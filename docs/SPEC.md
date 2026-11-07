@@ -3228,7 +3228,7 @@ error, `NotImplementedError` or a hang), its trace (L4-CRT-002) holds one of the
 `verifier.max_criteria_per_test` of the unit's criteria (L4-VER-052). Such a test SHALL count for its criteria's tracing
 tests and proof and only there: it SHALL NOT make an id outside the unit's criteria cited, be recorded `test.untraced`
 or be listed in `task.red_ok.tests`; a red step whose only tests are such tests SHALL be checked like any red step and
-SHALL NOT end as already satisfied. When red fails with `no new test traces <ids>: …` or with `no new test: the test the
+SHALL NOT end as already satisfied. Only a counted test that traces a criterion the step cites SHALL spare the step the `no new test` exit. A red step resumed at green (`resume_red`) SHALL hold each counted test as passing in the base report it rebuilds, so that green must make it pass again. When red fails with `no new test traces <ids>: …` or with `no new test: the test the
 task names does not count as a new test: …`, each changed named test that traces one of the step's cited criteria and
 does not count SHALL be named after the reason as `; <id>, which the task names, does not count for <criteria>: <why>`,
 `<why>` being `it did not pass before this step`, `it hangs at red`, `it does not fail by assertion at red` or `it
@@ -3238,13 +3238,13 @@ A criterion SHALL be *unchanged on the base* when the verifier's pass-to-pass ru
 archived specs read from git at the unit base, or a Kiro follow-up's merged parent, hold its id with the same text after
 `normalise`; red and the verifier SHALL read this through the same helpers, `spec_baseline` and `unchanged_ids`) and a
 test of the step's base report traces it, passed there and at red, and traces at most `verifier.max_criteria_per_test`
-of the unit's criteria. In the red step of any task, fresh or reopened, such a criterion SHALL need no new test: a cited
+of the unit's criteria. A test that red changed in place is no evidence of the base, whatever it asserts now. For a fix unit, the criterion is unchanged on the base only when both the fix unit's reading and its parent's reading of the family are unchanged. In the red step of any task, fresh or reopened, such a criterion SHALL need no new test: a cited
 one that no new test traces SHALL be left out, as L4-OPS-015 leaves out an unchanged criterion of a reopened task. A
 pre-satisfied candidate (L4-IMP-003) that is unchanged on the base and that no earlier red confirms SHALL be confirmed
 by the base specs, without the zero-value run and the base run, recorded as `criterion.pre_satisfied{via:
 "unchanged_spec"}` and in `task.red_ok.criteria` with `proof: "pre_satisfied"`, `discriminating: []`, `via:
 "unchanged_spec"` and `base_tests`; it SHALL give no red proof, so the verifier counts its tests pass-to-pass. A task
-whose every cited criterion is so confirmed SHALL end as already satisfied with no zero-value and no base run. A
+whose every cited criterion is so confirmed SHALL end as already satisfied with no zero-value and no base run. The judge (L4-VER-018) is shown the criterion's `base_tests` with its new tests, and told that the base specs confirmed it. This confirmation SHALL NOT be made in the task of a fix unit, whose events the judge does not read: such a task keeps the zero-value run, the base run and the hold. A
 criterion whose text differs from the base specs, that they do not hold, or that no test of the base traces, passing at
 the base and at red within the cap, SHALL keep the rules it has. [V, a consumer's TypeScript unit halted after 7 red
 attempts over 3 implementer profiles on a task whose text named the test to change in place, and a consumer's Python unit

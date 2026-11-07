@@ -395,6 +395,12 @@ def _accepted_block(items: Sequence[AcceptedRef]) -> str:
     return '<l4:data kind="accepted">\n' + defuse("\n\n".join(sections)) + "\n</l4:data>"
 
 
+VIA_UNCHANGED_SPEC = "unchanged_spec"  # `tdd.VIA_UNCHANGED_SPEC`: how the red step records a criterion confirmed so
+UNCHANGED_SPEC_NOTE = (
+    "confirmed by the base specs, not by a run: the scenario is unchanged and the base tests listed first pass"
+)
+
+
 @dataclass(frozen=True)
 class SatisfiedRef:
     """One task the harness ticked as already satisfied (L4-VER-018): its key, its text from `tasks.md`, and per
@@ -424,14 +430,21 @@ def satisfied_refs(
         elif event.type == "task.red_ok":
             proofs[key] = data.get("criteria") or {}
 
+    def tests_of(info: Mapping[str, Any]) -> tuple[str, ...]:
+        if info.get("via") == VIA_UNCHANGED_SPEC:  # no run: the passing base tests come first, then the new ones
+            return tuple(dict.fromkeys(str(t) for t in [*(info.get("base_tests") or ()), *(info.get("tests") or ())]))
+        return tuple(str(t) for t in info.get("discriminating") or info.get("tests") or ())
+
     def proof(key: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
-        return tuple(
-            (cid, tuple(str(t) for t in info.get("discriminating") or info.get("tests") or ()))
-            for cid, info in sorted(proofs.get(key, {}).items())
-        )
+        return tuple((cid, tests_of(info)) for cid, info in sorted(proofs.get(key, {}).items()))
+
+    def note_of(info: Mapping[str, Any]) -> str:
+        if info.get("via") == VIA_UNCHANGED_SPEC:
+            return UNCHANGED_SPEC_NOTE
+        return _unproven_note(info)
 
     def labels(key: str) -> tuple[tuple[str, str], ...]:
-        return tuple((cid, note) for cid, info in sorted(proofs.get(key, {}).items()) if (note := _unproven_note(info)))
+        return tuple((cid, note) for cid, info in sorted(proofs.get(key, {}).items()) if (note := note_of(info)))
 
     text = text_of or (lambda task: task.title)
     return [SatisfiedRef(t.key, text(t), proof(t.key), labels(t.key)) for t in tasks if done.get(t.key)]

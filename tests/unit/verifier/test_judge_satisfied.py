@@ -68,6 +68,42 @@ def test_scn_ver_72_the_prompt_lists_only_the_already_satisfied_task():
     assert "Proved by: C-00000001 (tests: tests.test_a::t1)" in block and "1.1" not in block
 
 
+BY_SPEC = {
+    "C-00000001": {
+        "tests": ["tests.test_a::t_new"],
+        "proof": "pre_satisfied",
+        "discriminating": [],
+        "via": "unchanged_spec",
+        "base_tests": ["tests.test_a::t_base"],
+    }
+}
+
+
+def test_a_task_confirmed_by_the_base_specs_shows_the_judge_the_base_tests_and_says_so():  # L4-IMP-093, L4-VER-018
+    events = [
+        ev(1, "task.red_ok", task="3.1", criteria=BY_SPEC, tdd="already-satisfied"),
+        ev(2, "task.done", task="3.1", tdd="already-satisfied"),
+    ]
+    from l4.implementer.tdd import VIA_UNCHANGED_SPEC
+
+    assert judge.VIA_UNCHANGED_SPEC == VIA_UNCHANGED_SPEC
+    [ref] = satisfied_refs(TASKS, events)
+    assert ref.criteria == (("C-00000001", ("tests.test_a::t_base", "tests.test_a::t_new")),)
+    assert ref.labels and "base specs" in ref.labels[0][1] and ref.labels[0][0] == "C-00000001"
+    block = prompt_of(ref).user.split('<l4:data kind="satisfied">')[1].split("</l4:data>")[0]
+    assert "tests.test_a::t_base" in block and "tests.test_a::t_new" in block and "base specs" in block
+
+
+def test_a_task_confirmed_by_the_base_specs_with_the_base_tests_only_lists_them_once():
+    info = {**BY_SPEC["C-00000001"], "tests": ["tests.test_a::t_base"]}
+    events = [
+        ev(1, "task.red_ok", task="3.1", criteria={"C-00000001": info}, tdd="already-satisfied"),
+        ev(2, "task.done", task="3.1", tdd="already-satisfied"),
+    ]
+    [ref] = satisfied_refs(TASKS, events)
+    assert ref.criteria == (("C-00000001", ("tests.test_a::t_base",)),)
+
+
 def test_scn_ver_72_without_such_a_task_there_is_no_block_and_no_ids():
     """SCN-VER-72: no block, no heading and no `satisfied_ids` when there is no such task."""
     prompt = prompt_of()

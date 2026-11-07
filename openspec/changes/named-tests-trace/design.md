@@ -88,8 +88,11 @@ the two points: the variant runs swap production files and put them back byte fo
 - A counted test fails at red, so its criterion is never in `passing`: no pre-satisfied confirmation, no hold. The
   criterion is an open criterion; run (b) (`vacuity_check`) or `no_assertion_failure` sees the counted test fail by
   assertion; `proofs[c]["tests"]` and `discriminating` name it, so the verifier's `red_proofs` gives it a red proof.
-- `classify_red` gets `named_proofs=tuple(counted)`: its `if not new:` exit returns `NAMED_NOT_NEW` or `NO_NEW_TEST`
-  only when `named_proofs` is empty too. Every other check is unchanged.
+- `classify_red` gets `named_proofs`, the counted ids that trace a cited criterion (the ones `check_criteria` puts in
+  `tracing`; a counted test that traces only a criterion the step does not cite is no proof): its `if not new:` exit
+  returns `NAMED_NOT_NEW` or `NO_NEW_TEST` only when `named_proofs` is empty too. `resume_red` holds each counted
+  test (a non-new test of a proof in `task.red_ok.criteria` that is not `pre_satisfied`) as passing in the base report it
+  rebuilds from the red checkpoint, so green's regression check makes it pass again after a resume too. Every other check is unchanged.
 - `task.red_ok.tests` stays the new ids (it may be empty); the verifier's expected red tests (`_red_green`) and green's
   `red_ids` are unchanged, and the named test is held to pass by green's regression check (D1.2). `tests.superseded{reason:
   "named_by_task"}` is recorded as today. A step with a changed named test still never ends as already satisfied
@@ -123,7 +126,9 @@ most `verifier.max_criteria_per_test` of `cap_universe(wb.provider, family)`, so
 as `wb.ref`, and `FamilyProvider.criteria` keeps the fix unit's own reading of an id it shares with the parent, where
 the verifier reads the family as the parent does; a criterion is therefore unchanged on the base only when the
 reading of `wb.ref` and, for a provider that has a `parent` other than `wb.ref`, the parent's reading are both
-unchanged (an intersection: it never exempts more than either reading alone). The archived specs are read from git at
+unchanged (an intersection: it never exempts more than either reading alone). A test that red changed in place (a
+named test) is no evidence of the base, whatever it asserts now: it is left out of the tests that show a criterion
+unchanged, so a base test weakened to `assert True` exempts nothing. The archived specs are read from git at
 the unit base (`unit_base`, as the base run and the verifier find it), never from the work tree, so a copy of a delta
 into `openspec/specs/` makes nothing unchanged (HB-3). A plain Kiro unit has no baseline and nothing is unchanged on the
 base: its ids hash the unit's own text, so no test of the base traces them unless an earlier task of the unit wrote it,
@@ -158,6 +163,12 @@ Call the set `on_base`. It applies to every task, fresh or reopened, as a union 
 
 `_via` and `proof_of` in `run_red` get the `on_base`-confirmed criteria; the constant is
 `VIA_UNCHANGED_SPEC = "unchanged_spec"` in `tdd.py`.
+
+The confirmation of items 2 and 3 is not made in a fix unit's task (`wb.event_context["fix_unit"]`): the judge reads no
+fix unit's events (L4-VER-018), so a task ticked there would get no check. Such a task keeps the zero-value run, the
+base run and the hold; its unchanged criteria still need no new test (item 1). For a criterion confirmed here,
+`judge.satisfied_refs` shows the L4-VER-018 judge the record's `base_tests` before its new tests, with a note that the
+base specs confirmed it, so that a vacuous new test is not the only thing it sees.
 
 ### D6. Why widening L4-OPS-015's scope is safe
 

@@ -16,6 +16,7 @@ from l4.implementer.tdd import (
     classify_red,
     green_failures,
     named_tracing,
+    resume_red,
     run_red,
 )
 
@@ -422,3 +423,38 @@ def test_a_named_test_beside_no_cited_criterion_changes_nothing_for_a_normal_red
     out = run_red(bench.wb, reviewed(bench, PY_TEXT), attempt=1)
     assert out.status == "ok", out.reason
     assert red_ok(bench)["criteria"][UNKNOWN]["tests"] == ["tests.test_discount::test_unknown_code"]
+
+
+def test_f1_a_resumed_red_still_makes_green_pass_the_named_test(make_bench, tmp_path):
+    """A run that died after the red commit resumes at green: the rebuilt base report must still hold the named test
+    as passing (it failed at the red head), so green that leaves it failing is refused as after an unbroken red."""
+    bench, task = typescript_bench(make_bench, tmp_path)
+    bench.adapter._script.append(ts_named_red(count_of(22)))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    resumed = resume_red(bench.wb, task)
+    assert resumed is not None and resumed.status == "ok"
+    assert resumed.new_ids == frozenset()
+    assert resumed.base_report.tests[TS_ID].status == "passed"
+    log = bench.wb.worktree / "green.log"
+
+    def gate(status: str) -> GateResult:
+        tests = {i: TestCase(i, "passed") for i in resumed.base_report.tests}
+        tests[TS_ID] = TestCase(TS_ID, status)  # type: ignore[arg-type]
+        return GateResult("test", "pass", "", 0, log, TestReport(tests))
+
+    reason, ids = green_failures(resumed.base_report, sorted(resumed.new_ids), gate("failed"), resumed.superseded)
+    assert reason == f"green broke existing tests: {TS_ID}" and ids == [TS_ID]
+    assert green_failures(resumed.base_report, sorted(resumed.new_ids), gate("passed"), resumed.superseded) == ("", [])
+
+
+def test_f1_a_resumed_red_keeps_a_new_test_out_of_the_base_and_a_named_python_test_in(make_bench):
+    bench, task = python_bench(make_bench, tagged(KNOWN))
+    bench.adapter._script.append(python_red(failing(KNOWN)))
+    out = run_red(bench.wb, task, attempt=1)
+    assert out.status == "ok", out.reason
+    resumed = resume_red(bench.wb, task)
+    assert resumed is not None
+    assert resumed.new_ids == frozenset({"tests.test_discount::test_unknown_code"})
+    assert resumed.base_report.tests[PY_ID].status == "passed"
+    assert "tests.test_discount::test_unknown_code" not in resumed.base_report.tests

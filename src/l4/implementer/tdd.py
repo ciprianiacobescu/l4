@@ -361,7 +361,11 @@ def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset
 
 
 def unchanged_on_base(
-    wb: Workbench, criteria: Sequence[Criterion], base_report: TestReport, report: TestReport
+    wb: Workbench,
+    criteria: Sequence[Criterion],
+    base_report: TestReport,
+    report: TestReport,
+    changed: Collection[str] = (),
 ) -> dict[str, tuple[str, ...]]:
     """The criteria that are *unchanged on the base* (L4-IMP-093) and the tests that show it, for the red step of any
     task: the ids that the verifier's pass-to-pass rule holds (L4-VER-009: the same id and the same text in the archived
@@ -369,7 +373,9 @@ def unchanged_on_base(
     with the sorted ids of the tests of `base_report` that trace it, passed there and pass in `report`, and trace at
     most `verifier.max_criteria_per_test` of the unit's criteria at red. A criterion with no such test is left out. A
     fix unit's tasks run with the fix unit as `wb.ref`, but the verifier reads the family as its parent does, so a
-    criterion counts only when both readings are unchanged. `criteria` is `wb.provider.criteria(wb.ref)`."""
+    criterion counts only when both readings are unchanged. `criteria` is `wb.provider.criteria(wb.ref)`. `changed`:
+    the report ids of the tests red changed in place (the named ones): they are no evidence of the base, whatever
+    they now assert."""
     baseline = spec_baseline(wb.git, wb.ref.framework, wb.provider, unit_base(wb))
     readings = [criteria]
     parent = getattr(wb.provider, "parent", None)
@@ -386,7 +392,7 @@ def unchanged_on_base(
     for criterion in sorted(unchanged):
         tests = sorted(
             i for i, before in base_report.tests.items()
-            if before.status == "passed" and criterion in trace_ids(before)
+            if before.status == "passed" and criterion in trace_ids(before) and i not in changed
             and i in report.tests and report.tests[i].status == "passed"
             and criterion in (traced := trace_ids(report.tests[i])) and len(traced & universe) <= cap
         )  # fmt: skip
@@ -1535,8 +1541,14 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     counted = named.counted
     # L4-IMP-093: the criteria the verifier would accept pass-to-pass, from the archived specs at the unit base; they
     # need no new test in any task, and a passing new test of one is confirmed by the base specs without a run
-    on_base = unchanged_on_base(wb, criteria, base_report, report) if family else {}
+    changed_named = {  # the report ids of the named tests red changed in place: no evidence of the base any more
+        test for test in report.tests
+        if test in other_in_place or any(names_test_id(test, t.path, t.name) for t in named_in_place)
+    }  # fmt: skip
+    on_base = unchanged_on_base(wb, criteria, base_report, report, changed_named) if family else {}
     exempt = unchanged_criteria(wb, task, base_report) | set(on_base)
+    # the judge reads no fix unit's events (L4-VER-018): a fix unit's task is never confirmed by the base specs alone
+    spec_confirmed = {} if wb.event_context.get("fix_unit") else on_base
     aliases = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
     required = {c for c in aliases if c not in exempt}
     proved_earlier: dict[str, EarlierRed] = {}
@@ -1597,7 +1609,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
-        by_spec = {c: t for c, t in passing.items() if c in on_base and c not in earlier}  # L4-IMP-093: no run
+        by_spec = {c: t for c, t in passing.items() if c in spec_confirmed and c not in earlier}  # L4-IMP-093
         confirmation = confirm_pre_satisfied(
             wb, {c: t for c, t in passing.items() if c not in earlier and c not in by_spec}, real=report
         )
@@ -1760,7 +1772,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", f"no test traces {', '.join(bare)} yet: write a new test for each")
         earlier = confirmed_by_earlier_red(wb, candidates, report, frozenset())
-        by_spec = {c: t for c, t in candidates.items() if c in on_base and c not in earlier}  # L4-IMP-093: no run
+        by_spec = {c: t for c, t in candidates.items() if c in spec_confirmed and c not in earlier}  # L4-IMP-093
         confirmation = confirm_pre_satisfied(
             wb, {c: t for c, t in candidates.items() if c not in earlier and c not in by_spec}, real=report
         )
@@ -1782,6 +1794,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     **_via(criterion, earlier, based, confirmation, overridden, by_spec))  # fmt: skip
         return finish_already_satisfied({c: proof_of(c, candidates[c] if c in by_spec else ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
+    # only a counted named test that traces a CITED criterion is a red test of this step (L4-IMP-093, SCN-IMP-440)
+    named_proofs = tuple(sorted({t for tests in tracing.values() for t in tests if t in counted}))
     still_rejected = preexisting_test_changes(wb, task, base, stale, listed)
     other_unchanged = [  # named, failing and not changed by red: the verdict says what to do (D3)
         t for t in listed.other_ids() if t not in other_in_place and t in report.tests
@@ -1794,7 +1808,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
         named_changed=[(t.path, t.name) for t in named_in_place], named_other=other_in_place,
-        named_unchanged=other_unchanged, named_proofs=tuple(counted),
+        named_unchanged=other_unchanged, named_proofs=named_proofs,
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
@@ -1908,6 +1922,18 @@ def _last_checkpoint(wb: Workbench) -> tuple[str, str, str] | None:
     return None
 
 
+def _named_proofs_of(red_ok: Mapping[str, Any], new_ids: Collection[str]) -> set[str]:
+    """The ids of the changed named tests that a `task.red_ok` record counted (L4-IMP-093): the tests of a criterion's
+    proof that are no new test of the step and that the proof does not record as passing already."""
+    criteria = red_ok.get("criteria")
+    found: set[str] = set()
+    for info in criteria.values() if isinstance(criteria, Mapping) else ():
+        if not isinstance(info, Mapping) or info.get("proof") == PROOF_PRE_SATISFIED:
+            continue
+        found |= {fold_subtest_id(str(t)) for t in info.get("tests") or ()}
+    return found - set(new_ids)
+
+
 def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     """A run that died between the red commit and the green commit left the red checkpoint on the unit branch:
     redoing red there would fail ("no tests added"), so the task resumes at green. Needs the `task.red_ok` event of
@@ -1939,6 +1965,11 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     if gate.report is None or gate.report.collection_errors:
         raise BaselineFailed(f"the test gate cannot run at the red checkpoint: {gate.reason or 'collection errors'}")
     base = TestReport({i: c for i, c in gate.report.tests.items() if i not in new_ids})
+    # a named test red changed in place counts for its criterion (L4-IMP-093): it passed at the real base and fails at
+    # this head, so the rebuilt base holds it as passing, and green must make it pass again as after an unbroken red
+    for test in _named_proofs_of(event.data, new_ids):
+        if (case := base.tests.get(test)) is not None and case.status != "passed":
+            base.tests[test] = replace(case, status="passed", message="", failure_kind=None, detail="", when="")
     tdd = wb.cfg.tdd
     manifest = build_manifest(wb.git, sha, f"{sha}~1", test_globs=tdd.test_globs, support_globs=tdd.test_support_globs)
     wb.emit("task.red_resumed", task=task.key, sha=sha)
