@@ -119,7 +119,11 @@ Two helpers move into `l4.specs.criteria`, and the verifier calls them:
 `unchanged_ids(criteria, spec_baseline(wb.git, wb.ref.framework, wb.provider, unit_base(wb)))`, the ids of the base
 report's tests whose `trace_ids` hold it, whose status is `passed` in `base_report` and in `report`, and that trace at
 most `verifier.max_criteria_per_test` of `cap_universe(wb.provider, family)`, sorted; a criterion with none is left out.
-`criteria` is `wb.provider.criteria(wb.ref)`, the list whose ids are `family`. The archived specs are read from git at
+`criteria` is `wb.provider.criteria(wb.ref)`, the list whose ids are `family`. A fix unit's tasks run with the fix unit
+as `wb.ref`, and `FamilyProvider.criteria` keeps the fix unit's own reading of an id it shares with the parent, where
+the verifier reads the family as the parent does; a criterion is therefore unchanged on the base only when the
+reading of `wb.ref` and, for a provider that has a `parent` other than `wb.ref`, the parent's reading are both
+unchanged (an intersection: it never exempts more than either reading alone). The archived specs are read from git at
 the unit base (`unit_base`, as the base run and the verifier find it), never from the work tree, so a copy of a delta
 into `openspec/specs/` makes nothing unchanged (HB-3). A plain Kiro unit has no baseline and nothing is unchanged on the
 base: its ids hash the unit's own text, so no test of the base traces them unless an earlier task of the unit wrote it,

@@ -1,6 +1,6 @@
 ## 1. A named test red changed traces its criterion (D1, D2, D3, D8)
 
-- [ ] 1.1 Write the tests first (tests/unit/implementer/test_named_tests_trace.py, new): `check_criteria` with the new
+- [x] 1.1 Write the tests first (tests/unit/implementer/test_named_tests_trace.py, new): `check_criteria` with the new
   `named` keyword: a counted test fills `tracing` for a cited criterion; it adds the unit's criteria it traces to the
   cited set only when `criteria_ids` is empty, never an id outside `family_criteria`; it is never in `untraced`.
   `classify_red` with the new `named_proofs` keyword: a step with no new test and one named proof is ok; with
@@ -14,7 +14,7 @@
   `src/l4/implementer/tdd.py` the `NamedTracing` dataclass, `named_tracing(...)` and the `named_proofs:
   Collection[str] = ()` keyword of `classify_red` (its `if not new:` exit also requires `not named_proofs`). Run
   `uv run pytest tests/unit/implementer/test_named_tests_trace.py tests/unit/implementer/test_check_criteria.py -q`.
-- [ ] 1.2 Write the run_red tests first, in the same file, with `make_bench` and the `reviewed(...)`, `ts_bench(...)`
+- [x] 1.2 Write the run_red tests first, in the same file, with `make_bench` and the `reviewed(...)`, `ts_bench(...)`
   and `FAKE_RUNNER` helpers of tests/unit/implementer/test_red_preexisting_tests.py (the SCN-IMP-439 tests): SCN-IMP-490
   (a named TypeScript test whose name carries a criterion id of the unit, changed to fail by assertion, with no other
   test and `criteria_ids` naming that id: `ok`, the proof names its report id, `task.red_ok.tests == []`, not already
@@ -30,13 +30,13 @@
   `traced_new`; pass `named=counted` to `check_criteria` and `named_proofs=tuple(counted)` to `classify_red`; append
   the D3 notes to a failing reason that starts with `no new test traces ` or equals `NAMED_NOT_NEW`. Run the new file,
   tests/unit/implementer/test_tdd_red.py and tests/unit/implementer/test_red_preexisting_tests.py.
-- [ ] 1.3 Change the sentence of `prompt._named_section` as D8 says, and the two assertions of
+- [x] 1.3 Change the sentence of `prompt._named_section` as D8 says, and the two assertions of
   tests/unit/implementer/test_prompt.py that read the old one (lines ~505 and ~523) to the new text. Run
   tests/unit/implementer/test_prompt.py. `red.md` and `templates.lock.json` stay as they are.
 
 ## 2. An unchanged scenario the base already tests (D4, D5, D6)
 
-- [ ] 2.1 Write the tests first (tests/unit/specs/test_spec_baseline.py, new): `unchanged_ids` (same id and same
+- [x] 2.1 Write the tests first (tests/unit/specs/test_spec_baseline.py, new): `unchanged_ids` (same id and same
   normalised text: in; same id and another body: out; an id the base lacks: out; re-wrapped text: in) and
   `spec_baseline` (OpenSpec reads `base_criteria_at` at `rev`, `[]` for `rev=None`; Kiro with a provider that has
   `merged_parent_criteria` returns it; Kiro without: `[]`). Then add both to `src/l4/specs/criteria.py`, make
@@ -44,7 +44,7 @@
   `spec_baseline(wb.git, wb.ref.framework, wb.provider, base_sha)`. Run the new file,
   tests/unit/specs/test_base_criteria_at.py and `uv run pytest tests/unit/verifier -q -k "trace or pass_to_pass or
   archived"`.
-- [ ] 2.2 Write the tests first (tests/unit/implementer/test_unchanged_on_base.py, new), with `make_bench` and an
+- [x] 2.2 Write the tests first (tests/unit/implementer/test_unchanged_on_base.py, new), with `make_bench` and an
   OpenSpec unit whose delta MODIFIES a requirement of an archived `openspec/specs/<cap>/spec.md` committed before the
   unit base: `tdd.unchanged_on_base` returns the passing tracing base tests of a restated scenario; and the negative
   cases, each `{}` for that criterion: the scenario's body changed under the same name (same id), a scenario the
@@ -52,7 +52,7 @@
   fails at red, its only tracing test traces 4 of the unit's criteria under `verifier.max_criteria_per_test: 3`, no test
   of the base traces it, `unit_base` is None, a Kiro unit that is not a follow-up. Then add `unchanged_on_base` to
   `src/l4/implementer/tdd.py`.
-- [ ] 2.3 Write the run_red tests first, in the same file: SCN-IMP-494 (a fresh task, not in any `tasks.reopened`,
+- [x] 2.3 Write the run_red tests first, in the same file: SCN-IMP-494 (a fresh task, not in any `tasks.reopened`,
   citing the restated scenario and a new one; one new failing test for the new one: `ok`, no hold, no
   `check.inconclusive`); SCN-IMP-495 (in a project whose gate is not pytest, as the SCN-IMP-485 tests of
   tests/unit/implementer/test_presatisfied_other_language.py set it up, a new passing test of the restated scenario:
@@ -69,14 +69,14 @@
   `by_spec` parameter of `_via` and a branch of `proof_of` (after the override branch). Run the new file,
   tests/unit/implementer/test_unchanged_criteria.py, tests/unit/implementer/test_red_cited_criteria.py and
   tests/unit/implementer/test_presatisfied_other_language.py.
-- [ ] 2.4 Verifier side, in tests/unit/verifier/test_traceability.py (beside its pass-to-pass tests): a `task.red_ok`
+- [x] 2.4 Verifier side, in tests/unit/verifier/test_traceability.py (beside its pass-to-pass tests): a `task.red_ok`
   record with `discriminating: []` and `via: "unchanged_spec"` gives no red proof (`red_proofs`) and no unproven note
   (`red_notes`), and `trace_criteria` counts the criterion's passing test `pass_to_pass` when the archived spec holds it
   unchanged and gives it no proof when the archived body differs.
 
 ## 3. The trace form of a Python gate that is not pytest (D7)
 
-- [ ] 3.1 Write the tests first (tests/unit/implementer/test_check_criteria.py, beside the SCN-IMP-67 test):
+- [x] 3.1 Write the tests first (tests/unit/implementer/test_check_criteria.py, beside the SCN-IMP-67 test):
   SCN-IMP-499 for `trace_rules` with `uv run python manage.py test`, `python -m unittest discover`, `./manage.py test`,
   `python -m xmlrunner discover` (the Python name rules), `uv run python -m pytest` and `uv run --with pytest-xdist
   pytest` (the marker rules), `npx vitest run` and `make test` (the name rules); `tag_example` under the Python rules
@@ -87,7 +87,7 @@
 
 ## 4. Checks
 
-- [ ] 4.1 docs/SPEC.md and CHANGELOG.md were written with this spec: check every name and text they quote against the
+- [x] 4.1 docs/SPEC.md and CHANGELOG.md were written with this spec: check every name and text they quote against the
   code (the D3 note, the reasons, `unchanged_spec`, `base_tests`, the D7 texts) and fix any drift in both. Run
   `python3 scripts/check_spec.py docs/SPEC.md`, tests/unit/docs, `uv run pytest tests/unit/implementer -q`,
   `uv run pytest tests/unit/verifier -q`, tests/unit/test_template_lock.py (unchanged), `uv run ruff check src tests`,
