@@ -446,10 +446,11 @@ class ProgressTrace:
         d = e.data
         n = self._count(d.get("failures"))
         failed = f"failed {n} attempts" if n else "failed its attempts"
+        on = d.get("on")  # a later run's continuation was refused: the step starts on the run's profile (L4-IMP-094)
         return (
             logging.WARNING,
             f"task {d.get('task')} {d.get('phase')}: {d.get('from')} {failed}; no later profile can take it "
-            f"({_clip(d.get('reason'))}); it stays on {d.get('from')}",
+            f"({_clip(d.get('reason'))}); it {'starts' if on else 'stays'} on {on or d.get('from')}",
         )
 
     def _prompt_rendered(self, e: LedgerEvent) -> tuple[int, str] | None:

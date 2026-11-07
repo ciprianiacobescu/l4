@@ -288,6 +288,7 @@ The important log lines:
 | `[l4] <unit> task <k> <phase> attempt <n> failed on <profile>: <reason>` | The same as the attempt line above, with the profile that ran the attempt. Older ledgers have no profile. |
 | `[l4] <unit> task <k> <phase>: escalated from <from> to <to> after <n> failed attempts` | The step moved to the next profile of `roles.implementer` (`implementer.escalated`). |
 | `[l4] <unit> task <k> <phase>: <from> failed <n> attempts; no later profile can take it (<reason>); it stays on <from>` | A warning. No later profile could take the step, so it stays on its profile (`implementer.escalation_skipped`). |
+| `[l4] <unit> task <k> <phase>: <from> failed <n> attempts; no later profile can take it (<reason>); it starts on <on>` | A warning. A run that continues a step that an earlier run moved from `<from>` could not make that move again (for example the profile it went to is cooling), so the step starts on the run's own profile `<on>` (`implementer.escalation_skipped` with `on`). |
 | `[l4] <unit> implementer: <profile> ok (…) → selected, escalated from <from>` | The selection of the new profile after an escalation. |
 | `[l4] <unit> halted: max_task_attempts (task <k>: <p1> <f1>, <p2> <f2>)` | The halt, with the failed attempts of each profile. |
 | `[l4] <unit> task <k> <phase>: the prompt holds the person's retry note of <ts>` | The prompt of the step carries the `--reason` of your `l4 retry` (`prompt.rendered`). |
@@ -750,7 +751,10 @@ new run late, and the time is the difference between your clock and the forge's.
   that is shorter than the job's timeout by more than the margin is a warning, in doctor and once in `l4 run`.
 - Failed attempts count across runs: `implementer.max_task_attempts` and `implementer.escalate_after` read the task's
   failed attempts since its last commit, retry, resume or restart. A run that hands back and continues does not give a
-  task fresh attempts. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
+  task fresh attempts, and it continues a step that an earlier run moved to a later profile of `roles.implementer` on
+  the profile that move went to, even when it selected an earlier profile: the move is asked again from the profile
+  that it started from (`implementer.escalated`). A cheaper profile that the step has moved past gets no attempt of that
+  step until `l4 retry`, `l4 resume` or `l4 restart` starts a new window. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
   (`l4 yolo resume --extend-runs N`).
 
 ## 7. Procedures for each state
@@ -1202,7 +1206,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 
 | The cause starts with | Code | Cause | What to do before you retry |
 |---|---|---|---|
-| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` or, when two or more profiles ran the step, `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). With a chain of profiles, each profile has its own count, and the detail names the profiles in the order that they ran. | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. Write the `--reason` of `l4 retry` for the implementer of that task: it reads the reason as a note (see the NOTE on escalation below). |
+| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` or, when two or more profiles ran the step, `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). With a chain of profiles, each profile has its own count, and the detail names the profiles in the order that they ran. When a later profile exists and a move to it was refused, the detail has `; no later profile can take it (<reason>)` before `; last failure:`: read the reason (a cooling profile, a spent one, or none usable). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. Write the `--reason` of `l4 retry` for the implementer of that task: it reads the reason as a note (see the NOTE on escalation below). |
 | ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
 | `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
 | `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
@@ -1323,6 +1327,14 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > Set `implementer.escalate_after: 0` to turn escalation off: each profile then keeps all its attempts and the unit
 > halts as in 0.4.3. `l4 doctor` (CFG-009) warns when the key is not below `max_task_attempts`, or when two profiles run
 > the same model. The key needs harness 0.4.4: move the pin first, because the config schema is strict.
+>
+> A move skips a profile that has no attempt left: a profile that failed the phase of the task `max_task_attempts`
+> times in the task's window is *spent*, and the selection refuses it (`spent: <n> failed attempts of <phase> of task
+> <k> (implementer.max_task_attempts <m>)` in the `skipped` list of `availability.selected`). A move that lands on a
+> profile that has itself failed `implementer.escalate_after` times moves on at once, before the next attempt, so the
+> unit does not halt on a profile with a later profile left. When no later profile can take the step, the halt detail
+> says so before the last failure (`; no later profile can take it (<reason>)`), and the step keeps the profile it is
+> on up to `max_task_attempts`.
 
 Retry the unit with the command or with the label. Both give the unit new task attempts. You run the command from a
 clone on `<base>`, and not on the unit branch: [control-loop.md](control-loop.md) tells why, and what a retry keeps.

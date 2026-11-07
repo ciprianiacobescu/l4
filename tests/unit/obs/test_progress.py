@@ -270,6 +270,20 @@ def test_a_skipped_escalation_is_a_warning(console):
     ]
 
 
+def test_a_refused_continuation_says_where_the_step_starts(console):
+    """SCN-IMP-508: with `on`, the line names the run's profile; without it, the line is as before."""
+    trace = ProgressTrace()
+    trace(event("implementer.escalation_skipped", task="4.1", phase="red", **{"from": "glm"}, failures=2,
+                reason="claude-sonnet is cooling", on="deepseek"))  # fmt: skip
+    trace(event("implementer.escalation_skipped", task="4.1", phase="red", **{"from": "deepseek"}, failures=2,
+                reason="glm is cooling"))  # fmt: skip
+    assert lines(console) == [
+        "task 4.1 red: glm failed 2 attempts; no later profile can take it (claude-sonnet is cooling); "
+        "it starts on deepseek",
+        "task 4.1 red: deepseek failed 2 attempts; no later profile can take it (glm is cooling); it stays on deepseek",
+    ]
+
+
 def test_a_retry_note_in_the_prompt_has_a_line_and_a_prompt_without_one_none(console):
     trace = ProgressTrace()
     trace(event("prompt.rendered", task="4.1", phase="red", sha256="x"))

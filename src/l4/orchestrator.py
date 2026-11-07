@@ -71,7 +71,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
-from l4.implementer.loop import EscalationRequest, run_task
+from l4.implementer.loop import EscalationRequest, run_task, spent_constraint
 from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
@@ -1278,16 +1278,18 @@ class Orchestrator:
 
     def _escalation_profile(self, request: EscalationRequest) -> Selected | str:
         """The selection step of `_escalate`, also the fix loop's (`ctx.shared["escalate"]`, fix-unit-escalate D2): the
-        next usable profile after `request.profile`, which becomes the running task's own profile (`_task_selected`),
-        or why there is none. The caller builds the workbench, because a fix unit's differs from the unit's."""
+        next usable profile after `request.profile` that has an attempt left (L4-IMP-094 D1), which becomes the running
+        task's own profile (`_task_selected`), or why there is none. The caller builds the workbench, because a fix
+        unit's differs from the unit's."""
         used = list(self._refold().profiles_used.get("implementer", ()))
         if request.profile not in used:
             used.append(request.profile)
         keeper = independence_keeper(self.cfg, used, self.services.factory.routed)
         try:
             chosen = self.services.factory.next_profile(
-                "implementer", self.services.ref.id, request.profile, constraints=(keeper,)
-            )
+                "implementer", self.services.ref.id, request.profile,
+                constraints=(spent_constraint(request, self.cfg.implementer.max_task_attempts), keeper),
+            )  # fmt: skip
         except RoleUnavailable as exc:
             return str(exc)
         self._task_selected = chosen

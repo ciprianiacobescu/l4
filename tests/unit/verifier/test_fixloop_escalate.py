@@ -103,3 +103,63 @@ def test_the_next_fix_task_starts_on_the_run_profile_after_a_task_moved(run_l4, 
     assert vendors[5] == vendors[1] != vendors[4]  # task 1's third step ran on impl-b, task 2's first on impl
     (cooled,) = run.events("availability.cooldown")
     assert cooled["profile"] == "impl"  # the profile task 2 ran on, not the one task 1 had moved to
+
+
+# --- a later run continues the move of an earlier one (L4-IMP-094; SCN-IMP-509) --------------------------------------
+
+THREE = TWO | {
+    "roles": {"implementer": ["impl", "impl-b", "impl-c"]},
+    "profiles": TWO["profiles"] | {"impl-c": {"adapter": "fake", "vendor": "thirdco"}},
+    "verifier": {"independence": "none"},
+}
+
+
+def fix_rows(*, moved_in_fix_unit: bool) -> list[tuple[str, dict]]:
+    """The window of the chore 1.1 of the fix unit: impl-b failed `single` twice, and the step moved to impl-c. The
+    move carries the fix unit or, for the other test, not (it is then the unit's own task 1.1's)."""
+    fix = {"fix_unit": FIX_UNIT}
+    attempt = {"task": "1.1", "phase": "single", "profile": "impl-b", "reason": "r"} | fix
+    failures = [("task.attempt_failed", attempt | {"attempt": n}) for n in (1, 2)]
+    move = {"task": "1.1", "phase": "single", "from": "impl-b", "to": "impl-c", "failures": 2, "attempt": 3}
+    return [*failures, ("implementer.escalated", move | (fix if moved_in_fix_unit else {}))]
+
+
+def stopped_in_the_chore(run_l4, tdd_repo, fake_clock):
+    """A first run that leaves the fix unit open: its chore is stopped at the run's deadline."""
+    from ..orchestrator.test_step_deadline import budget, fire, no_budget
+
+    budget(tdd_repo, fake_clock, left_at_start=100000)
+    first = run_l4([red_step(), noqa_green(), Step(structured=result("single"), on_start=fire)], **THREE)
+    assert first.code == 10 and len(first.events("fix.spawned")) == 1 and first.events("fix.done") == []
+    no_budget(tdd_repo)
+    return first
+
+
+def test_a_fix_chore_continues_the_move_of_an_earlier_run(run_l4, valid_spec, tdd_repo, raw, fake_clock):
+    """SCN-IMP-509: the chore's step moved from impl-b to impl-c; this run is on impl and continues on impl-c."""
+    from ..orchestrator.test_step_deadline import new_events, run_ids, seed_events
+
+    first = stopped_in_the_chore(run_l4, tdd_repo, fake_clock)
+    seed_events(tdd_repo, raw, fake_clock, fix_rows(moved_in_fix_unit=True))
+    old = {*run_ids(first), "r-20260101T0001Z-5eed"}
+    run = run_l4([chore_fix(), judge()], **THREE)
+    assert run.code == 0
+    [moved] = new_events(run, old, "implementer.escalated")
+    assert (moved["from"], moved["to"], moved["failures"], moved["attempt"], moved["fix_unit"]) == (
+        "impl-b", "impl-c", 2, 3, FIX_UNIT,
+    )  # fmt: skip
+    started = [e for e in new_events(run, old, "step.started") if e.get("fix_unit") == FIX_UNIT]
+    assert [(e["phase"], e["attempt"]) for e in started] == [("single", 3)]
+    assert run.adapter.requests[0].profile.vendor == "thirdco"
+    assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"  # the run's profile did not change
+
+
+def test_a_move_of_the_units_own_task_does_not_move_the_fix_chore(run_l4, valid_spec, tdd_repo, raw, fake_clock):
+    from ..orchestrator.test_step_deadline import new_events, run_ids, seed_events
+
+    first = stopped_in_the_chore(run_l4, tdd_repo, fake_clock)
+    seed_events(tdd_repo, raw, fake_clock, fix_rows(moved_in_fix_unit=False))
+    old = {*run_ids(first), "r-20260101T0001Z-5eed"}
+    run = run_l4([chore_fix(), judge()], **THREE)
+    assert run.code == 0 and new_events(run, old, "implementer.escalated") == []
+    assert run.adapter.requests[0].profile.vendor not in ("otherco", "thirdco")  # the run's own profile
