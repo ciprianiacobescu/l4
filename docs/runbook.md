@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.54 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.55 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.54](#11-known-limits-of-0454)
+11. [Known limits of 0.4.55](#11-known-limits-of-0455)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -1509,6 +1509,7 @@ cannot restore a test (the test-path freeze), so the unit escalates after the re
 
 | `a pre-existing test fails on the unit's code` | The gate ran at head with every test and support file the unit added or changed at its base version (an added one set aside), and a test that passed at the base failed (twice). The row `pre-existing tests still pass` of the integrity table says how many base tests passed and where the base result came from; the finding lists the ids. | Restore the base version of the weakened test or support file on the unit branch in your own commit (`git checkout <base> -- <path>`), or fix the code so that the base test passes. **An intended behaviour change** (the test must change because the specified behaviour changed): list the test in a `tests.superseded` event (the reopened task's red step records it), or let a person make the change in their own commit or answer. A support file (conftest, fixture, golden data, helper) that only people changed, a `[test-infra]` task changed or a `task.unfrozen` frees stays at head for the run and is listed under `## Pre-existing tests changed with an allowance`, so the tests that depend on it are not blocked. |
 | `a pre-existing test no longer runs on the unit's code` | A base test is missing from that run, or a file no longer collects (for example a production module that imports only while the unit's `conftest.py` is present). A parametrised case whose id vanished counts too, unless a `tests.superseded` event names it. | The same restore. When a production module needs a test file to import, fix the code. |
+| `a pre-existing test is flaky in the <gate> gate` (minor) | From 0.4.55. Every test that failed in the test gate or the e2e gate was a pre-existing test (not one the unit added, in a file the unit did not change), at most five failed, and each passed when the verifier ran the same gate again, up to `verifier.flaky_repeats` runs in all (default 3). The round does not fail on it. The Gates table has a row `<gate>-repeat-<n>` for each repeat, and the ledger a `verify.gate_repeat`. A test that fails in every run stays a blocker, and the unit's own tests are never run again. | Nothing for the unit. Fix the flaky test on the base branch. `verifier.flaky_repeats: 1` turns the repeat off. |
 | `a construct that can change what the tests report`, with `pytest_pyfunc_call`, `pytest_runtest_call`, `pytest_runtest_setup`, `assignment to .obj` or `.runtest` | A support file or a helper module under the test globs (a `.py` file with no test) replaces or wraps the call of a test. | Remove it, or ask for a `[test-infra]` task. |
 
 Then push and retry the unit (section 7.2). A `[test-infra]` task, a `task.unfrozen` for the same task and a
@@ -1836,7 +1837,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.54 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.55 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1905,7 +1906,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.54 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.55 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -2327,7 +2328,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.54. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.55. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -2602,7 +2603,7 @@ the run recorded the real behaviour.
 | U10 | The exit code after SIGINT. | `harness_interrupt`: the harness's own interrupt flag decides `cancelled`. |
 | U11 | How a multi-step run's export lays out its messages. | `sum_messages`: usage is the sum over the assistant messages. |
 
-## 11. Known limits of 0.4.54
+## 11. Known limits of 0.4.55
 
 These limits make operation more difficult. Know them before you start.
 
