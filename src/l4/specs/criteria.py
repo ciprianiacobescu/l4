@@ -5,6 +5,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.gates.junit import TestCase
@@ -326,6 +327,26 @@ def base_criteria_at(git: Git, rev: str) -> list[Criterion]:
             continue
         found += _base_scenarios(match.group(1), shown.stdout)
     return found
+
+
+def spec_baseline(git: Git, framework: Framework, provider: Any, rev: str | None) -> list[Criterion]:
+    """The criteria the unit's pass-to-pass rule compares with (L4-VER-009), read the one way by the verifier and by
+    the red step (L4-IMP-093): for OpenSpec the archived specs at `rev`, the unit's base commit, from git
+    (`base_criteria_at`; none without a `rev`); for Kiro the criteria of the merged parent a follow-up follows, which
+    the `provider` gives (`merged_parent_criteria`; none for a provider that has no such parent, so a plain Kiro unit
+    has no baseline)."""
+    if framework is Framework.OPENSPEC:
+        return base_criteria_at(git, rev) if rev is not None else []
+    merged = getattr(provider, "merged_parent_criteria", None)
+    return list(merged()) if callable(merged) else []
+
+
+def unchanged_ids(criteria: Sequence[Criterion], base: Sequence[Criterion]) -> frozenset[str]:
+    """The ids of `criteria` that `base` holds with the same text after `normalise` (L4-VER-009): a criterion the unit
+    did not change. An OpenSpec id hashes the scenario's name, not its body, so the text is what tells a changed
+    scenario from a restated one."""
+    before = {c.id: normalise(c.text) for c in base}
+    return frozenset(c.id for c in criteria if before.get(c.id) == normalise(c.text))
 
 
 def replaced_requirements(unit_dir: Path) -> frozenset[tuple[str, str]]:

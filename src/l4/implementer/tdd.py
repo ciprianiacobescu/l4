@@ -137,8 +137,8 @@ from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env, cache_env, gate_ci_env
 from l4.security.protected import changed_paths, glob_match, revert_protected
-from l4.specs.base import Framework, Marker, Task, UnitRef
-from l4.specs.criteria import linked_criteria, own_criteria, trace_ids
+from l4.specs.base import Criterion, Framework, Marker, Task, UnitRef
+from l4.specs.criteria import linked_criteria, own_criteria, spec_baseline, trace_ids, unchanged_ids
 from l4.specs.fixmark import read_fix_marker
 from l4.specs.followup import read_follow_up_marker
 from l4.specs.kiro import parse_kiro_tasks
@@ -360,6 +360,47 @@ def unchanged_criteria(wb: Workbench, task: Task, base: TestReport) -> frozenset
     return frozenset({i for case in base.tests.values() for i in trace_ids(case)} - changed)
 
 
+def unchanged_on_base(
+    wb: Workbench,
+    criteria: Sequence[Criterion],
+    base_report: TestReport,
+    report: TestReport,
+    changed: Collection[str] = (),
+) -> dict[str, tuple[str, ...]]:
+    """The criteria that are *unchanged on the base* (L4-IMP-093) and the tests that show it, for the red step of any
+    task: the ids that the verifier's pass-to-pass rule holds (L4-VER-009: the same id and the same text in the archived
+    specs at the unit base, read from git through `spec_baseline` and `unchanged_ids`, the verifier's own helpers), each
+    with the sorted ids of the tests of `base_report` that trace it, passed there and pass in `report`, and trace at
+    most `verifier.max_criteria_per_test` of the unit's criteria at red. A criterion with no such test is left out. A
+    fix unit's tasks run with the fix unit as `wb.ref`, but the verifier reads the family as its parent does, so a
+    criterion counts only when both readings are unchanged. `criteria` is `wb.provider.criteria(wb.ref)`. `changed`:
+    the report ids of the tests red changed in place (the named ones): they are no evidence of the base, whatever
+    they now assert."""
+    baseline = spec_baseline(wb.git, wb.ref.framework, wb.provider, unit_base(wb))
+    readings = [criteria]
+    parent = getattr(wb.provider, "parent", None)
+    if parent is not None and parent != wb.ref:  # a fix unit: the verifier reads the criteria as the parent's reading
+        readings.append(wb.provider.criteria(parent))
+    unchanged = frozenset(c.id for c in criteria)
+    for reading in readings:
+        unchanged &= unchanged_ids(reading, baseline)
+    if not unchanged:
+        return {}
+    universe = cap_universe(wb.provider, {c.id for c in criteria})
+    cap = wb.cfg.verifier.max_criteria_per_test
+    found: dict[str, tuple[str, ...]] = {}
+    for criterion in sorted(unchanged):
+        tests = sorted(
+            i for i, before in base_report.tests.items()
+            if before.status == "passed" and criterion in trace_ids(before) and i not in changed
+            and i in report.tests and report.tests[i].status == "passed"
+            and criterion in (traced := trace_ids(report.tests[i])) and len(traced & universe) <= cap
+        )  # fmt: skip
+        if tests:
+            found[criterion] = tuple(tests)
+    return found
+
+
 def cited_criteria(provider: Any, ref: UnitRef, links: Sequence[str]) -> dict[str, str]:
     """id -> alias of the criteria a Kiro leaf's `_Requirements:_` links name, read on the task's OWN unit (a fix unit
     cites the numbers of its own `bugfix.md` items, never the parent's `Req 2.1`). Empty for an OpenSpec task, which
@@ -465,6 +506,7 @@ def classify_red(
     named_changed: Collection[tuple[str, str]] = (),
     named_other: Collection[str] = (),
     named_unchanged: Collection[str] = (),
+    named_proofs: Collection[str] = (),
 ) -> RedVerdict:
     """The failure reasons, in order (design D3.4); the first that holds is returned. `superseded`: the stale tests
     of a reopened task (`stale_tests`, L4-OPS-015) may be gone or fail, they are not regressions. `named_changed`:
@@ -474,7 +516,8 @@ def classify_red(
     `head` (one that passes cannot be checked by the AST, so the attempt fails); one gone from `head` is a regression.
     `named_unchanged`: the named tests of another language that fail at red and that red changed neither in their own
     lines nor in their file's shared lines: when one of them is among the regressed ids of `red broke existing tests`,
-    the reason says why and what to do (L4-IMP-089).
+    the reason says why and what to do (L4-IMP-089). `named_proofs`: the changed named tests that count for a cited
+    criterion (`named_tracing`, L4-IMP-093): a step with no new test and one of them is no "no new test" step.
     `allowed_passing`: the new tests of a confirmed pre-satisfied criterion may pass. `failure_kinds`: every other new
     test must fail by assertion or with the stub's NotImplementedError; any other error is reported by name (SPEC
     check 3). `excerpt` turns the named tests into the failure text of the retry prompt."""
@@ -507,7 +550,7 @@ def classify_red(
         )
     if broken_modules:
         return RedVerdict(False, f"tests not collected individually: {_list(sorted(broken_modules))}")
-    if not new:  # every test was collected, but none has a name the base did not have (Kiro e2e H2, task 2.2)
+    if not new and not named_proofs:  # every test was collected, none has a name the base did not have (Kiro e2e H2)
         return RedVerdict(False, NAMED_NOT_NEW if named_changed or named_other else NO_NEW_TEST)
     passing = sorted(i for i in new if head.tests[i].status in ("passed", "skipped") and i not in allowed_passing)
     if passing:
@@ -1249,6 +1292,55 @@ def named_other_changed(
     return changed
 
 
+@dataclass(frozen=True)
+class NamedTracing:
+    """`counted`: the changed named tests that trace like a new test (report id -> its case); `refused`: report id ->
+    why a changed named test that traces one of the unit's criteria does not count (L4-IMP-093)."""
+
+    counted: dict[str, TestCase] = field(default_factory=dict)
+    refused: dict[str, str] = field(default_factory=dict)
+
+
+def named_tracing(
+    python_changed: Sequence[Tampered],
+    other_changed: Collection[str],
+    base_report: TestReport,
+    report: TestReport,
+    family: Collection[str],
+    universe: Collection[str],
+    cap: int,
+) -> NamedTracing:
+    """Which report ids of the tests the task names, that red changed in place, count as the red test of the criteria
+    they trace (L4-IMP-093, design D1). `python_changed`: the named Python tests red changed, each matching the report
+    ids `names_test_id` maps to it (a parametrised test gives several, each judged alone); `other_changed`: the report
+    ids of the named tests of another language it changed (`named_other_changed`). A test counts when it passed in
+    `base_report` (green then makes it pass again), fails at red by assertion (not an error, `NotImplementedError` or a
+    hang), traces one of the unit's `family` criteria and traces at most `cap` of the `universe`. A changed test that
+    traces none of the family is in neither map; one that meets that and not the rest is refused, with the first
+    reason in that order."""
+    known, wide = set(family), set(universe)
+    found = NamedTracing()
+    for test in sorted(report.tests):
+        if test not in other_changed and not any(names_test_id(test, t.path, t.name) for t in python_changed):
+            continue
+        case = report.tests[test]
+        traced = trace_ids(case)
+        if not traced & known:
+            continue
+        before = base_report.tests.get(test)
+        if before is None or before.status != "passed":
+            found.refused[test] = "it did not pass before this step"
+        elif case.status in ("failed", "error") and TIMEOUT_MARKER in case.message:
+            found.refused[test] = "it hangs at red"
+        elif not fails_on_zero(case):
+            found.refused[test] = "it does not fail by assertion at red"
+        elif len(traced & wide) > cap:
+            found.refused[test] = f"it traces more than {cap} of this unit's criteria"
+        else:
+            found.counted[test] = case
+    return found
+
+
 def _preexisting_reason(found: Sequence[Tampered]) -> str:
     shown = "; ".join(f"{t.path}::{t.name} ({t.why})" for t in found[:MAX_LISTED])
     more = f" (+{len(found) - MAX_LISTED} more)" if len(found) > MAX_LISTED else ""
@@ -1273,6 +1365,7 @@ def _reject_preexisting(wb: Workbench, found: Sequence[Tampered]) -> RedOutcome:
 VIA_HUMAN_OVERRIDE = "human_override"
 VIA_AGENT_OVERRIDE = "agent_override"  # an agent answered, where clarifier.answer_by_agents allows it
 VIA_DELEGATE_OVERRIDE = "delegate_override"  # the delegate answered (L4-DLG-010)
+VIA_UNCHANGED_SPEC = "unchanged_spec"  # the base specs confirm a criterion they hold unchanged, no run (L4-IMP-093)
 
 
 def override_via(override: Override) -> str:
@@ -1295,14 +1388,18 @@ def _via(
     based: BaseRunResult,
     confirmation: PreSatisfied,
     overridden: Mapping[str, Override] | None = None,
+    by_spec: Collection[str] = (),
 ) -> dict:
-    """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run."""
+    """How a pre-satisfied criterion was confirmed, for `criterion.pre_satisfied`: nothing for the zero-value run.
+    `by_spec`: the criteria the base specs confirmed (L4-IMP-093)."""
     if overridden and criterion in overridden:
         return {
             "via": override_via(overridden[criterion]),
             "question": overridden[criterion].question,
             **override_who(overridden[criterion]),
         }
+    if criterion in by_spec:
+        return {"via": VIA_UNCHANGED_SPEC}
     if criterion in earlier:
         return {"via": VIA}
     if criterion in confirmation.confirmed:
@@ -1431,10 +1528,29 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         return RedOutcome("failed", f"the test gate produced no readable report ({gate.reason})")
     report = gate.report
     new_ids = new_test_ids(base_report, report)
-    family = {c.id for c in wb.provider.criteria(wb.ref)}
-    exempt = unchanged_criteria(wb, task, base_report)
-    named = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
-    required = {c for c in named if c not in exempt}
+    criteria = wb.provider.criteria(wb.ref)
+    family = {c.id for c in criteria}
+    # the named tests red changed in place (L4-IMP-082, L4-IMP-089), found once: the test files do not change below
+    # (the variant runs swap production files and put them back byte for byte)
+    named_in_place = split_named(_preexisting_changes(wb, task, base, stale), listed)[1] if listed.tests else []
+    other_in_place = named_other_changed(wb, base, listed, base_report, report) if listed.other else []
+    named = named_tracing(  # L4-IMP-093: which of them trace a cited criterion like a new test
+        named_in_place, other_in_place, base_report, report, family, cap_universe(wb.provider, family),
+        wb.cfg.verifier.max_criteria_per_test,
+    )  # fmt: skip
+    counted = named.counted
+    # L4-IMP-093: the criteria the verifier would accept pass-to-pass, from the archived specs at the unit base; they
+    # need no new test in any task, and a passing new test of one is confirmed by the base specs without a run
+    changed_named = {  # the report ids of the named tests red changed in place: no evidence of the base any more
+        test for test in report.tests
+        if test in other_in_place or any(names_test_id(test, t.path, t.name) for t in named_in_place)
+    }  # fmt: skip
+    on_base = unchanged_on_base(wb, criteria, base_report, report, changed_named) if family else {}
+    exempt = unchanged_criteria(wb, task, base_report) | set(on_base)
+    # the judge reads no fix unit's events (L4-VER-018): a fix unit's task is never confirmed by the base specs alone
+    spec_confirmed = {} if wb.event_context.get("fix_unit") else on_base
+    aliases = cited_criteria(wb.provider, wb.ref, task.links)  # L4-KSP-012: the leaf's own cited criteria
+    required = {c for c in aliases if c not in exempt}
     proved_earlier: dict[str, EarlierRed] = {}
     existing: dict[str, tuple[str, ...]] = {}
     tracing: dict[str, tuple[str, ...]] = {}
@@ -1442,12 +1558,26 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     confirmation = PreSatisfied()
     based = BaseRunResult()
     earlier: dict[str, EarlierRed] = {}
+    by_spec: dict[str, tuple[str, ...]] = {}  # criteria the base specs confirmed, without a run (L4-IMP-093)
     overridden: dict[str, Override] = {}  # criteria a person's `accept` carried (design D8)
     overridden_tests: dict[str, tuple[str, ...]] = {}
-    if family and new_ids and not set(report.collection_errors) - set(base_report.collection_errors):
+
+    def refused_note(reason: str) -> str:
+        """L4-IMP-093: a failure that says a cited criterion has no new test also names the changed named tests that
+        trace it and do not count, and why, so that the next attempt fixes the test and writes no copy of it."""
+        if not named.refused or not (reason.startswith("no new test traces ") or reason == NAMED_NOT_NEW):
+            return reason
+        cited_now = (set(result.criteria_ids) | required) or family
+        notes = []
+        for test, why in named.refused.items():
+            if mine := sorted(trace_ids(report.tests[test]) & cited_now):
+                notes.append(f"; {test}, which the task names, does not count for {', '.join(mine)}: {why}")
+        return reason + "".join(notes)
+
+    if family and (new_ids or counted) and not set(report.collection_errors) - set(base_report.collection_errors):
         # owner decision 4: a cited criterion that an earlier red of the unit proved, and whose tests pass now, needs
         # no copy among the new tests
-        traced_new = set().union(*(trace_ids(report.tests[i]) for i in new_ids))
+        traced_new = set().union(*(trace_ids(report.tests[i]) for i in new_ids), *map(trace_ids, counted.values()))
         passing_now = {
             i: trace_ids(case) for i, case in report.tests.items() if i not in new_ids and case.status == "passed"
         }
@@ -1460,14 +1590,15 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             trace_hint=trace_rules(wb.cfg.gates.test.command).hint,
             exempt=exempt | set(proved_earlier),  # M2: an honest step may list a criterion an earlier red proved
             required=required - set(proved_earlier),
-            aliases=named,
+            aliases=aliases,
             links=", ".join(task.links),
+            named=counted,
         )
         for test in check.untraced:
             wb.emit("test.untraced", task=task.key, test=test)
         if check.error:
             wb.discard_changes()
-            return RedOutcome("failed", check.error)
+            return RedOutcome("failed", refused_note(check.error))
         if over := over_cap_text(
             {i: report.tests[i] for i in new_ids},
             cap_universe(wb.provider, family),
@@ -1478,7 +1609,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         tracing = check.tracing
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
-        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in passing.items() if c not in earlier}, real=report)
+        by_spec = {c: t for c, t in passing.items() if c in spec_confirmed and c not in earlier}  # L4-IMP-093
+        confirmation = confirm_pre_satisfied(
+            wb, {c: t for c, t in passing.items() if c not in earlier and c not in by_spec}, real=report
+        )
         for criterion in proved_earlier:  # proved by tests that exist already: recorded like the no-new-test path
             wb.emit(
                 "criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(existing[criterion]), via=VIA
@@ -1498,7 +1632,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         pre_satisfied = passing
         for criterion, tests in pre_satisfied.items():
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests),
-                    **_via(criterion, earlier, based, confirmation, overridden))  # fmt: skip
+                    **_via(criterion, earlier, based, confirmation, overridden, by_spec))  # fmt: skip
     # a stale test that is gone or fails now was replaced on purpose; one that still passes is simply kept
     replaced = frozenset(
         t for t in (stale.tests if stale else ()) if t not in report.tests or report.tests[t].status != "passed"
@@ -1534,6 +1668,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": list(overridden_tests[criterion]),
                 "via": override_via(overridden[criterion]), "question": overridden[criterion].question,
                 "answer_sha256": overridden[criterion].answer_sha256, **override_who(overridden[criterion]),
+            }  # fmt: skip
+        if criterion in by_spec:  # no discriminating test: the verifier counts its passing tests pass-to-pass
+            return {
+                "tests": list(tests), "proof": PROOF_PRE_SATISFIED, "discriminating": [], "via": VIA_UNCHANGED_SPEC,
+                "base_tests": list(on_base[criterion]),
             }  # fmt: skip
         return {
             "tests": list(tests),
@@ -1633,7 +1772,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             wb.discard_changes()
             return RedOutcome("failed", f"no test traces {', '.join(bare)} yet: write a new test for each")
         earlier = confirmed_by_earlier_red(wb, candidates, report, frozenset())
-        confirmation = confirm_pre_satisfied(wb, {c: t for c, t in candidates.items() if c not in earlier}, real=report)
+        by_spec = {c: t for c, t in candidates.items() if c in spec_confirmed and c not in earlier}  # L4-IMP-093
+        confirmation = confirm_pre_satisfied(
+            wb, {c: t for c, t in candidates.items() if c not in earlier and c not in by_spec}, real=report
+        )
         if (out := tampered("pre-satisfied confirmation")) is not None:
             return out
         left = {c: candidates[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
@@ -1649,12 +1791,12 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         _accept(wb, task, "pre_satisfied", overridden)
         for criterion, tests in candidates.items():
             wb.emit("criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(tests),
-                    **_via(criterion, earlier, based, confirmation, overridden))  # fmt: skip
-        return finish_already_satisfied({c: proof_of(c, ()) for c in candidates})
+                    **_via(criterion, earlier, based, confirmation, overridden, by_spec))  # fmt: skip
+        return finish_already_satisfied({c: proof_of(c, candidates[c] if c in by_spec else ()) for c in candidates})
     allowed = {t for tests in pre_satisfied.values() for t in tests}
+    # only a counted named test that traces a CITED criterion is a red test of this step (L4-IMP-093, SCN-IMP-440)
+    named_proofs = tuple(sorted({t for tests in tracing.values() for t in tests if t in counted}))
     still_rejected = preexisting_test_changes(wb, task, base, stale, listed)
-    named_in_place = split_named(_preexisting_changes(wb, task, base, stale), listed)[1] if listed.tests else []
-    other_in_place = named_other_changed(wb, base, listed, base_report, report) if listed.other else []
     other_unchanged = [  # named, failing and not changed by red: the verdict says what to do (D3)
         t for t in listed.other_ids() if t not in other_in_place and t in report.tests
         and report.tests[t].status in ("failed", "error")
@@ -1666,11 +1808,11 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
         rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
         named_changed=[(t.path, t.name) for t in named_in_place], named_other=other_in_place,
-        named_unchanged=other_unchanged,
+        named_unchanged=other_unchanged, named_proofs=named_proofs,
     )  # fmt: skip
     if not verdict.ok:
         wb.discard_changes()
-        return RedOutcome("failed", verdict.reason, excerpt=verdict.excerpt)
+        return RedOutcome("failed", refused_note(verdict.reason), excerpt=verdict.excerpt)
     if still_rejected:  # after classify_red: it keeps its reasons
         return _reject_preexisting(wb, still_rejected)
     named_changed[:] = named_in_place
@@ -1780,6 +1922,18 @@ def _last_checkpoint(wb: Workbench) -> tuple[str, str, str] | None:
     return None
 
 
+def _named_proofs_of(red_ok: Mapping[str, Any], new_ids: Collection[str]) -> set[str]:
+    """The ids of the changed named tests that a `task.red_ok` record counted (L4-IMP-093): the tests of a criterion's
+    proof that are no new test of the step and that the proof does not record as passing already."""
+    criteria = red_ok.get("criteria")
+    found: set[str] = set()
+    for info in criteria.values() if isinstance(criteria, Mapping) else ():
+        if not isinstance(info, Mapping) or info.get("proof") == PROOF_PRE_SATISFIED:
+            continue
+        found |= {fold_subtest_id(str(t)) for t in info.get("tests") or ()}
+    return found - set(new_ids)
+
+
 def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     """A run that died between the red commit and the green commit left the red checkpoint on the unit branch:
     redoing red there would fail ("no tests added"), so the task resumes at green. Needs the `task.red_ok` event of
@@ -1811,6 +1965,11 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     if gate.report is None or gate.report.collection_errors:
         raise BaselineFailed(f"the test gate cannot run at the red checkpoint: {gate.reason or 'collection errors'}")
     base = TestReport({i: c for i, c in gate.report.tests.items() if i not in new_ids})
+    # a named test red changed in place counts for its criterion (L4-IMP-093): it passed at the real base and fails at
+    # this head, so the rebuilt base holds it as passing, and green must make it pass again as after an unbroken red
+    for test in _named_proofs_of(event.data, new_ids):
+        if (case := base.tests.get(test)) is not None and case.status != "passed":
+            base.tests[test] = replace(case, status="passed", message="", failure_kind=None, detail="", when="")
     tdd = wb.cfg.tdd
     manifest = build_manifest(wb.git, sha, f"{sha}~1", test_globs=tdd.test_globs, support_globs=tdd.test_support_globs)
     wb.emit("task.red_resumed", task=task.key, sha=sha)

@@ -704,7 +704,7 @@ class PanelCfg(_Strict):
 class VerifierCfg(_Strict):
     independence: Literal["different_vendor", "different_model", "none"] = "different_vendor"
     max_fix_rounds: int = Field(default=3, ge=0)
-    flaky_repeats: int = Field(default=3, ge=1)
+    flaky_repeats: int = Field(default=3, ge=1, le=5)  # runs of a failed step-3 gate in all (L4-VER-076)
     generate_missing_tests: bool = True
     audit_sample_ratio: float = 0.3
     max_criteria_per_test: int = Field(default=3, ge=1)

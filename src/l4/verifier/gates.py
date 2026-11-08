@@ -6,7 +6,9 @@ in that order and stops at the first failure: every failure is a deterministic b
 exit code (the implementer's setup failure is exit 3; here the verdict is FAIL, SPEC L4-VER-002).
 Step 3 runs the full `gates.test`, non-vacuous: zero tests, a missing report or a missing new test fail it.
 The end-to-end gate (`gates.e2e`, served by `l4.gates.e2e`) is part of step 3 when it has a command.
-M1: verifier 1.7 (extra gates), 1.8 (`flaky_repeats`).
+A gate that failed only on a few pre-existing tests is run again by `l4.verifier.gate_repeat` (`verifier.flaky_repeats`
+runs at most, L4-VER-076): `run_test_gate` and `run_e2e_gate` take the name of the run for that.
+M1: verifier 1.7 (extra gates), 1.8 (`flaky_repeats`: built for step 3's failed gates, never for a new test).
 """
 
 import hashlib
@@ -50,10 +52,12 @@ class TestGateOutcome:
     gate: GateLine
     report: TestReport | None
     findings: list[Finding] = field(default_factory=list)
+    repeats: list[GateLine] = field(default_factory=list)  # the runs after the first one (`gate_repeat.settle`)
+    repeat_note: str = ""  # the step note's line about them
 
     @property
     def ok(self) -> bool:
-        return not self.findings
+        return not any(f.blocking for f in self.findings)  # a flaky pre-existing test is a minor finding
 
 
 DIGEST_LINES, DIGEST_LENGTH = 30, 12
@@ -218,21 +222,23 @@ def failure_records(
     return out, dropped
 
 
-def judge_e2e(wb: Workbench, result: GateResult) -> TestGateOutcome:
+def judge_e2e(wb: Workbench, result: GateResult, name: str = "e2e") -> TestGateOutcome:
     """The e2e run `result` judged as step 3 judges it (`_judged`): failing tests named, a missing report, a collection
-    error or no test at all a failure. A fix chore for a browser-test finding uses it too (L4-IMP-090)."""
-    return _judged(wb, "e2e", wb.cfg.gates.e2e.command, "gates.e2e.reports", result)
+    error or no test at all a failure. A fix chore for a browser-test finding uses it too (L4-IMP-090). `name`: the
+    gate's, `e2e-repeat-<n>` for a repeat."""
+    return _judged(wb, name, wb.cfg.gates.e2e.command, "gates.e2e.reports", result)
 
 
 def run_test_gate(
-    wb: Workbench, must_contain: Collection[str], *, extra_env: Mapping[str, str] | None = None
+    wb: Workbench, must_contain: Collection[str], *, extra_env: Mapping[str, str] | None = None, name: str = "test"
 ) -> TestGateOutcome:
-    """`extra_env`: the coverage plugin's environment (M1.6), merged with the trace plugin's by the workbench."""
+    """`extra_env`: the coverage plugin's environment (M1.6), merged with the trace plugin's by the workbench. `name`:
+    the run's, `test-repeat-<n>` for a repeat (L4-VER-076), which gets no `extra_env`."""
     command = wb.cfg.gates.test.command
     result = wb.run_gate(
-        "test", command, reports=wb.cfg.gates.test.reports, must_contain=must_contain, extra_env=extra_env
+        name, command, reports=wb.cfg.gates.test.reports, must_contain=must_contain, extra_env=extra_env
     )
-    return _judged(wb, "test", command, "gates.test.reports", result)
+    return _judged(wb, name, command, "gates.test.reports", result)
 
 
 def e2e_gate_configured(cfg: L4Config) -> bool:
@@ -246,9 +252,10 @@ class E2eGateOutcome(TestGateOutcome):
     snapshot: str | None = None  # `GET <origin>/` as the launcher saved it: what step 5 shows the test writer
 
 
-def run_e2e_gate(wb: Workbench) -> E2eGateOutcome:
+def run_e2e_gate(wb: Workbench, *, name: str = "e2e") -> E2eGateOutcome:
     """Step 3, second half: the app is served and the browser tests run against the head, in one gate spawn. A server
-    that never gets ready raises (exit 1): that is the runner's trouble, not a finding about the unit."""
-    run = run_e2e(wb)
-    out = judge_e2e(wb, run.gate)
-    return E2eGateOutcome(out.gate, out.report, out.findings, run.snapshot_text)
+    that never gets ready raises (exit 1): that is the runner's trouble, not a finding about the unit. `name`:
+    `e2e-repeat-<n>` for a repeat (L4-VER-076), which serves the app again."""
+    run = run_e2e(wb, name=name)
+    out = judge_e2e(wb, run.gate, name)
+    return E2eGateOutcome(out.gate, out.report, out.findings, snapshot=run.snapshot_text)

@@ -4,7 +4,8 @@
 round, and a discarded reply is an escalation (the pass records `delegate.result{status: discarded}`). Pure: the unit
 head is a `HeadTree` (the listing of regular files and a reader), the latest test report is a set of ids, and the
 questions file is the one the answer would be written to, so that the composed answer is judged by the very checks of
-`l4 questions` (`check_text`, `check_question`)."""
+`l4 questions` (`check_text`, `check_question`). A `checked` quote is compared with the file it cites as
+delegate-quote-tolerance describes (L4-DLG-005): `_resolves`."""
 
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -35,6 +36,7 @@ MAX_REASON_CHARS = 1000
 MAX_CHECKED = 20  # entries; the longest of each field is the next constant (review 3, minor 4)
 MAX_CHECKED_CHARS = {"ref": 300, "quote": 600, "claim": 600}
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
+MARKDOWN_SUFFIXES = (".md", ".markdown")  # the files in which a quote is also compared without the `**` bold marker
 MIN_QUOTE_CHARS = (
     12  # a shorter quote (after whitespace is folded) is in nearly any file: it shows nothing; it is named
 )
@@ -53,6 +55,7 @@ FIT: Mapping[QuestionKind, tuple[str, ...]] = {
     QuestionKind.HARNESS: ("accept", "retry", "escalate"),
 }
 _LINE_REF = re.compile(r"(?P<path>[^\s:][^:]*):(?P<line>[0-9]+)(?:-[0-9]+)?")
+_EMPHASIS = re.compile(r"\*\*")  # `__` stays: it is the dunder of identifiers, and `init` is not `__init__`
 
 
 @dataclass(frozen=True)
@@ -114,8 +117,31 @@ class Discarded:
     checked: tuple[dict[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class Resolved:
+    """A `checked` entry that holds. `at` is `<path>:<line>` only for a `path:line` entry that the file placed (its
+    quote is not within `LINE_WINDOW` lines of the line it names, and the file holds it at one place): the answered
+    `delegate.result` records it as `resolved`. An entry that holds as cited, a `spec:` or a `test:` entry has none."""
+
+    at: str | None = None
+
+
 def _flat(text: str) -> str:
     return " ".join(text.split())
+
+
+def _flat_md(text: str) -> str:
+    """`_flat` with the bold marker `**` removed first (it never spans a line break, so it can be removed per line)."""
+    return _flat(_EMPHASIS.sub("", text))
+
+
+def _folds(path: str, quote: str) -> tuple[Callable[[str], str], ...]:
+    """The ways `quote` is compared with the file `path`, in order: whitespace folded (`_flat`), and, in a markdown
+    file, also with `**` removed from both (`_flat_md`) when the quote so folded keeps `MIN_QUOTE_CHARS` (a quote that
+    is only markers folds to nothing, which is in every file)."""
+    if PurePosixPath(path).suffix.lower() in MARKDOWN_SUFFIXES and len(_flat_md(quote)) >= MIN_QUOTE_CHARS:
+        return (_flat, _flat_md)
+    return (_flat,)
 
 
 def _safe_relative(ref: str) -> str | None:
@@ -176,34 +202,73 @@ def _too_short(entry: Mapping[str, str]) -> bool:
     return not entry["ref"].strip().startswith("test:") and len(_flat(entry["quote"])) < MIN_QUOTE_CHARS
 
 
-def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> bool:
-    """Whether a `checked` entry holds at the unit head: a `test:` id is in the report; a `spec:` quote is in the file
-    `_spec_file` names; a `path:line` quote, whitespace folded, starts within `LINE_WINDOW` lines of the line (the
-    first occurrence from `line - LINE_WINDOW` on starts in those lines), whatever line breaks the quote keeps."""
-    ref, quote = entry["ref"].strip(), _flat(entry["quote"])
+def _in_window(lines: Sequence[str], line: int, quote: str, fold: Callable[[str], str]) -> bool:
+    """Whether `quote` (already folded by `fold`) starts within `LINE_WINDOW` lines of `line` (counted from 1): its
+    first occurrence from line `line - LINE_WINDOW` on starts in the folded text of those lines, whatever line breaks
+    the quote keeps."""
+    first = max(line - LINE_WINDOW, 1)
+    window = fold("\n".join(lines[first - 1 : line + LINE_WINDOW]))
+    rest = fold("\n".join(lines[first - 1 :]))
+    return 0 <= rest.find(quote) < len(window)
+
+
+def _line_of(lines: Sequence[str], fold: Callable[[str], str], at: int) -> int:
+    """The line (from 1) that holds the character at offset `at` of `fold("\n".join(lines))`. Both folds work line by
+    line (the folded non-empty lines are joined by one space), so the folded text of the first `n` lines is a prefix of
+    the folded whole, and a running length finds the line in one pass."""
+    total = 0
+    for n, text in enumerate(lines, 1):
+        folded = fold(text)
+        total += len(folded) + (1 if total and folded else 0)
+        if total > at:
+            return n
+    return len(lines)
+
+
+def _resolves(entry: Mapping[str, str], head: HeadTree, test_ids: Collection[str]) -> Resolved | None:
+    """Whether a `checked` entry holds at the unit head (None when it does not): a `test:` id is in the report; a
+    `spec:` quote is in the file `_spec_file` names; a `path:line` quote, whitespace folded, starts within
+    `LINE_WINDOW` lines of the line (the first occurrence from `line - LINE_WINDOW` on starts in those lines), whatever
+    line breaks the quote keeps. In a markdown file each comparison is also made with `**` removed from both sides
+    (`_folds`). A `path:line` quote that is not within the window and that the file holds at exactly one offset (as
+    written, and in a markdown file also with `**` removed; overlapping occurrences count) is placed at
+    the line where it starts, counted by line feeds: the result's `at` names it (delegate-quote-tolerance;
+    L4-DLG-005)."""
+    ref, raw = entry["ref"].strip(), entry["quote"]
     if ref.startswith("test:"):
-        return ref.removeprefix("test:").strip() in test_ids
+        return Resolved() if ref.removeprefix("test:").strip() in test_ids else None
     if ref.startswith("spec:"):
         name = _safe_relative(ref.removeprefix("spec:").split("#", 1)[0])
         if name is None or _harness_written(name):
-            return False
+            return None
         chosen = _spec_file(name, head)
         text = head.read(chosen) if chosen is not None and not _harness_written(chosen) else None
-        return text is not None and quote in _flat(text)
+        if chosen is None or text is None:
+            return None
+        return Resolved() if any(fold(raw) in fold(text) for fold in _folds(chosen, raw)) else None
     found = _LINE_REF.fullmatch(ref)
     if found is None:
-        return False
+        return None
     path, line = _safe_relative(found["path"]), int(found["line"])
     if path is None or not head.tracked.get(path) or _harness_written(path):
-        return False
+        return None
     text = head.read(path)
     if text is None:
-        return False
-    lines = text.splitlines()
-    first = max(line - LINE_WINDOW, 1)
-    window = _flat("\n".join(lines[first - 1 : line + LINE_WINDOW]))
-    rest = _flat("\n".join(lines[first - 1 :]))
-    return 0 <= rest.find(quote) < len(window)
+        return None
+    lines, folds = text.splitlines(), _folds(path, raw)
+    if any(_in_window(lines, line, fold(raw), fold) for fold in folds):
+        return Resolved()
+    numbered = text.split("\n")  # the lines as git and an editor number them (`splitlines` also splits on \x0c, \r...)
+    placed: str | None = None
+    for fold in folds:  # a quote must be alone in every fold in which it occurs, or no place is certain
+        quote, whole = fold(raw), fold(text)
+        at = whole.find(quote)
+        if at < 0:
+            continue
+        if whole.find(quote, at + 1) != -1:  # two or more offsets: nothing says which one the claim is about
+            return None
+        placed = placed or f"{path}:{_line_of(numbered, fold, at)}"
+    return Resolved(placed) if placed else None
 
 
 def _frozen_hits(
@@ -314,6 +379,7 @@ def _check_reply(
         return refuse(f"accept needs a clarifier suggestion, and {question.id} has none")
     if not checked:
         return refuse(f"the decision {decision} has no checked entry")
+    resolved: list[Mapping[str, str]] = []  # the entries as kept: `resolved` is added to one that the file placed
     for entry in checked:
         if _harness_ref(entry["ref"], head.unit_rel):
             return refuse(f"checked {entry['ref']} {HARNESS_REASON}")
@@ -322,8 +388,10 @@ def _check_reply(
             return refuse(
                 f"checked {ref}: the quote of {ref} is shorter than {MIN_QUOTE_CHARS} characters", retryable=True
             )
-        if not _resolves(entry, head, test_ids):
+        got = _resolves(entry, head, test_ids)
+        if got is None:
             return refuse(f"checked {entry['ref']} does not resolve", retryable=True)
+        resolved.append({**entry, "resolved": got.at} if got.at else entry)
     if not plain_accept and (refusal := check_text(text, redactor)) is not None:
         return refuse(f"the text is refused: {refusal.message}")
     if verdict and hold_kind == "judge_view":  # L4-DLG-024: a reject escalates the unit, only a person decides it
@@ -396,4 +464,4 @@ def _check_reply(
         )
     ) is not None:
         return refuse(refusal.message)
-    return Kept(decision, reason, checked, form, None if plain_accept else composed, effective, effects)
+    return Kept(decision, reason, tuple(resolved), form, None if plain_accept else composed, effective, effects)

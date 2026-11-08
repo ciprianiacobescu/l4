@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from l4 import deadline
-from l4.config.schema import duration_seconds
+from l4.availability.fallback import Constraint
+from l4.config.schema import Profile, duration_seconds
 from l4.gates.collection import ledger_excerpt
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import GuardNote, guard_note_text
@@ -341,6 +342,41 @@ class EscalationRequest:
     profile: str  # the profile that failed
     failures: tuple[tuple[str, str], ...]  # (profile, reason) of every failed attempt of this phase, oldest first
     attempt: int  # the attempt number of the next step
+    spent: tuple[tuple[str, int], ...] = ()  # (profile, failed attempts) of each profile at `max_task_attempts` (D1)
+    used: tuple[tuple[str, int], ...] = ()  # the same for each profile at `escalate_after` or more, spent ones too
+
+
+def _failed_text(request: EscalationRequest, n: int, key: str, limit: int) -> str:
+    return f"{n} failed attempts of {request.phase} of task {request.task} (implementer.{key} {limit})"
+
+
+def spent_constraint(request: EscalationRequest, limit: int) -> Constraint:
+    """The veto of a move's selection (L4-IMP-094 D1): a profile that has failed `limit` attempts of the phase in the
+    task's window has no attempt left, so the walk goes on past it. Any other profile passes."""
+    spent = dict(request.spent)
+
+    def check(name: str, profile: Profile) -> str | None:
+        if (n := spent.get(name, 0)) < limit:
+            return None
+        return "spent: " + _failed_text(request, n, "max_task_attempts", limit)
+
+    return check
+
+
+def used_constraint(request: EscalationRequest, limit_after: int, limit: int) -> Constraint:
+    """The first pass of a move's selection (L4-IMP-094 D1): a profile that has failed `limit_after` attempts of the
+    phase, its `escalate_after` share, is passed over while a later profile can take the step; a spent one gets the
+    text of `spent_constraint`. The second pass (`spent_constraint` alone) runs when the first takes no profile."""
+    used, spent = dict(request.used), spent_constraint(request, limit)
+
+    def check(name: str, profile: Profile) -> str | None:
+        if (why := spent(name, profile)) is not None:
+            return why
+        if (n := used.get(name, 0)) < limit_after:
+            return None
+        return "used its share: " + _failed_text(request, n, "escalate_after", limit_after)
+
+    return check
 
 
 Escalate = Callable[[Workbench, EscalationRequest], Workbench | str]  # a new workbench, or why there is none
@@ -359,6 +395,7 @@ class Seeded:
     failures: dict[str, dict[str, int]]  # phase -> profile -> failed attempts
     reasons: dict[str, list[tuple[str, str]]]  # phase -> (profile, reason), oldest first
     attempts: dict[str, int]  # "red" | "green" (a single-phase chore's too) -> the highest attempt number used
+    escalated_from: dict[str, str] = field(default_factory=dict)  # phase -> `from` of the newest move in the window
 
 
 def seed_attempts(wb: Workbench, task: Task) -> Seeded:
@@ -370,11 +407,16 @@ def seed_attempts(wb: Workbench, task: Task) -> Seeded:
     failures: dict[str, dict[str, int]] = {"red": {}, "green": {}, "single": {}}
     reasons: dict[str, list[tuple[str, str]]] = {"red": [], "green": [], "single": []}
     attempts = {"red": 0, "green": 0}
+    escalated_from: dict[str, str] = {}
     for event in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit):
         data = event.data
         if data.get("task") != task.key or data.get("fix_unit") != fix_unit:
             continue
         phase = data.get("phase")
+        if event.type == "implementer.escalated":  # the newest move of the phase wins (L4-IMP-094 D3)
+            if phase in failures and isinstance(origin := data.get("from"), str) and origin:
+                escalated_from[phase] = origin
+            continue
         failed = event.type == "task.attempt_failed"
         stopped = event.type == "deadline.reached" and data.get("when") == "during"
         if phase not in failures or not (failed or stopped):
@@ -387,37 +429,69 @@ def seed_attempts(wb: Workbench, task: Task) -> Seeded:
         if isinstance(number, int) and not isinstance(number, bool):
             key = "red" if phase == "red" else "green"
             attempts[key] = max(attempts[key], number)
-    return Seeded(failures, reasons, attempts)
+    return Seeded(failures, reasons, attempts, escalated_from)
 
 
 def _escalate_if_due(
     wb: Workbench, task: Task, phase: str, failures: dict[str, dict[str, int]],
     reasons: dict[str, list[tuple[str, str]]], attempts: dict[str, int], escalate: Escalate | None, limit: int,
-    limit_after: int,
-) -> Workbench:  # fmt: skip
+    limit_after: int, origin: str | None = None,
+) -> tuple[Workbench, str | None]:  # fmt: skip
     """The escalation hook (D1 of escalate-and-note): when the selected profile has failed `escalate_after` attempts of
     `phase` and fewer than `max_task_attempts`, and a later profile exists, ask for the next profile's workbench. Run
-    after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075)."""
-    profile = wb.selected.profile_name
+    after a failed attempt, and before a task's first attempt when earlier runs' failures say so (L4-IMP-075). Returns
+    the workbench the task goes on with, and why the hook refused a move (None: no move was asked, or it was made).
+    `origin` asks the move from that profile in place of the selected one, the profile an earlier run moved the phase
+    from (L4-IMP-094 D3); a refusal then records `on`, the profile the phase starts on. The profiles at
+    `max_task_attempts` and at `escalate_after` go in the request, so the selection passes over them (D1)."""
+    selected = wb.selected.profile_name
+    profile = origin or selected
     if not escalate or not 1 <= limit_after < limit:
-        return wb
+        return wb, None
     count = failures[phase].get(profile, 0)
     if not (limit_after <= count < limit and _has_later(wb, profile)):
-        return wb
+        return wb, None
     number = attempts["red" if phase == "red" else "green"] + 1  # a single step counts with the green ones
-    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number)
+    spent = tuple((p, n) for p, n in failures[phase].items() if n >= limit)
+    used = tuple((p, n) for p, n in failures[phase].items() if n >= limit_after)
+    request = EscalationRequest(task.key, phase, profile, tuple(reasons[phase]), number, spent, used)
     answer = escalate(wb, request)
     if isinstance(answer, str):
         wb.emit(
             "implementer.escalation_skipped", task=task.key, phase=phase, **{"from": profile},
-            failures=count, reason=answer,
+            failures=count, reason=answer, **({"on": selected} if profile != selected else {}),
         )  # fmt: skip
-        return wb
+        return wb, answer
     wb.emit(
         "implementer.escalated", task=task.key, phase=phase, **{"from": profile},
         to=answer.selected.profile_name, failures=count, attempt=request.attempt,
     )  # fmt: skip
-    return answer
+    return answer, None
+
+
+def _escalate_while_due(
+    wb: Workbench, task: Task, phase: str, failures: dict[str, dict[str, int]],
+    reasons: dict[str, list[tuple[str, str]]], attempts: dict[str, int], escalate: Escalate | None, limit: int,
+    limit_after: int, origin: str | None = None,
+) -> tuple[Workbench, str | None]:  # fmt: skip
+    """Move the phase while a move is due (L4-IMP-094 D2): a move that lands on a profile which has itself failed
+    `escalate_after` attempts of `phase` is asked again at once. Every move goes to a later profile, and the loop is
+    bounded by the chain besides. `origin` is the profile the first move is asked from (D3); when it is refused the
+    phase stays on the selected profile, and that profile's own count says whether to ask again. Returns the workbench
+    and the newest refusal on the profile it ends on (None after a move)."""
+    refusal: str | None = None
+    for _ in range(len(wb.cfg.roles.implementer) + 1):  # one more than the chain: a refused `origin` does not stop it
+        moved, why = _escalate_if_due(
+            wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after, origin
+        )  # fmt: skip
+        continuing, origin = origin is not None, None
+        if moved.selected.profile_name != wb.selected.profile_name:
+            wb, refusal = moved, None
+            continue
+        refusal = why or refusal
+        if not continuing:
+            break
+    return wb, refusal
 
 
 def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
@@ -472,11 +546,18 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     )
     red: RedOutcome | None = None if chore else resume_red(wb, task)
     start = "single" if chore else "red" if red is None else "green"
-    for _ in wb.cfg.roles.implementer:  # D7b: earlier runs' failures can say to move through several profiles
-        moved = _escalate_if_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after)
-        if moved.selected.profile_name == wb.selected.profile_name:
-            break
-        wb = moved
+    # D7b: earlier runs' failures can say to move through several profiles; the first move is asked from the profile
+    # an earlier run moved the phase from, when that profile comes after this run's (L4-IMP-094 D3)
+    chain = wb.cfg.roles.implementer
+    origin = seeded.escalated_from.get(start)
+    if origin is not None and not (
+        origin in chain
+        and wb.selected.profile_name in chain
+        and chain.index(origin) > chain.index(wb.selected.profile_name)
+    ):
+        origin = None
+    wb, why = _escalate_while_due(wb, task, start, failures, reasons, attempts, escalate, limit, limit_after, origin)
+    refused: tuple[str, str] | None = (start, why) if why else None  # the newest refusal on the profile: (phase, why)
     while True:
         current = "single" if chore else ("red" if red is None else "green")
         if failures[current].get(wb.selected.profile_name, 0) >= limit:
@@ -548,14 +629,20 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             excerpt_lines=len(excerpt.splitlines()),
             **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
         )  # fmt: skip
-        wb = _escalate_if_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
+        before = wb.selected.profile_name
+        wb, why = _escalate_while_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
+        if why or wb.selected.profile_name != before:  # a move clears the refusal of the profile it left
+            refused = (phase, why) if why else None
     if failure is None and reasons[current]:  # no attempt ran in this run: the newest failure of an earlier one
         failure = reasons[current][-1][1]
     ran = [{"profile": p, "failures": n} for p, n in failures[current].items()]
     where = current
     if len(ran) > 1:
         where += " on " + ", ".join(f"{p['profile']} ({p['failures']})" for p in ran)
-    reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}; last failure: {failure}"
+    why_no_move = ""  # a move was refused while the phase was on this profile, and a later profile exists (D4)
+    if refused is not None and refused[0] == current and _has_later(wb, wb.selected.profile_name):
+        why_no_move = f"; no later profile can take it ({refused[1]})"
+    reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}{why_no_move}; last failure: {failure}"
     if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code
         reason += REPAIR_EXHAUSTED_NOTE
     wb.emit(
