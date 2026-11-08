@@ -77,8 +77,9 @@
   request, limit)` and `used_constraint(request, limit_after, limit)`, both `-> Constraint` (D1 texts).
   `Orchestrator._escalation_profile` selects in two passes: `constraints=(used_constraint(...), keeper)`, and when that
   raises `RoleUnavailable` and a profile after `request.profile` is in `request.used`, `constraints=(spent_constraint(
-  ...), keeper)`; the reason of the last pass is the refusal. The returned `Selected.request` has the constraints of
-  pass 2, so a limit on the moved profile (`Factory.on_limit`) never falls back to a spent one (D1).
+  ...), keeper)`; the reason of the last pass is the refusal. The move sets `_task_veto` (the task and the spent veto),
+  which `switch_profile` adds to every limit fallback of the task and `_wait_in_run` applies, so no fallback of the
+  task takes a spent profile (D1); the run's stored profile drops it.
 - [x] 2.3 `_escalate_if_due(..., origin: str | None = None) -> tuple[Workbench, str | None]`: the request's profile and
   count are `origin`'s when given (conditions of L4-IMP-017 for it, `_has_later` on it), `spent` from
   `failures[phase]` (and `used`); a refusal with `origin` different from the workbench's profile records `on` (that profile).

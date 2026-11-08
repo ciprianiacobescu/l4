@@ -12,9 +12,10 @@ walk in two passes. The first refuses such a profile as a constraint with `used 
 only when the first takes no profile, refuses the spent profiles alone, so that a profile that used its share and has
 attempts left takes the step when nothing after it can. A move SHALL record one `availability.selected`, that of the
 pass that took the profile, and a profile that was passed over SHALL NOT be probed, recorded as selected or added to
-the unit's implementer profiles. When the profile a move took hits a limit, the fallback of L4-AVL-006 SHALL refuse
-the spent profiles as the second pass does, so that the step never goes back to a spent profile; a profile that
-used its share may take it. When a move takes a profile that has itself failed at least `escalate_after` and
+the unit's implementer profiles. After a move of T, every limit fallback of T (L4-AVL-006: a later limit and a wait
+in the run included) SHALL refuse the spent profiles of that move as the second pass does, so that the step never
+goes back to a spent profile; a profile that used its share may take it, and the run's profile does not keep that
+veto for a later task. When a move takes a profile that has itself failed at least `escalate_after` and
 fewer than `max_task_attempts` attempts of P (only the second pass does), and `roles.implementer` lists a profile after
 it, the harness SHALL try to move P again at once, before the next attempt, after a failed attempt as before the first
 attempt; when that move is refused, P SHALL stay on that profile, which keeps its attempts up to `max_task_attempts`.
@@ -53,7 +54,8 @@ restart` start a new window, so the task starts on the run's selected profile wi
 - **THEN** the move goes from deepseek to claude-sonnet, and `availability.selected` lists glm as skipped with
   `spent: 3 failed attempts of red of task 4.1 (implementer.max_task_attempts 3)`
 - **AND** when claude-sonnet then hits a limit while deepseek is cooling, the limit's fallback refuses glm as spent
-  too: the unit waits for capacity and glm runs no step
+  too: the unit waits for capacity and glm runs no step; so does a later limit of the task, after the step fell back to
+  deepseek
 
 #### Scenario: SCN-IMP-503 (−) every later profile spent: no move, and the halt says why
 - **WHEN** glm and claude-sonnet each failed red three times in the window and deepseek fails red three times

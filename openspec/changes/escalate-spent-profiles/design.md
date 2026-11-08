@@ -78,8 +78,9 @@ in two passes, inside `Orchestrator._escalation_profile` (the fix loop reaches i
   answers `used its share: <n> failed attempts of <phase> of task <k> (implementer.escalate_after <m>)` for a profile
   that used its share, and the `spent:` text for a spent one (a spent profile has used its share, so it is refused
   with the more telling text). So the walk passes over both and takes the first profile that has not used its share.
-- **Pass 2,** only when pass 1 takes nothing and a profile after `request.profile` is in `request.used` (without one,
-  pass 2 would walk the same profiles to the same end, and the pass-1 reason is returned): `constraints=
+- **Pass 2,** only when pass 1 takes nothing and a profile after `request.profile` is in `request.used` with fewer
+  than `max_task_attempts` failures (without one, pass 2 would walk the same profiles to the same end, and the pass-1
+  reason is returned): `constraints=
   (spent_constraint(request, max_task_attempts), keeper)`. A profile that used its share but has attempts left takes
   the step when nothing after it can.
 
@@ -96,11 +97,18 @@ probe that pass 1 made and cached (a profile that failed its hello, for example)
 console's `skipped` lines of pass 1 can print again in pass 2.
 
 *The limit fallback after a move:* the `Selected` that a move returns carries the `SelectionRequest` that
-`Factory.on_limit` asks again when that profile hits a limit, from the chain's start (L4-AVL-006). Its constraints are
-those of pass 2, `(spent_constraint(request, max_task_attempts), keeper)`, whichever pass took the profile: the run's
-own profile, which used its share before the move, may take the step back after the limit (SCN-IMP-421), and a spent
-profile never does; when nothing else is usable the unit waits for capacity, as any limit with no fallback does. The
-veto of pass 1 would refuse the run's own profile there and park the unit with that profile usable.
+`Factory.on_limit` asks again when that profile hits a limit, from the chain's start (L4-AVL-006), with the keeper only.
+The move also sets `Orchestrator._task_veto = (task, spent_constraint(request, max_task_attempts))`, and
+`switch_profile` adds that veto to every fallback of the same task: the first limit on the moved profile, a later limit
+after the step fell back to the run's profile, and the selection after a wait in the run (`_wait_in_run`). The veto
+survives the task loop's restart after a limit (`limited` in `_implement`) and ends with the task (the loop's
+`finally`, `_escalation_ended` in the fix loop). So the run's own profile, which used its share before the move, may
+take the step back after the limit (SCN-IMP-421), and a spent profile never does; when nothing else is usable the unit
+waits for capacity, as any limit with no fallback does. The veto of pass 1 would refuse the run's own profile there
+and park the unit with that profile usable. When a fallback moves the run's profile, the stored `_selected` drops the
+veto (`_with_constraints(..., drop=veto)`), so a later task's fallbacks do not refuse a profile that is spent only for
+this task [I: the fixture unit has one task]. The veto is the move's snapshot of phase P; in a later phase of the same
+task it can refuse a profile that is spent only for P, which at worst makes the unit wait for capacity.
 
 *Alternatives rejected:* (a) retry the hook in the loop when it returns a spent profile: it would build a workbench,
 probe and record a move for a profile that cannot run. (b) Select the used profile, then move on from it in the loop
@@ -127,9 +135,9 @@ through the chain before the first attempt.
 Bounded: every move goes to a profile after the current one (`next_profile` walks after `request.profile`), a spent
 profile is never taken (D1), and the loop stops at the chain's length or at the first call that does not move.
 
-In a single run the landed profile has no failure of the phase, so the re-check is a no-op and no hook call is added
-[I: the counts start at 0 in a fresh window; a profile the step comes back to after a limit is covered by D3's
-same-run cases below].
+In a single run with no limit the landed profile has no failure of the phase, so the re-check is a no-op and no hook
+call is added [I: the counts start at 0 in a fresh window]. After a limit fallback in the same run, pass 2 can land on a
+profile with failures, and the ask from it is then made at once (D3's same-run cases below).
 
 ### D3. A run continues the window's move
 
@@ -214,5 +222,6 @@ take it (<reason>); it starts on <on>`. Without `on` the line is today's (`…; 
 - A profile reaches `max_task_attempts` only as the profile the step halts on, and a halted unit goes on through
   `l4 retry`, `l4 resume` or `l4 restart`, which start a new window [I: the paths read; the spec edit after a stop is
   taken inside those commands]. So a spent profile in a window is expected after a configuration change during the
-  window (a lower `max_task_attempts`, a reordered or renamed chain). The veto is there so that such a window never
-  halts with a later profile left, and so that no move re-enters a profile in any case.
+  window (a lower `max_task_attempts`, a reordered or renamed chain). The veto is there so that no move or limit
+  fallback re-enters a spent profile in such a window. A run whose own profile is cooling at its start can still begin
+  on a spent profile and halt at once (L4-IMP-075 counts it; a move at `max_task_attempts` is not tried).

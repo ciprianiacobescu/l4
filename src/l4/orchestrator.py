@@ -51,7 +51,7 @@ from l4.agents.base import AgentAdapter, LimitSignal, RunResult
 from l4.agents.factory import RoleUnavailable, Selected, SelectionRequest
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
-from l4.availability.fallback import minute_stamp
+from l4.availability.fallback import Constraint, minute_stamp
 from l4.ci.budget import job_budget, job_timeout, raise_fix, read_workflow, shortens_job, too_short
 from l4.ci.detect import in_ci_job
 from l4.ci.pin_guard import stale_pin_stop
@@ -291,6 +291,15 @@ class RunWaits:
     started: set[str] = field(default_factory=set)  # the units whose run ledger was opened (`run.started` written)
 
 
+def _with_constraints(selected: Selected, extra: tuple[Constraint, ...], *, drop: Constraint | None = None) -> Selected:
+    """`selected` whose limit fallback (`Factory.on_limit`) asks again with `extra` added to its constraints and `drop`
+    left out. A selection without a request is returned as it is."""
+    if selected.request is None:
+        return selected
+    kept = tuple(c for c in selected.request.constraints if c is not drop)
+    return replace(selected, request=replace(selected.request, constraints=(*kept, *extra)))
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -339,6 +348,7 @@ class Orchestrator:
             self._waits.began = services.factory.now()
         self._previous_attempt: PreviousAttempt | None = None  # set when a limit moved the task to another profile
         self._task_selected: Selected | None = None  # the profile an escalation gave the running task (D4)
+        self._task_veto: tuple[str, Constraint] | None = None  # a move's task and its spent veto (L4-IMP-094 D1)
         self._publish_unpublished()
         # what earlier runs wrote after their hand-off commit lives only in the lock ref: without it a unit in
         # review would fold as `verified` and be handed off again
@@ -1176,6 +1186,7 @@ class Orchestrator:
                     return self._await_human(open_ids)
                 self._go(Trigger.ALL_LEAVES_DONE)
                 return None
+            limited = False
             try:
                 outcome = run_task(wb, task, escalate=self._escalate)
             except BaselineFailed as exc:
@@ -1184,10 +1195,13 @@ class Orchestrator:
             except PlantedLink as exc:
                 return self._halt_planted_link(exc, task.key)
             except RoleLimit as exc:
+                limited = True  # the task starts again: a move's veto holds for it (L4-IMP-094 D1)
                 wb = self._fall_back(exc, wb, task.key)
                 continue
             finally:
                 self._task_selected = None  # the task's own profile ends with the task (escalate-and-note D4)
+                if not limited:
+                    self._task_veto = None
             if outcome.status == "blocked":
                 rounds = self._rounds[task.key] = self._rounds.get(task.key, 0) + 1
                 if self._clarifier_available() and rounds <= MAX_CLARIFIER_ROUNDS_PER_TASK:
@@ -1216,12 +1230,18 @@ class Orchestrator:
         through here and every later task and the outcome follow the new profile."""
         task_profile, self._task_selected = self._task_selected, None
         previous = task_profile or self._select()
+        # a move of this task refused its spent profiles (L4-IMP-094 D1): every fallback of the task refuses them too,
+        # a later limit included, but the run's profile does not keep that veto for later tasks
+        veto = self._task_veto[1] if self._task_veto is not None and self._task_veto[0] == task else None
+        asked = previous if veto is None else _with_constraints(previous, (veto,))
         try:
-            chosen = self.services.factory.on_limit(previous, limit)
+            chosen = self.services.factory.on_limit(asked, limit)
         except WaitingCapacity as exc:
-            chosen = self._wait_in_run(exc)  # a short cool-down is waited out; else this raises `exc` again
+            # a short cool-down is waited out (the veto holds there too); else this raises `exc` again
+            chosen = self._wait_in_run(exc, () if veto is None else (veto,))
         if task_profile is None or chosen.profile_name != self._select().profile_name:
-            self._selected = chosen  # the run's profile moves; a task's own profile that limited leaves it as it is
+            # the run's profile moves; a task's own profile that limited leaves it as it is
+            self._selected = chosen if veto is None else _with_constraints(chosen, (), drop=veto)
         signal = limit if isinstance(limit, LimitSignal) else limit.limit
         kind = signal.kind if signal else limit.status if isinstance(limit, RunResult) else "rate_limit"
         self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task)
@@ -1232,11 +1252,12 @@ class Orchestrator:
         s = self.services
         return job_remaining_s(self.cfg, s.app.environ, s.factory.now(), self._waits.began)
 
-    def _wait_in_run(self, exc: WaitingCapacity) -> Selected:
+    def _wait_in_run(self, exc: WaitingCapacity, constraints: tuple[Constraint, ...] = ()) -> Selected:
         """L4-AVL-011: every implementer left is cooling and the earliest cool-down ends within
         `availability.wait_in_run`, so the run sleeps until then and selects again (the step goes on from its last
         checkpoint, like after a fallback). Not within `wait_in_run_max_total` of the run, nor the job's remaining time:
-        `exc` is raised again and the unit parks (exit 12). A selection that fails again may be waited for too."""
+        `exc` is raised again and the unit parks (exit 12). A selection that fails again may be waited for too.
+        `constraints` are a move's veto of the running task (L4-IMP-094 D1)."""
         s, cfg = self.services, self.cfg.availability
         while True:
             now = s.factory.now()
@@ -1257,7 +1278,7 @@ class Orchestrator:
             self._waits.waited_s += seconds
             s.ledger.append("availability.wait_in_run", profile=profile, waited_s=seconds, kind=kind)
             try:
-                return s.factory.for_role("implementer", s.ref.id)
+                return s.factory.for_role("implementer", s.ref.id, constraints=constraints)
             except WaitingCapacity as again:
                 exc = again
 
@@ -1296,8 +1317,8 @@ class Orchestrator:
             )  # fmt: skip
         except RoleUnavailable as exc:
             after = chain[chain.index(request.profile) + 1 :] if request.profile in chain else []
-            if not any(name in after for name, _ in request.used):
-                return str(exc)  # pass 1 passed over nothing: pass 2 would walk the same profiles to the same end
+            if not any(name in after and n < cfg.max_task_attempts for name, n in request.used):
+                return str(exc)  # pass 1 passed over no profile with an attempt left: pass 2 would end the same way
             try:  # pass 2: nothing after it can, so a used profile with attempts left takes the step (D1)
                 chosen = factory.next_profile(
                     "implementer", unit, request.profile,
@@ -1305,16 +1326,18 @@ class Orchestrator:
                 )  # fmt: skip
             except RoleUnavailable as again:
                 return str(again)
-        # a limit on the moved profile selects again from the chain's start (`Factory.on_limit`) with the veto of
-        # pass 2: a profile that used its `escalate_after` share may take the step back, a spent one never does
-        spent = spent_constraint(request, cfg.max_task_attempts)
-        chosen = replace(chosen, request=SelectionRequest("implementer", unit, None, (spent, keeper)))
+        # a limit in this task selects again from the chain's start (`Factory.on_limit`) with the veto of pass 2,
+        # which `switch_profile` adds: a profile that used its `escalate_after` share may take the step back, a spent
+        # one never does
+        chosen = replace(chosen, request=SelectionRequest("implementer", unit, None, (keeper,)))
+        self._task_veto = (request.task, spent_constraint(request, cfg.max_task_attempts))
         self._task_selected = chosen
         return chosen
 
     def _escalation_ended(self) -> None:
-        """A fix unit's task is over: its own profile ends with it, as the unit loop's `finally` does."""
+        """A fix unit's task is over: its own profile and a move's veto end with it, as in the unit loop's `finally`."""
         self._task_selected = None
+        self._task_veto = None
 
     def _fall_back(self, exc: RoleLimit, wb: Workbench, task: str | None = None) -> Workbench:
         """A limit in the middle of a task (agent-factory 1.25, implementer-tdd-loop 2.25): the cool-down is recorded

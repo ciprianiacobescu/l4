@@ -193,3 +193,20 @@ def test_a_limit_on_the_moved_profile_never_hands_the_step_back_to_a_spent_one(r
     own = run.adapter.requests[0].profile.vendor
     assert [r.profile.vendor for r in run.adapter.requests] == [own, own, "thirdco"]  # impl-b ran nothing
     assert "waiting_capacity" in [e["to"] for e in new_events(run, old, "phase.changed")]
+
+
+def test_a_second_limit_in_the_task_never_hands_the_step_to_a_spent_profile(run_l4, tdd_repo, raw, fake_clock):
+    """The veto holds for every fallback of the task (D1): impl-b is spent, the move goes from impl to impl-c, impl-c
+    limits and the step falls back to impl, the next move is refused (impl-c cooling), and impl limits too. The second
+    fallback refuses impl-b as the first did, so the unit waits for capacity and impl-b runs nothing."""
+    old = earlier_run(run_l4, tdd_repo, raw, fake_clock, [failed(n, "impl-b") for n in (1, 2, 3)])
+    limit = LimitSignal("fake", None, "usage_limit", datetime(2026, 1, 1, 6, 0, tzinfo=UTC), "test", "usage limit")
+    quota = Step(status="quota", limit=limit)
+    run = run_l4([FAIL, FAIL, quota, quota, FAIL], **CHAIN)
+    assert run.code == 12
+    assert [(e["from"], e["to"]) for e in new_events(run, old, "implementer.escalated")] == [("impl", "impl-c")]
+    own = run.adapter.requests[0].profile.vendor
+    assert [r.profile.vendor for r in run.adapter.requests] == [own, own, "thirdco", own]  # impl-b ran nothing
+    fallbacks = [(e["from"], e["to"]) for e in new_events(run, old, "availability.fallback")]
+    assert fallbacks == [("impl-c", "impl")]
+    assert "waiting_capacity" in [e["to"] for e in new_events(run, old, "phase.changed")]
