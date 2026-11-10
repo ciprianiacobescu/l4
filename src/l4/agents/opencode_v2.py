@@ -1,4 +1,4 @@
-"""OpenCode v2 adapter (`@opencode/cli` 2.0.32, binary `opencode2`; experimental, L4-OCV-001 to -014, design
+"""OpenCode v2 adapter (`@opencode/cli` 2.2.6, binary `opencode2`; experimental, L4-OCV-001 to -014, design
 `openspec/changes/opencode-v2`), selected by `options.cli_major: 2`. This module is the command layer:
 
     opencode2 run --standalone --format json -m <provider/model> --title "l4 <role> <stem>"   # stdin: prompt, EOF
@@ -85,6 +85,8 @@ SWITCHES = (*DISABLE_SWITCHES, "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS")  # v2 read
 # the only subcommands the harness starts, as words: there is no `debug config`, `serve`, `service`, `api`, `pair` or
 # `models` (each starts or reaches the shared daemon)
 SUBCOMMANDS = (("run",), ("auth", "list"), ("session", "export"))
+# the shell patterns the agent may not run: the CLI by name (v2 only, L4-OCV-016), and through any install path
+OPENCODE_CLI = ("opencode*", "opencode2*", "*bin/opencode*")
 # v1 tool name -> v2 permission action, for `options.tools`; `list` has none (glob and read cover it, refused at load)
 TOOL_ACTIONS = {
     "bash": "shell", "edit": "edit", "write": "edit", "patch": "edit", "read": "read", "glob": "glob", "grep": "grep",
@@ -156,10 +158,17 @@ def _permissions(
         actions = list(dict.fromkeys(TOOL_ACTIONS[tool] for tool in options.tools))
         rules += [_rule("*", "deny"), *(_rule(action, "allow") for action in actions)]
     else:
+        # An allow-list (L4-OCV-015): the refuse-all comes first and the allows after it, so OpenCode's own tools
+        # (worktrees, sessions, models, MCP resources, `execute`) and any tool a later version adds start refused.
+        # Two tools stay offered: `worktree_remove`, which OpenCode gates with `edit`, and `skill`, which it offers in
+        # every mode.
         actions = ["edit", "read", "glob", "grep", "shell"]
-        rules += [_rule(action, "allow") for action in actions]
-    if "shell" in actions:  # the harness commits, never the agent
-        rules += [_rule("shell", "deny", pattern) for pattern in GIT_WRITES]
+        rules += [_rule("*", refuse), *(_rule(action, "allow") for action in actions)]
+    if "shell" in actions:  # the harness commits, never the agent, and the agent's shell starts no OpenCode CLI
+        # L4-OCV-016: a guard, the sandbox is the boundary (`sh -c`, `env`, `npx` or a copy of the binary get past it).
+        # The path pattern is `*bin/opencode*`: not `*/opencode*`, which would refuse any command that names a source
+        # path holding `/opencode`, and not `*/bin/opencode*`, which misses npm's `.bin` (design D3).
+        rules += [_rule("shell", "deny", pattern) for pattern in (*GIT_WRITES, *OPENCODE_CLI)]
     rules += [
         _rule("external_directory", "deny"), _rule("external_directory", "allow", f"{result_dir}/**"),
         _rule("external_directory", "allow", f"{result_dir}/*"),

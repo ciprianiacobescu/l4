@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from l4.agents.base import AdapterError, PermissionPolicy, RunRequest
+from l4.agents.opencode import GIT_WRITES
 from l4.agents.opencode_v2 import (
     IMPLEMENT_STEPS,
     JUDGE_STEPS,
+    OPENCODE_CLI,
     OpenCodeV2Adapter,
     config_content_v2,
     isolation_env_v2,
@@ -152,9 +154,14 @@ def test_the_adapter_is_the_experimental_opencode():
 # -- SCN-OCV-09: the native rules equal the recorded normalisation ---------------------------------
 
 
-def test_implement_rules_equal_the_recorded_normalisation_followed_by_skill_and_subagent():
-    expected = [*native(recorded_permissions("config-normalised-implement.json")), rule("skill", "deny"),
-                rule("subagent", "deny")]  # fmt: skip
+def test_implement_rules_equal_the_recorded_normalisation_after_a_refuse_all_and_before_skill_and_subagent():
+    """SCN-OCV-09 as amended: `*:* deny` (L4-OCV-015) before the recorded array, the OpenCode CLI denies (L4-OCV-016)
+    after its git denies, and `skill` and `subagent` at its end."""
+    recorded = native(recorded_permissions("config-normalised-implement.json"))
+    last_git = max(i for i, item in enumerate(recorded) if item["resource"] in GIT_WRITES)
+    cli = [rule("shell", "deny", pattern) for pattern in OPENCODE_CLI]
+    expected = [rule("*", "deny"), *recorded[: last_git + 1], *cli, *recorded[last_git + 1 :],
+                rule("skill", "deny"), rule("subagent", "deny")]  # fmt: skip
     assert config_of(IMPLEMENT)["permissions"] == expected
 
 
@@ -272,9 +279,9 @@ def test_tools_map_to_their_v2_actions_in_listed_order_once_each():
     rules = config_of(IMPLEMENT, tools=["bash", "write", "edit", "patch", "grep", "glob"])["permissions"]
     allowed = [r["action"] for r in rules if r["effect"] == "allow" and r["action"] != "external_directory"]
     assert allowed == ["shell", "edit", "grep", "glob"]
-    shell = [r for r in rules if r["action"] == "shell"]  # the git writes stay refused when shell is allowed
+    shell = [r for r in rules if r["action"] == "shell"]  # the git writes and the CLI stay refused when shell is on
     assert shell[0] == rule("shell", "allow")
-    assert [r["resource"] for r in shell[1:]] == ["git commit*", "git push*", "git reset*", "git checkout*"]
+    assert [r["resource"] for r in shell[1:]] == [*GIT_WRITES, *OPENCODE_CLI]  # the CLI denies: L4-OCV-016
     assert all(r["effect"] == "deny" for r in shell[1:])
 
 

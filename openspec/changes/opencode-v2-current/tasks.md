@@ -105,7 +105,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 3. The allow-list (L4-OCV-015, L4-OCV-005; SCN-OCV-09, SCN-OCV-29 to SCN-OCV-31; design D2)
 
-- [ ] 3.1 Tests first, new `tests/unit/agents/test_opencode_v2_allow_list.py`. Give it a small evaluator: the last rule
+- [x] 3.1 Tests first, new `tests/unit/agents/test_opencode_v2_allow_list.py`. Give it a small evaluator: the last rule
   whose `action` matches the call's action and whose `resource` matches its resource (`fnmatch.fnmatchcase` on both)
   decides. The evaluator lives in the test, not in `src`.
   - SCN-OCV-29: `config_content_v2(PermissionPolicy("implement"), Path("/tmp/l4-step/result"), PAID)` has
@@ -119,7 +119,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   - Edit SCN-OCV-09's test in `tests/unit/agents/test_opencode_v2_command.py` to the amended scenario: the implement
     array is the recorded normalisation with `*:* deny` before it, the CLI denies after its git denies (task 4), and
     `skill` and `subagent` at the end.
-- [ ] 3.2 Code: in `src/l4/agents/opencode_v2.py` `_permissions`, the implement branch without `options.tools` starts
+- [x] 3.2 Code: in `src/l4/agents/opencode_v2.py` `_permissions`, the implement branch without `options.tools` starts
   with `_rule("*", refuse)`. Add a comment at it: the allow-list of L4-OCV-015, and the two tools that stay offered
   (`worktree_remove`, gated by `edit`; `skill`, offered in every mode). Run `tests/unit/agents/test_opencode_v2_allow_list.py
   tests/unit/agents/test_opencode_v2_command.py tests/unit/agents/test_opencode_v2_run.py
@@ -127,7 +127,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 4. The OpenCode CLI denies (L4-OCV-016; SCN-OCV-33, SCN-OCV-34; design D3)
 
-- [ ] 4.1 Tests first, new `tests/unit/agents/test_opencode_v2_cli_deny.py`. Give it an evaluator for `shell` rules: the
+- [x] 4.1 Tests first, new `tests/unit/agents/test_opencode_v2_cli_deny.py`. Give it an evaluator for `shell` rules: the
   last rule with `action == "shell"` whose `resource` matches the command (`fnmatch.fnmatchcase`, `*` spanning any text)
   decides.
   - SCN-OCV-33: the default implement array and `options.tools: [bash, read]` both hold `shell:opencode* deny`,
@@ -136,7 +136,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   - SCN-OCV-34: `options.tools: [read, edit]` and both judge arrays hold no rule whose resource contains `opencode`.
     The v1 `config_content` of an implementer equals its 0.4.55 literal (already pinned by
     `test_factory_opencode_major.py`: assert it is unchanged, do not copy it).
-- [ ] 4.2 Code: in `src/l4/agents/opencode_v2.py`, add `OPENCODE_CLI = ("opencode*", "opencode2*", "*bin/opencode*")`
+- [x] 4.2 Code: in `src/l4/agents/opencode_v2.py`, add `OPENCODE_CLI = ("opencode*", "opencode2*", "*bin/opencode*")`
   beside the import of `GIT_WRITES`. Add its denies right after the git denies, under the same `if "shell" in actions`.
   Add a comment: it is a guard, the sandbox is the boundary, and the pattern is `*bin/opencode*`. It is not
   `*/opencode*`, which would refuse any command naming a source path that holds `/opencode`. It is not
