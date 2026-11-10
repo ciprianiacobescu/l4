@@ -138,7 +138,7 @@ def test_the_e2e_kind_is_not_bound_by_these_rules():
 
 def test_the_audit_rules_v5_state_the_three_rules():
     system, _ = build_writer_prompt("audit", ID, "c", [])
-    assert TEMPLATE_VERSION == 5
+    assert TEMPLATE_VERSION == 7
     assert "python -m" in system and "__main__" in system and "Import every module" in system
 
 

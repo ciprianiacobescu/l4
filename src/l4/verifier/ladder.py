@@ -228,10 +228,13 @@ from l4.verifier.types import (
     VerifyResult,
 )
 from l4.verifier.ui_step import (
+    covered_by_step4,
     edited_findings,
     gap_findings,
+    lost_notes,
     plan_generation,
     previously_generated,
+    ui_hold_text,
     ui_hold_views,
     ui_waivers,
     unclosed_holds,
@@ -507,6 +510,9 @@ class _Run:
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
     repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
+    recheck_notes: Callable[[], None] | None = (
+        None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
+    )
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -813,6 +819,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             _judge_step(vc, run, base_sha, events)
         finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
             _calibrate(vc, run)
+        if run.recheck_notes is not None:  # a fresh round only: a reused one keeps the holds it stored
+            run.recheck_notes()
         findings.extend(_unsafe_findings(wb))
         _finalize(vc, run, criteria, events)
     else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
@@ -1208,7 +1216,12 @@ def _generate_step(
     traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
     base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
     a criterion that stays without one is `needs_human` through aggregation, with a finding that says why. A criterion
-    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`."""
+    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`. A
+    `not_testable` for a criterion that step 4 covers with a discriminating test is a note, not a hold: the covering
+    tests are read from `result.trace` as it stands here and stored on the outcome (`covered_by`), so a reused round
+    keeps what the round stored and never decides it again (`covered_by_step4` is called nowhere else). A note's
+    basis can go later, when step 9's adequacy review rejects the covering tests: `recheck` (run by `verify_unit`
+    after step 9, so in a fresh round only) then raises the criterion's UI hold if another test would still pass it."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1256,6 +1269,12 @@ def _generate_step(
         run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
         return
 
+    def recheck() -> None:
+        """After step 9: a note whose covering tests the judge rejected, while another test would still pass the
+        criterion, becomes the criterion's UI hold, stored with the round's holds (L4-VER-067, SCN-VER-307)."""
+        if lost := lost_notes(result.trace, result.generated):
+            hold_all([ui_hold_text(cid) for cid in lost])
+
     def body() -> tuple[bool, str]:
         assert vc.ui_writer is not None and browser is not None
         ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
@@ -1263,8 +1282,10 @@ def _generate_step(
             wb, vc.ui_writer(), gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
             support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
+            covered=covered_by_step4(result.trace),
         )  # fmt: skip
         result.generated = [*result.generated, *out.outcomes]
+        run.recheck_notes = recheck
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
         if out.cost_usd:
             result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
@@ -1273,7 +1294,13 @@ def _generate_step(
         result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
         hold_all(unclosed_holds(gaps, out.outcomes))
         counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
-        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        if noted := sum(bool(o.covered_by) for o in out.outcomes):
+            note += f"; {noted} not_testable covered by step 4: notes, no hold (L4-VER-067)"
+        if out.suite_files or out.suite_skipped:
+            note += f"; e2e support files shown to the writer: {len(out.suite_files)}"
+            note += f" (+{len(out.suite_skipped)} not shown)" if out.suite_skipped else ""
+        return True, note
 
     _step(vc, run, "5", "ui test generation", body)
 

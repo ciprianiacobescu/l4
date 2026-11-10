@@ -66,6 +66,39 @@ def test_the_generated_section_lists_every_attempt_with_its_artifacts_and_reason
     assert "def t(): ..." not in text  # the writer's code is an artefact, not report text
 
 
+NOTED = GeneratedOutcome(
+    CID,
+    "not_testable",
+    reason="pure functions",
+    covered_by=("tests.a::t1", "tests.a::t2", "tests.a::t3", "tests.a::t4"),
+)
+
+
+def test_a_noted_criterion_says_in_its_row_that_step_4_covers_it():  # SCN-VER-298
+    text = render_verification_md(result(generated=[NOTED, REFUSED]))
+    row = next(line for line in text.splitlines() if line.startswith(f"| {CID} | not_testable"))
+    assert (
+        "pure functions; covered by step 4: tests.a::t1, tests.a::t2, tests.a::t3 (+1 more); "
+        "a note, not a hold (L4-VER-067)" in row
+    )
+    one = GeneratedOutcome(CID, "not_testable", reason="pure functions", covered_by=("tests.a::t1",))
+    row = next(line for line in render_verification_md(result(generated=[one])).splitlines() if "not_testable" in line)
+    assert "pure functions; covered by step 4: tests.a::t1; a note, not a hold (L4-VER-067)" in row
+    assert "more" not in row
+    plain = GeneratedOutcome(CID, "not_testable", reason="pure functions")
+    row = next(
+        line for line in render_verification_md(result(generated=[plain])).splitlines() if "not_testable" in line
+    )
+    assert "covered by step 4" not in row and "pure functions" in row
+
+
+def test_verdict_json_stores_covered_by_as_a_list():  # SCN-VER-298
+    body = verdict_json(result(generated=[NOTED, REFUSED]))
+    back = json.loads(json.dumps(body))
+    assert back["generated"][0]["covered_by"] == ["tests.a::t1", "tests.a::t2", "tests.a::t3", "tests.a::t4"]
+    assert back["generated"][1]["covered_by"] == []
+
+
 def test_the_s1_section_says_it_decides_nothing_and_lists_the_unavailable():
     text = render_verification_md(result())
     assert "## S1" in text and "never decides" in text

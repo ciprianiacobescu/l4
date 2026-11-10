@@ -41,10 +41,10 @@
   },
   "testwriter/audit": {
     "sha256": "60b28f79c5b7ca34c9e93edab8c32d2846fb1c416a8f1e46c7f65b52ae887970",
-    "version": 5
+    "version": 7
   },
   "testwriter/e2e": {
-    "sha256": "853c5b0d3165bb500dc62488bdc5e792e0cafd0646286476a9280adab0503899",
-    "version": 5
+    "sha256": "12a3ba55ac3da28eff5a21c8b5f7d3263d9bc9266569347aa87c44561d2ff6e1",
+    "version": 7
   }
 }

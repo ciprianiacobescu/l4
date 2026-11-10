@@ -174,6 +174,80 @@ def test_generate_ui_tests_returns_paths_and_removes_the_base_checkout(web):
     assert nothing.paths == [] and nothing.outcomes == []
 
 
+COVERED = {CID: ("tests.test_x::test_a",)}
+BASE_CONFTEST = "def login(page):\n    page.goto('/login')  # the base's helper\n"
+
+
+def test_the_writer_is_shown_the_suite_s_support_files_as_the_base_has_them(make_bench, raw):  # noqa: F811  # SCN-VER-304
+    bench = web_bench(make_bench)
+    base = stage_base_and_head(
+        bench, raw, base_files={"e2e/conftest.py": BASE_CONFTEST},
+        head_files={"e2e/conftest.py": "def login(page):\n    pass  # the unit's version\n"},
+    )  # fmt: skip
+    bench.wb.cfg.verifier.independence = "none"
+    writer = Writer({"criterion": CID, "not_testable": "pure functions"})
+    result = generate_ui_tests(bench.wb, writer, [CRITERION], base_sha=base, ui_diff="d", snapshot="PAGE-SNAPSHOT")
+    prompt = writer.prompts[0]
+    assert "e2e/conftest.py (e2e support file at the merge base)" in prompt and "the base's helper" in prompt
+    assert "the unit's version" not in prompt and "test_smoke" not in prompt
+    assert prompt.index("PAGE-SNAPSHOT") < prompt.index("e2e support file at the merge base")
+    assert result.suite_files == ["e2e/conftest.py"] and result.suite_skipped == []
+
+
+def test_a_project_with_no_support_file_gets_no_block(web):  # SCN-VER-304
+    bench, base = web
+    writer = Writer({"criterion": CID, "not_testable": "pure functions"})
+    result = generate_ui_tests(bench.wb, writer, [CRITERION], base_sha=base, ui_diff="d", snapshot="s")
+    assert "e2e support file" not in writer.prompts[0] and result.suite_files == [] and result.suite_skipped == []
+
+
+def test_a_not_testable_criterion_that_step_4_covers_carries_covered_by(web):  # SCN-VER-298
+    bench, base = web
+    wb = bench.wb
+    reply = {"criterion": CID, "not_testable": "pure functions"}
+    result = generate_ui_tests(
+        wb, Writer(reply), [CRITERION], base_sha=base, ui_diff="d", snapshot="s", covered=COVERED
+    )
+    (done,) = result.outcomes
+    assert done.status == "not_testable" and done.covered_by == ("tests.test_x::test_a",)
+    (event,) = bench.events("verify.generated")
+    assert event["status"] == "not_testable" and event["covered_by"] == ["tests.test_x::test_a"]
+    for covered in (None, {}):
+        result = generate_ui_tests(
+            wb, Writer(reply), [CRITERION], base_sha=base, ui_diff="d", snapshot="s", covered=covered
+        )
+        assert result.outcomes[0].covered_by == ()
+    assert "covered_by" not in bench.events("verify.generated")[-1]
+    assert "covered_by" not in bench.events("verify.generated")[-2]
+
+
+def test_a_second_attempt_that_is_not_testable_is_covered_the_same_way(web):  # SCN-VER-298
+    bench, base = web
+    writer = Writer(
+        StructuredResult("schema_invalid", None, detail="criterion: missing"), {"criterion": CID, "not_testable": "x"}
+    )
+    result = generate_ui_tests(bench.wb, writer, [CRITERION], base_sha=base, ui_diff="d", snapshot="s", covered=COVERED)
+    (done,) = result.outcomes
+    assert done.status == "not_testable" and done.attempts == 2 and done.covered_by == ("tests.test_x::test_a",)
+
+
+def test_another_status_never_carries_covered_by(web):  # SCN-VER-300
+    bench, base = web
+    result = generate_ui_tests(
+        bench.wb,
+        Writer(code(WRONG), code(WRONG)),
+        [CRITERION],
+        base_sha=base,
+        ui_diff="d",
+        snapshot="s",
+        covered=COVERED,
+    )
+    (done,) = result.outcomes
+    assert done.status == "fails_at_head" and done.covered_by == ()
+    (event,) = bench.events("verify.generated")
+    assert "covered_by" not in event
+
+
 def test_a_server_that_is_never_ready_is_an_internal_error_and_cleans_up(web):
     bench, base = web
     wb = bench.wb

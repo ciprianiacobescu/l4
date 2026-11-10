@@ -5,17 +5,20 @@
 `path:line: text`, for the judge ("a new test that needs an optional dependency must use them") and for the audit
 writer. `base_test_header` is the start of one existing test file of the base that the unit did not change, up to its
 first test, which shows the writer how this project begins a test file. Both read `git show <base>:<path>` and nothing
-else: what the unit changed, or left in the worktree, cannot shape them.
+else: what the unit changed, or left in the worktree, cannot shape them. `e2e_support_files` is the same for the UI
+test writer: the e2e suite's `conftest.py` and helper modules at the base, bounded (L4-VER-077).
 """
 
 import re
 import tomllib
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from l4.config.schema import L4Config
 from l4.security.protected import glob_match
 from l4.vcs.git import Git
+from l4.verifier.testwriter import E2E_DIR
 
 MAX_LINES = 40
 MAX_CHARS = 3000
@@ -28,6 +31,13 @@ _HELPER = re.compile(
 _FIRST_TEST = re.compile(r"^(?:def test_|async def test_|class Test)")
 _GENERATED = re.compile(r"(^|/)test_l4_audit_c_[0-9a-f]{8}_r\d+\.py$|^e2e/")
 INI_FILES = ("pytest.ini", ".pytest.ini")
+MAX_SUITE_FILES = 6
+MAX_SUITE_FILE_CHARS = 8_000
+MAX_SUITE_CHARS = 20_000
+MAX_NOT_SHOWN = 20
+_REGULAR = ("100644", "100755")
+_TEST_MODULE = re.compile(r"^(?:test_.*|.*_test)\.py$")
+_SKIPPED_PART = re.compile(r"^(?:\..*|__pycache__|node_modules)$")
 
 
 def _show(git: Git, base: str, path: str) -> str | None:
@@ -131,3 +141,75 @@ def base_test_header(git: Git, base_sha: str, changed: Sequence[str], near: str)
         if (text := _show(git, base_sha, path)) is not None and (header := _header(text)):
             return path, header
     return None
+
+
+@dataclass(frozen=True)
+class E2eSupport:
+    """What the UI test writer is shown of the e2e suite: (label, text) blocks, the paths shown and the paths left out
+    (also named in the last block)."""
+
+    blocks: tuple[tuple[str, str], ...] = ()
+    shown: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+
+
+def _support_candidates(git: Git, base: str) -> tuple[list[str], bool]:
+    """(the regular `.py` files under `e2e/` at the base that support the suite, whether `e2e/__init__.py` is one of
+    the base's files). A support file is not a test module, not a `conftest.py` below `e2e/`, and has no part that
+    starts with `.` or is `__pycache__` or `node_modules`. `e2e/conftest.py` first, then by depth and path."""
+    listing = git.run("ls-tree", "-r", "-z", base, "--", E2E_DIR).stdout
+    found = []
+    package = False
+    for entry in listing.split("\0"):
+        meta, _, path = entry.partition("\t")
+        parts = PurePosixPath(path).parts
+        if not path or meta.split(" ")[0] not in _REGULAR or not path.endswith(".py"):
+            continue
+        package = package or path == f"{E2E_DIR}/__init__.py"
+        name = parts[-1]
+        if _TEST_MODULE.match(name) or any(_SKIPPED_PART.match(part) for part in parts):
+            continue
+        if name == "conftest.py" and path != f"{E2E_DIR}/conftest.py":
+            continue
+        found.append(path)
+    return sorted(found, key=lambda p: (p != f"{E2E_DIR}/conftest.py", p.count("/"), p)), package
+
+
+def e2e_support_files(git: Git, base_sha: str) -> E2eSupport:
+    """The e2e suite's support files at `base_sha` for the UI test writer (L4-VER-077): `e2e/conftest.py`, then the
+    other helper modules, each cut at 8,000 characters and taken until six are taken or the next would bring the total
+    past 20,000; that file and every file after it are left out without being read, and the block that names them
+    lists the first 20 (`(+n more)` for the rest). When `e2e/__init__.py` is at the base, a last block says the suite
+    is a package, so that a helper is imported by its module path (`from e2e.conftest import login`). The base only:
+    the generated test runs at the base and, at head, with the support files the unit changed at their base versions,
+    so a helper the unit added is not shown."""
+    blocks: list[tuple[str, str]] = []
+    shown: list[str] = []
+    skipped: list[str] = []
+    size = 0
+    candidates, package = _support_candidates(git, base_sha)
+    for path in candidates:
+        if skipped or len(shown) >= MAX_SUITE_FILES:
+            skipped.append(path)  # by rule: nothing after a file that is left out is read
+            continue
+        text = _show(git, base_sha, path)
+        if text is None or not text.strip():
+            continue
+        cut = text[:MAX_SUITE_FILE_CHARS]
+        if size + len(cut) > MAX_SUITE_CHARS:
+            skipped.append(path)
+            continue
+        note = f", first {MAX_SUITE_FILE_CHARS} characters" if len(cut) < len(text) else ""
+        blocks.append((f"{path} (e2e support file at the merge base{note})", cut))
+        shown.append(path)
+        size += len(cut)
+    if skipped:
+        more = f"\n(+{len(skipped) - MAX_NOT_SHOWN} more)" if len(skipped) > MAX_NOT_SHOWN else ""
+        blocks.append(("e2e support files not shown", "\n".join(skipped[:MAX_NOT_SHOWN]) + more))
+    if blocks and package:
+        layout = (
+            "e2e/ is a package (e2e/__init__.py exists): import a helper by its module path, "
+            "as `from e2e.conftest import <name>`"
+        )
+        blocks.append(("e2e suite layout", layout))
+    return E2eSupport(tuple(blocks), tuple(shown), tuple(skipped))
