@@ -225,7 +225,7 @@ no runner that serves a consumer, so E6 held.
 - B9.2: done by D6 with rows still open, by the owner's decision. The open rows are listed as known fallbacks.
 - **Not covered by the check itself:** row 68's "a unit on the owner's dummy repository runs end to end with a v2
   implementer and a v2 free judge". The check drove `OpenCodeV2Adapter.probe` and `run` directly, which is the
-  adapter's whole contract with the harness. Afterwards a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. That is one small fixture change, not a consumer repository.
+  adapter's whole contract with the harness. Afterwards a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 160 s), with the real data home's database untouched. That is one small fixture change, not a consumer repository.
 
 The U5 census on 2.2.6 counts 24 runs: 12 on mac and 12 in the box, from 1 to 23 steps. Twenty-two ended with a final
 `step_finish` of reason `stop`. One ended on an `error` event with no step (a free model with no route). One lost its
@@ -296,7 +296,7 @@ A new [V] shape (`live-error-no-route`): an `error` event `{type: "provider.no-r
 - **The cache home stays shared read-write** (D5): the cache home (`~/.cache/opencode`) holds OpenCode's models cache, plugin store and downloaded binaries; it stays shared read-write for v1 and v2 alike; a per-unit cache is a follow-up.
 - **`worktree_remove` and `skill` stay offered** (D2). Both are covered by the sandbox and the isolation, and stated in
   the SPEC and the runbook.
-- **One full L4 unit has run on v2, in a container** (D7): a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. The first consumer unit on a v2 profile is the first evidence on a real repository. The
+- **One full L4 unit has run on v2, in a container** (D7): a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 160 s), with the real data home's database untouched. The first consumer unit on a v2 profile is the first evidence on a real repository. The
   runbook says to watch its first `verification.md`.
 - **v2 moves fast** (2.0.32 to 2.2.6 in three weeks). The pin is exact, and a move is a re-check of D1's surface list
   plus a recording.

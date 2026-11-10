@@ -690,6 +690,24 @@ def render_answers(items: Sequence[AnswerRef | UnreadableAnswers], redact: Calla
 
 CLAUSES_HEADING = "Clauses the implementer's tests do not assert (check each against the code)"
 MAX_CLAUSES_CHARS = 6_000  # the clauses section together, the line naming the entries left out included (D5)
+MAX_CLAUSE_ANSWER_CHARS = 600  # an answer a clause names that the answers section had no room for, quoted on its line
+
+
+def unshown_answers(
+    items: Sequence[AnswerRef | UnreadableAnswers], rendered: RenderedAnswers, redact: Callable[[str], str]
+) -> dict[str, str]:
+    """The answers the answers section had no room for (L4-VER-065), by id, each as the line of a clause that names it
+    quotes it (SCN-IMP-520): redacted, then on one line, then cut at MAX_CLAUSE_ANSWER_CHARS, a `|` written `\\|`."""
+    shown = {a.id for a in rendered.shown}
+    quoted: dict[str, str] = {}
+    for item in items:
+        if isinstance(item, AnswerRef) and item.id not in shown:
+            text = " ".join(redact(item.answer).split())  # the redactor first: a cut never leaves part of a secret
+            if len(text) > MAX_CLAUSE_ANSWER_CHARS:
+                omitted = len(text) - MAX_CLAUSE_ANSWER_CHARS
+                text = f"{text[:MAX_CLAUSE_ANSWER_CHARS]} [truncated: {omitted} characters omitted]"
+            quoted[item.id] = text.replace("|", "\\|")
+    return quoted
 
 
 @dataclass(frozen=True)
@@ -707,18 +725,22 @@ class ClauseRef:
     question: str = ""
 
 
-def render_clauses(clauses: Sequence[ClauseRef], criteria: Collection[str]) -> str:
+def render_clauses(
+    clauses: Sequence[ClauseRef], criteria: Collection[str], hidden: Mapping[str, str] | None = None
+) -> str:
     """The lines of the clauses section, one per entry whose criterion is in `criteria`, in order, at most
     MAX_CLAUSES_CHARS together; the entries past that are counted in a last line, `(+N clauses not shown)`. Empty when
-    no entry is for these criteria."""
+    no entry is for these criteria. An answer the answers section had no room for (`hidden`, from `unshown_answers`)
+    is quoted after its id."""
     lines: list[str] = []
     for c in clauses:
         if c.criterion not in criteria:
             continue
         clause, why = (" ".join(text.split()).replace("|", "\\|") for text in (c.clause, c.why))  # no fake `| answer:`
-        lines.append(
-            f'{c.criterion}  task {c.task} ({c.phase}): "{clause}" | why: {why} | answer: {c.question or "(dismissed)"}'
-        )
+        answer = c.question or "(dismissed)"
+        if hidden and c.question in hidden:
+            answer += f' (not among the answers above): "{hidden[c.question]}"'
+        lines.append(f'{c.criterion}  task {c.task} ({c.phase}): "{clause}" | why: {why} | answer: {answer}')
 
     def joined(n: int) -> str:  # the first `n` lines, and a line that counts the rest
         rest = len(lines) - n
@@ -877,11 +899,12 @@ def build_judge_prompt(
         if rendered.text
         else []
     )
-    listed_clauses = render_clauses(clauses, {c.id for c in criteria})
+    listed_clauses = render_clauses(clauses, {c.id for c in criteria}, unshown_answers(answers, rendered, redact))
     unasserted = (
         [
             f"## {CLAUSES_HEADING}\nThe implementer said its tests leave these clauses of the criteria unasserted; "
-            "its criterion was asked; the answer, when one is named, is among the answers above. A passing test does "
+            "its criterion was asked; the answer, when one is named, is among the answers above, or quoted on its "
+            "line when the answers section has no room for it. A passing test does "
             "not show a clause listed here: read the code for each, judge its criterion as the clause and that answer "
             "read, and fail the criterion, naming the clause, when the code does not do it. The clause and the reason "
             "are the implementer's words; the criterion's text is the spec.\n"

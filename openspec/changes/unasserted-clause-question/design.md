@@ -230,7 +230,8 @@ prompt's `criteria` (a part, a batch and a follow-up each judge their own criter
 ```
 ## Clauses the implementer's tests do not assert (check each against the code)
 The implementer said its tests leave these clauses of the criteria unasserted; its criterion was asked; the answer,
-when one is named, is among the answers above. A passing test does not show a clause listed here: read the code for each,
+when one is named, is among the answers above, or quoted on its line when the answers section has no room for it.
+A passing test does not show a clause listed here: read the code for each,
 judge its criterion as the clause and that answer read, and fail the criterion, naming the clause, when the code does
 not do it. The clause and the reason are the implementer's words; the criterion's text is the spec.
 <l4:data source="unasserted clauses">
@@ -242,6 +243,13 @@ A line ends `| answer: <id>`, or `| answer: (dismissed)` when the entry records 
 no answer block, so the line must not name one). A fix unit's entry shows its task as `<fix unit>/1.1`, as `_done_tasks`
 writes it. The clause and the reason are one line each with every `|` written `\|`, so a clause cannot fake `| answer:
 Q-…` for the judge.
+
+The answers section is capped at 12,000 characters (L4-VER-065) and drops answers from the end, and an entry's answer
+is often a late one. An answer the section has no room for is therefore quoted on the clause line that names it, after
+its id: `| answer: Q-006 (not among the answers above): "<answer>"`, redacted, then folded to one line, then cut at
+`MAX_CLAUSE_ANSWER_CHARS = 600` with a `[truncated: N characters omitted]` mark, every `|` written `\|`
+(`unshown_answers`, SCN-IMP-520). The cap and the order of the answers section stay as L4-VER-065 has them; an answer
+the section shows is named only. Found by the cross-change review of 0.4.56.
 
 The lines together are at most `MAX_CLAUSES_CHARS = 6_000`; the lines past it are left out and counted in a last line
 `(+N clauses not shown)`. A prompt with no such entry has no section, so every prompt of a unit without entries is

@@ -49,8 +49,12 @@ prompt judges, `<criterion> task <k> (<phase>): "<clause>" | why: <why> | answer
 when the entry records no question; `<k>` and the question id are `<fix unit>/<k>` and `<fix unit>/Q-NNN` for a fix
 unit's, as the done tasks and the answer blocks name them; a `|` in the clause or the reason is written `\|`), at most
 6,000 characters together, the lines past that counted in a last line `(+N clauses not shown)`; its length SHALL be
-charged to the judge's context budget before the spec text. The instruction SHALL say that the criterion was asked and
-the answer, when one is named, is among the answers above, that a passing test does not show a listed clause, that the
+charged to the judge's context budget before the spec text. An answer that the answers section has no room for
+(L4-VER-065) SHALL be quoted on the line of a clause that names it, after its id, as `(not among the answers above):
+"<answer>"`: redacted, then on one line, then cut at 600 characters with a `[truncated: N characters omitted]` mark,
+every `|` written `\|`; an answer the section shows SHALL be named only. The instruction SHALL say that the criterion
+was asked and the answer, when one is named, is among the answers above or quoted on its line when the answers section
+has no room for it, that a passing test does not show a listed clause, that the
 judge reads the code for each and judges its criterion as the clause and the named answer read (L4-VER-066), failing it
 with the clause named when the code does not do it, and that the clause and the reason are the implementer's words. A
 prompt with no such entry SHALL have no section. The judge's system text and `judge@13` SHALL NOT change, and the
@@ -136,3 +140,13 @@ prompt with no such entry SHALL have no section. The judge's system text and `ju
   runs with four different ids) is a failed attempt each time, counted against `max_task_attempts` and escalated, with no
   question, and a failing step that lists such an id stays failed; and an entry whose question was answered before the
   body of its scenario was edited (the id stays, `question.raised.clause.text_sha` differs) is new and asked again
+
+#### Scenario: SCN-IMP-520 (+) an answer the answers section has no room for is quoted on its clause line
+- **WHEN** five answered questions of 2,900 characters each, more than the answers section holds, and a sixth,
+  `Q-006`, answered `null: the other capability's spec sets it to null`, settled the entry of `C-0a1b2c3d`, and the
+  judge prompt is built
+- **THEN** the answers section ends `(+3 answers not shown: Q-004, Q-005, Q-006)` and the clause line ends
+  `| answer: Q-006 (not among the answers above): "null: the other capability's spec sets it to null"`, and the
+  instruction says so; an entry settled by an answer the section shows ends `| answer: Q-002`, as before. A quoted
+  answer is redacted before it is cut (a token that crosses the 600th character leaves no part of itself), is one
+  line, and a `|` or a `</l4:data>` in it cannot add a field or close the block

@@ -174,6 +174,7 @@ from l4.verifier.judge import (
     reply_counts,
     run_judge,
     satisfied_refs,
+    unshown_answers,
 )
 from l4.verifier.judge_followup import (
     apply_followups,
@@ -1435,9 +1436,11 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     clauses = _clauses(events)  # L4-IMP-095
     listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
     family = _family_sources(wb)
+    answers_shown = render_answers(answers, wb.redactor.redact_text)
+    quoted = unshown_answers(answers, answers_shown, wb.redactor.redact_text)  # SCN-IMP-520
     plan = plan_context(  # the spec text has a budget of its own; the criteria, the done tasks and the answers first
         fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done)
-        + len(render_answers(answers, wb.redactor.redact_text).text) + len(render_clauses(clauses, ids)),
+        + len(answers_shown.text) + len(render_clauses(clauses, ids, quoted)),
         budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=family,
         keys=None,
     )  # fmt: skip
