@@ -258,11 +258,11 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 9. Docs (design D1 to D9)
 
-- [ ] 9.1 Check the spec commit against the code as built: L4-OCV-015 to L4-OCV-019, the amended L4-OCV-001 to -013,
+- [x] 9.1 Check the spec commit against the code as built: L4-OCV-015 to L4-OCV-019, the amended L4-OCV-001 to -013,
   L4-OCG-002, L4-SEC-005, the §8.3 v2 row, the L4-FAC-002 v2 table, change-table row 125, and SCN-OCV-29 to SCN-OCV-48
   plus the rewritten SCN-OCV-02, -04, -06, -09, -24 and -26. Check the names, the patterns, the directory names and the
   values. Correct the text where the code had to differ, and say so in the commit message.
-- [ ] 9.2 `docs/runbook.md` 10.9:
+- [x] 9.2 `docs/runbook.md` 10.9:
   - The title becomes "OpenCode v2", and the anchors that point at it (7.4, 10.7, the versions paragraph) follow.
   - The "Experimental, and not yet checked against a live run" box becomes a short paragraph: checked live on
     `@opencode/cli` 2.2.6 through L4's probe and run, in a Linux container with L4's sandbox and on macOS; no full L4
@@ -281,14 +281,14 @@ Every group is one implementer step, run in order in one worktree. Each step fol
     retried, and a free model's route can come back).
   - Section 11 (known limits) gets one line: no full L4 unit on v2 yet.
   - The pointer in 7.4 drops "(experimental)".
-- [ ] 9.3 `docs/plan/opencode-v2.md`: §4 and §5 get a status line for 2026-11-10. The live check on 2.2.6 replaced B8 for
+- [x] 9.3 `docs/plan/opencode-v2.md`: §4 and §5 get a status line for 2026-11-10. The live check on 2.2.6 replaced B8 for
   U2, U5, U7, U9 (in part) and U11, B9 was done without a parser change, and the adapter is supported (change
   `opencode-v2-current`). The rows of design D9 that stay open are named. Leave the matrix's 2.0.32 facts as they are,
   because they are history.
-- [ ] 9.4 `openspec/changes/opencode-v2/tasks.md`: under the headers of groups 8 and 9, add one line each: "Replaced in
+- [x] 9.4 `openspec/changes/opencode-v2/tasks.md`: under the headers of groups 8 and 9, add one line each: "Replaced in
   part by `opencode-v2-current` (0.4.56): see its design D7." Leave their boxes unchecked.
-- [ ] 9.5 `CHANGELOG.md`: check the Unreleased lines of the spec commit against the code as built.
-- [ ] 9.6 Run `.venv/bin/python scripts/check_spec.py docs/SPEC.md` (exit 0), `.venv/bin/python -m pytest -q -p
+- [x] 9.5 `CHANGELOG.md`: check the Unreleased lines of the spec commit against the code as built.
+- [x] 9.6 Run `.venv/bin/python scripts/check_spec.py docs/SPEC.md` (exit 0), `.venv/bin/python -m pytest -q -p
   no:cacheprovider tests/unit/docs` and `openspec validate opencode-v2-current --strict`. Commit.
 
 ## 10. Final check (orchestrator)
