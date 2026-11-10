@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Fixed
+- A delegate reply over a length limit is asked again instead of going to a person, and a delegate's escalation reaches the person with its reason. In a consumer run the delegate escalated a question with a reason of 1028 characters, 28 over the limit (a $1.93 call); the reply was discarded at once and the person read only `the reply was discarded: the reason has 1028 characters: the limit is 1000`, not the reason, which had found the real cause. Now a reply whose reason, number of entries or entry fields break a limit is asked again within `delegate.max_attempts_per_question` (it takes one of the question's attempts, as a reference that does not resolve does; no attempt is added), and the retry says which limit and by how much. With no attempt left, an escalation is kept with its reason cut after 1000 characters and ended `… [cut at 1000 of <n> characters]` and its entries over the limits dropped; an answer, accept, reject or retry is still discarded. The `Escalated by:` line of a delegate's escalation now holds its whole reason, not its first 300 characters (L4-DLG-029).
+
 ## 0.4.55 (2026-11-08)
 
 ### Fixed
