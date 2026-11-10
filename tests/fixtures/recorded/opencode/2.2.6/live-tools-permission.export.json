@@ -1,0 +1,162 @@
+{
+  "info": {
+    "id": "ses_l4live1",
+    "projectID": "daac28bc0daf1971f60f95fb661e935499c4d8f6",
+    "model": {
+      "id": "deepseek-v4.1-flash",
+      "providerID": "opencode-go",
+      "variant": "default"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 4202,
+      "output": 374,
+      "reasoning": 218,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794302159729,
+      "updated": 1794302169956,
+      "busy": 1794302160421,
+      "idle": 1794302169959
+    },
+    "title": "l4 implementer events",
+    "location": {
+      "directory": "/tmp/l4-oc2/tools-1/repo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1c4be2b86001AeD7CAfVhUJX8i",
+      "time": {
+        "created": 1794302160425
+      },
+      "text": "Run the shell command `ls -la` with your shell tool and put its first line in the summary. Then write a JSON result file at /tmp/l4-oc2/tools-1/step/result.json with {\"status\": \"done\", \"summary\": \"<the line or why you could not run it>\"}.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1c4be2e2e0017Wk3XixPQpfaoL",
+      "time": {
+        "created": 1794302160432,
+        "streamed": 1794302167276,
+        "completed": 1794302167282
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-v4.1-flash",
+        "providerID": "opencode-go",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "The user asks me to run `ls -la` with my shell tool. But I don't have a shell tool in my available functions. Available: edit, opencode_worktree_remove, read, skill, write. No execute/shell tool.\n\nThe system mentions `execute` tool for session_move but it's not in the function list. So I cannot run shell commands.\n\nI should write the result.json with status done and summary explaining why I could not run it. But status \"done\"? The schema says {\"status\": \"done\", \"summary\": \"<the line or why you could not run it>\"}. So write done with the explanation.\n\nMaybe I can simulate ls -la? No — must not fabricate. I can read the directory though, which gives entries but not the first line (\"total N\"). I should not fabricate the first line.\n\nLet me write the file.",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794302164836,
+            "completed": 1794302167269
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_2837f0c17aa14f42a6535152",
+          "name": "write",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "/tmp/l4-oc2/tools-1/step/result.json",
+              "content": "{\n  \"status\": \"done\",\n  \"summary\": \"Could not run `ls -la`: no shell/execute tool is available in this session (only file read/write/edit, skill, and worktree tools), so the command's first line could not be captured.\"\n}\n"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Created file successfully: /tmp/l4-oc2/tools-1/step/result.json"
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794302166385,
+            "ran": 1794302167274,
+            "completed": 1794302167281
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 1871,
+        "output": 186,
+        "reasoning": 183,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1c4be48f6001MfrFH4WGS1JeOz",
+      "time": {
+        "created": 1794302167288,
+        "streamed": 1794302169955,
+        "completed": 1794302169956
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-v4.1-flash",
+        "providerID": "opencode-go",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "I should report. Maybe verify file. Not necessary. Also note I could not run the shell command. The summary should be in the response too. Provide the summary line.",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794302168294,
+            "completed": 1794302169951
+          }
+        },
+        {
+          "type": "text",
+          "text": "I could not run `ls -la` — this session exposes no shell/execute tool (only file read/write/edit, skill, and worktree tools), so there was no first line to capture.\n\nSummary: `Could not run 'ls -la': no shell/execute tool is available in this session (only file read/write/edit, skill, and worktree tools), so the command's first line could not be captured.`\n\nThe result file was written to `/tmp/l4-oc2/tools-1/step/result.json` with `\"status\": \"done\"` and that summary."
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 2331,
+        "output": 188,
+        "reasoning": 35,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1c4be5367001lEjqmQlxFSHJCJ",
+      "time": {
+        "created": 1794302169959
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

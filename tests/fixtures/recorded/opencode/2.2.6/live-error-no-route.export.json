@@ -1,0 +1,55 @@
+{
+  "info": {
+    "id": "ses_l4live1",
+    "projectID": "c25fc3b0b63c881cf8a4429b4fe47fc2dab40d41",
+    "model": {
+      "id": "nemotron-3-ultra-free",
+      "providerID": "opencode",
+      "variant": "default"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "failed",
+    "time": {
+      "created": 1794303272600,
+      "updated": 1794303272664,
+      "busy": 1794303272667,
+      "idle": 1794303272674
+    },
+    "title": "l4 judge events",
+    "location": {
+      "directory": "/tmp/l4-oc2box/.cache/l4-step/judge-2/judge-cwd"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1c4cf26a5001sAdIs0NmAXEggA",
+      "time": {
+        "created": 1794303272672
+      },
+      "text": "The requirement: add(a, b) returns a + b. The code: `def add(a, b): return a - b`. Reply with only one JSON object {\"verdict\": \"pass\" or \"fail\", \"reason\": \"...\"}.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1c4cf26e2001OqJPz1faK3y0oP",
+      "time": {
+        "created": 1794303272674
+      },
+      "type": "idle",
+      "outcome": "failed",
+      "error": {
+        "type": "provider.no-route",
+        "message": "Model unavailable: opencode/nemotron-3-ultra-free"
+      }
+    }
+  ]
+}
