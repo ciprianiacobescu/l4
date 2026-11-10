@@ -39,7 +39,8 @@ def credential_variable(adapter: str | None, auth: str | None) -> str | None:
     return None
 
 
-OPENCODE_OWN_PREFIXES = ("opencode/", "opencode-go/")  # OpenCode's own providers (Zen, Go)
+FREE_PREFIX = "opencode/"  # OpenCode Zen's own models: no login needed [V, runner]
+OPENCODE_OWN_PREFIXES = (FREE_PREFIX, "opencode-go/")  # OpenCode's own providers (Zen, Go)
 OPENCODE_API_KEY = "OPENCODE_API_KEY"
 
 
@@ -56,6 +57,18 @@ def profile_credential_variable(profile: "Profile") -> str | None:
         if options is None or options.provider is None:
             return OPENCODE_API_KEY
     return credential_variable(profile.adapter, profile.auth)
+
+
+def no_stored_login(profile: "Profile") -> bool:
+    """Whether a profile needs no login stored in OpenCode's own data home (L4-OCV-017, design D4): an opencode profile
+    with `options.cli_major: 2` whose credential variable is `OPENCODE_API_KEY`, or whose model is an `opencode/` model
+    (its auth step is skipped, `login: not needed`). v1 and every other adapter keep their stored login."""
+    if profile.adapter != "opencode":
+        return False
+    options = profile.opencode_options()
+    if options is None or options.cli_major != 2:
+        return False
+    return profile_credential_variable(profile) == OPENCODE_API_KEY or (profile.model or "").startswith(FREE_PREFIX)
 
 
 def hosted_login_problem(adapter: str | None, auth: str | None) -> str | None:

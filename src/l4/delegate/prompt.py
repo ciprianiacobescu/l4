@@ -239,12 +239,52 @@ def _asked(question: QuestionView, redact: Callable[[str], str]) -> str:
     return "\n\n".join(parts)
 
 
+# the clauses of `reply._length_problems` (L4-DLG-029) and what the retry is told for each: the groups are the count
+# that the reply had and the limit; the instructions follow the order of the clauses
+_LENGTH_CLAUSES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"the reason has (\d+) characters: the limit is (\d+)"),
+        "Shorten the reason to at most {limit} characters; it had {n}.",
+    ),
+    (
+        re.compile(r"the reply has (\d+) checked entries: the limit is (\d+)"),
+        "Keep at most {limit} checked entries; it had {n}.",
+    ),
+    (
+        re.compile(r"a checked ref has (\d+) characters: the limit is (\d+)"),
+        "Shorten each checked ref to at most {limit} characters; the longest had {n}.",
+    ),
+    (
+        re.compile(r"a checked quote has (\d+) characters: the limit is (\d+)"),
+        "Shorten each checked quote to at most {limit} characters, still copied word for word; the longest had {n}.",
+    ),
+    (
+        re.compile(r"a checked claim has (\d+) characters: the limit is (\d+)"),
+        "Shorten each checked claim to at most {limit} characters; the longest had {n}.",
+    ),
+)
+_REFERENCE_HINT = "Write each reference in the form the rules give; the quote is copied word for word."
+
+
+def _length_instructions(told: str) -> str | None:
+    """One instruction per clause of `told` when every `; `-separated clause is a length refusal of `check_reply`
+    (L4-DLG-029), else None. The clauses are the harness's own text, with no repository content."""
+    found: list[str] = []
+    for clause in told.split("; "):
+        for pattern, instruction in _LENGTH_CLAUSES:
+            if matched := pattern.fullmatch(clause):
+                found.append(instruction.format(n=matched.group(1), limit=matched.group(2)))
+                break
+        else:
+            return None
+    return " ".join(found)
+
+
 def _previous_part(told: str, redact: Callable[[str], str], heading: str) -> str:
-    """The question is asked again after a reply that was discarded: say why, right after it."""
-    text = (
-        f"The previous reply to this question was discarded: {_cap(redact(told))}. Write each "
-        "reference in the form the rules give; the quote is copied word for word."
-    )
+    """The question is asked again after a reply that was discarded: say why, right after it, and what to do: a length
+    refusal says which limit and by how much, any other reason the form of a reference."""
+    then = _length_instructions(told) or _REFERENCE_HINT
+    text = f"The previous reply to this question was discarded: {_cap(redact(told))}. {then}"
     return heading + "\n" + _block("previous", "harness", text)
 
 

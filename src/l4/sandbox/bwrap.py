@@ -31,6 +31,7 @@ from l4.sandbox.base import (
     SandboxUnavailable,
     WrappedCommand,
     hidden_credential_paths,
+    own_login_binds,
     repo_guidance_masks,
 )
 from l4.sandbox.home import cache_is_covered
@@ -133,7 +134,7 @@ class BwrapSandbox:
             out += _hide(path)
         for path in spec.runner_tmp:
             out += _hide(path)
-        for path in () if spec.adapter in NO_LOGIN_BIND else spec.credential_paths.get(spec.adapter or "", ()):
+        for path in () if spec.adapter in NO_LOGIN_BIND else own_login_binds(spec):
             if path.exists():
                 out += ["--bind", str(path), str(path)]
         # the delegate's worktree is read-only (L4-DLG-004); the private directory holding its result stays writable

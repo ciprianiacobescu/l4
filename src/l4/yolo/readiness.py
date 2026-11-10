@@ -34,6 +34,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from l4.agents.base import AgentAdapter, PermissionPolicy, ProbeCtx, RunRequest
+from l4.agents.credentials import no_stored_login
 from l4.agents.factory import Factory, Selected
 from l4.availability.cooldown import AvailabilityStore, SystemClock
 from l4.availability.errors import RoleUnavailable
@@ -522,7 +523,7 @@ class _Calls:
         self.spec = SandboxSpec(
             "agent", self.cwd, Path(common), self.tmp, home, logins,
             adapter=selected.profile.adapter, network=True, runner_tmp=runner_tmp_paths(app.environ),
-            cache_root=cache, tool_paths=tools,
+            cache_root=cache, tool_paths=tools, hide_own_homes=no_stored_login(selected.profile),  # L4-OCV-018
         )  # fmt: skip
         self.count = 0
         self.judge = AgentJudge(selected.impl, self._request, role=ROLE, profile=selected.profile_name)

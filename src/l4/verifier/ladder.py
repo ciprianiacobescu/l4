@@ -153,6 +153,7 @@ from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrit
 from l4.verifier.judge import (
     AnswerRef,
     BatchView,
+    ClauseRef,
     CriterionVerdict,
     FollowUpView,
     JudgePrompt,
@@ -169,9 +170,11 @@ from l4.verifier.judge import (
     build_judge_prompt,
     named_tests,
     render_answers,
+    render_clauses,
     reply_counts,
     run_judge,
     satisfied_refs,
+    unshown_answers,
 )
 from l4.verifier.judge_followup import (
     apply_followups,
@@ -228,10 +231,13 @@ from l4.verifier.types import (
     VerifyResult,
 )
 from l4.verifier.ui_step import (
+    covered_by_step4,
     edited_findings,
     gap_findings,
+    lost_notes,
     plan_generation,
     previously_generated,
+    ui_hold_text,
     ui_hold_views,
     ui_waivers,
     unclosed_holds,
@@ -420,6 +426,31 @@ def _notes(events: Sequence[LedgerEvent]) -> str:
     return "\n\n".join(parts)[:MAX_NOTES_CHARS]
 
 
+def _clauses(events: Sequence[LedgerEvent]) -> list[ClauseRef]:
+    """The clauses that committed steps listed as unasserted and recorded (L4-IMP-095), in ledger order: the
+    `unasserted` of a `task.red_ok`, of a green `task.done` and of a single step's (`tdd: exempt`). A record that does
+    not hold the shape is skipped. A fix unit's task and question id are named as `_done_tasks` and an answer block do.
+    """
+    found = []
+    for e in events:
+        if e.type not in ("task.red_ok", "task.done") or not isinstance(e.data.get("unasserted"), list):
+            continue
+        phase = "red" if e.type == "task.red_ok" else "single" if e.data.get("tdd") == "exempt" else "green"
+        fix = e.data.get("fix_unit")
+        for item in e.data["unasserted"]:
+            if not isinstance(item, dict) or not all(
+                isinstance(item.get(k), str) for k in ("criterion", "clause", "why")
+            ):
+                continue
+            question = item.get("question")
+            qid = question if isinstance(question, str) else ""
+            if qid and isinstance(fix, str) and fix:
+                qid = f"{fix}/{qid}"
+            task = f"{fix}/{e.data.get('task')}" if isinstance(fix, str) and fix else str(e.data.get("task"))
+            found.append(ClauseRef(task, phase, item["criterion"], item["clause"], item["why"], qid))
+    return found
+
+
 def _guards(events: Sequence[LedgerEvent]) -> list[str]:
     return [
         f"{e.type}: {e.data.get('path') or e.data.get('rule') or ''}".strip()
@@ -507,6 +538,9 @@ class _Run:
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
     repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
+    recheck_notes: Callable[[], None] | None = (
+        None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
+    )
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -813,6 +847,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             _judge_step(vc, run, base_sha, events)
         finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
             _calibrate(vc, run)
+        if run.recheck_notes is not None:  # a fresh round only: a reused one keeps the holds it stored
+            run.recheck_notes()
         findings.extend(_unsafe_findings(wb))
         _finalize(vc, run, criteria, events)
     else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
@@ -1208,7 +1244,12 @@ def _generate_step(
     traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
     base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
     a criterion that stays without one is `needs_human` through aggregation, with a finding that says why. A criterion
-    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`."""
+    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`. A
+    `not_testable` for a criterion that step 4 covers with a discriminating test is a note, not a hold: the covering
+    tests are read from `result.trace` as it stands here and stored on the outcome (`covered_by`), so a reused round
+    keeps what the round stored and never decides it again (`covered_by_step4` is called nowhere else). A note's
+    basis can go later, when step 9's adequacy review rejects the covering tests: `recheck` (run by `verify_unit`
+    after step 9, so in a fresh round only) then raises the criterion's UI hold if another test would still pass it."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1256,6 +1297,12 @@ def _generate_step(
         run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
         return
 
+    def recheck() -> None:
+        """After step 9: a note whose covering tests the judge rejected, while another test would still pass the
+        criterion, becomes the criterion's UI hold, stored with the round's holds (L4-VER-067, SCN-VER-307)."""
+        if lost := lost_notes(result.trace, result.generated):
+            hold_all([ui_hold_text(cid) for cid in lost])
+
     def body() -> tuple[bool, str]:
         assert vc.ui_writer is not None and browser is not None
         ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
@@ -1263,8 +1310,10 @@ def _generate_step(
             wb, vc.ui_writer(), gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
             support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
+            covered=covered_by_step4(result.trace),
         )  # fmt: skip
         result.generated = [*result.generated, *out.outcomes]
+        run.recheck_notes = recheck
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
         if out.cost_usd:
             result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd
@@ -1273,7 +1322,13 @@ def _generate_step(
         result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
         hold_all(unclosed_holds(gaps, out.outcomes))
         counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
-        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        if noted := sum(bool(o.covered_by) for o in out.outcomes):
+            note += f"; {noted} not_testable covered by step 4: notes, no hold (L4-VER-067)"
+        if out.suite_files or out.suite_skipped:
+            note += f"; e2e support files shown to the writer: {len(out.suite_files)}"
+            note += f" (+{len(out.suite_skipped)} not shown)" if out.suite_skipped else ""
+        return True, note
 
     _step(vc, run, "5", "ui test generation", body)
 
@@ -1378,11 +1433,14 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
     done = _done_tasks(wb, satisfied)
     answers = _family_answers(wb, events)  # L4-VER-065
+    clauses = _clauses(events)  # L4-IMP-095
     listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
     family = _family_sources(wb)
+    answers_shown = render_answers(answers, wb.redactor.redact_text)
+    quoted = unshown_answers(answers, answers_shown, wb.redactor.redact_text)  # SCN-IMP-520
     plan = plan_context(  # the spec text has a budget of its own; the criteria, the done tasks and the answers first
         fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done)
-        + len(render_answers(answers, wb.redactor.redact_text).text),
+        + len(answers_shown.text) + len(render_clauses(clauses, ids, quoted)),
         budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=family,
         keys=None,
     )  # fmt: skip
@@ -1419,6 +1477,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "repaired_changes": _repaired_changes(wb, result.head_sha, events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
+                "clauses": clauses,
             }  # fmt: skip
             return build_judge_prompt(**{**args, **over})
 

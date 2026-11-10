@@ -115,8 +115,12 @@ def _generated_rows(result: VerifyResult) -> list[str]:
     ]
     for g in result.generated:
         reason = f"{g.reason + '; ' if g.reason else ''}support: {g.support}" if g.support in ("base", "head") else ""
+        reason = reason or g.reason
+        if g.covered_by:  # L4-VER-067: the writer's answer and step 4's, both visible
+            shown = ", ".join(g.covered_by[:3]) + (f" (+{len(g.covered_by) - 3} more)" if len(g.covered_by) > 3 else "")
+            reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
         cells = [
-            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or g.reason or "-",
+            g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or "-",
             ", ".join(g.artifacts) or "-",
         ]  # fmt: skip
         rows.append(f"| {' | '.join(_cell(c) for c in cells)} |")
@@ -349,6 +353,7 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     """The test the writer wrote is kept only when it was not accepted: an accepted one is in the repository."""
     data = dataclasses.asdict(g)
     data["tests"], data["artifacts"] = list(g.tests), list(g.artifacts)
+    data["covered_by"] = list(g.covered_by)
     data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]
     if not data["code"]:
         del data["code"]

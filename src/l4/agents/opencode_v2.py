@@ -1,13 +1,15 @@
-"""OpenCode v2 adapter (`@opencode/cli` 2.0.32, binary `opencode2`; experimental, L4-OCV-001 to -014, design
-`openspec/changes/opencode-v2`), selected by `options.cli_major: 2`. This module is the command layer:
+"""OpenCode v2 adapter (`@opencode/cli` 2.2.6, binary `opencode2`; L4-OCV-001 to -019, design
+`openspec/changes/opencode-v2` and `opencode-v2-current`), selected by `options.cli_major: 2`. This module is the
+command layer:
 
     opencode2 run --standalone --format json -m <provider/model> --title "l4 <role> <stem>"   # stdin: prompt, EOF
 
 Every v2 call is standalone (without it a per-user daemon serves a later client the first client's environment
 [V, row 8]) and has an empty `XDG_STATE_HOME` of its own, so a missed flag still cannot find a shared `service.json`.
-`XDG_DATA_HOME` is never redirected: the credentials and `opencode.db` live there. v2 has no `--pure` and no `--dir`;
-the cwd is the worktree (implement) or the empty judge directory (judge). The configuration is the native v2 shape,
-not v1's, which v2 only normalises in memory (design D5). The parser is below (B5); the run and the probe are B6.
+`XDG_DATA_HOME` is redirected only for a profile that needs no stored login (L4-OCV-017): otherwise the credentials
+and `opencode.db` live there. v2 has no `--pure` and no `--dir`; the cwd is the worktree (implement) or the empty judge
+directory (judge). The configuration is the native v2 shape, not v1's, which v2 only normalises in memory (design D5).
+The parser is below (B5); the run and the probe are B6.
 
 The run is followed by `opencode2 session export --standalone <session id>` (stdin closed, 60 s, the same wrap), whose
 `info.outcome` and token counts `parse` reads (design D7, D8). Every v2 call sees EOF on stdin: OpenCode 2 waits without
@@ -42,7 +44,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.contract import attach_file_result, attach_judge_reply
-from l4.agents.credentials import credential_loader
+from l4.agents.credentials import OPENCODE_API_KEY, credential_loader, no_stored_login, profile_credential_variable
 from l4.agents.opencode import (
     _AUTH_FAILED,
     CONFIG_DIR,
@@ -72,9 +74,11 @@ from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import OpencodeOptions, Profile
 from l4.provision.catalog import OPENCODE2_BINARY
 from l4.safepath import resolve_tool
+from l4.sandbox.home import uv_dirs
 
 JUDGE_STEPS = 3  # one answering step, one tolerated rejected attempt, v2's forced tool-less summary (D6)
 IMPLEMENT_STEPS = 200  # about 10x the largest recorded tool-call count: only a model that never ends reaches it
+DATA_DIR = "opencode2-data"  # the private `XDG_DATA_HOME` of a profile that needs no stored login (L4-OCV-017)
 STATE_DIR = "opencode2-state"  # the empty `XDG_STATE_HOME` of the run, in the step's private directory
 EXPORT_STATE_DIR = "opencode2-export-state"  # the export's own (SCN-OCV-06: each call has a state directory of its own)
 EXPORT_CONFIG_DIR = "opencode2-export-config"  # the export's own config home: the run's is writable by the agent
@@ -85,6 +89,8 @@ SWITCHES = (*DISABLE_SWITCHES, "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS")  # v2 read
 # the only subcommands the harness starts, as words: there is no `debug config`, `serve`, `service`, `api`, `pair` or
 # `models` (each starts or reaches the shared daemon)
 SUBCOMMANDS = (("run",), ("auth", "list"), ("session", "export"))
+# the shell patterns the agent may not run: the CLI by name (v2 only, L4-OCV-016), and through any install path
+OPENCODE_CLI = ("opencode*", "opencode2*", "*bin/opencode*")
 # v1 tool name -> v2 permission action, for `options.tools`; `list` has none (glob and read cover it, refused at load)
 TOOL_ACTIONS = {
     "bash": "shell", "edit": "edit", "write": "edit", "patch": "edit", "read": "read", "glob": "glob", "grep": "grep",
@@ -104,13 +110,25 @@ def v2_argv(exe: str, subcommand: str, *args: str) -> list[str]:
     )
 
 
-def isolation_env_v2(config_dir: Path, state_dir: Path, content: str) -> dict[str, str]:
-    """The isolation of one v2 call: an empty `XDG_CONFIG_HOME`, the call's own `XDG_STATE_HOME` (never shared, never
-    `XDG_DATA_HOME`), the five disable switches and `OPENCODE_CONFIG_CONTENT`."""
-    return {
+def isolation_env_v2(
+    config_dir: Path,
+    state_dir: Path,
+    content: str,
+    *,
+    data_dir: Path | None = None,
+    extra: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """The isolation of one v2 call: an empty `XDG_CONFIG_HOME`, the call's own `XDG_STATE_HOME` (never shared), the
+    five disable switches and `OPENCODE_CONFIG_CONTENT`. `XDG_DATA_HOME` is set only for a profile that needs no stored
+    login (`data_dir`, L4-OCV-017): otherwise the credentials and `opencode.db` live there and it is never redirected.
+    `extra` carries the variables that keep the agent's own tools working with that redirect."""
+    env = {
         "XDG_CONFIG_HOME": str(config_dir), "XDG_STATE_HOME": str(state_dir), **{name: "1" for name in SWITCHES},
         "OPENCODE_CONFIG_CONTENT": content,
     }  # fmt: skip
+    if data_dir is not None:
+        env["XDG_DATA_HOME"] = str(data_dir)
+    return {**env, **(extra or {})}
 
 
 def _refuse_read_only(policy: PermissionPolicy) -> None:
@@ -148,18 +166,25 @@ def _permissions(
         return [_rule("*", "deny")]
     rules: list[dict[str, str]] = []
     if options is not None and options.tools:
-        # Fallback `tools_by_permission` (U2): whether a v2 deny drops the tool's schema from the request is not
-        # recorded, so the intent of `options.tools` is a deny-all and the listed tools' allows. v2's own normalisation
-        # of the v1 form would allow `shell` again after them [V, recorded], which is why the array is native.
+        # Fallback `tools_by_permission` (U2, a v2 deny drops the tool from the request [V, 2.2.6]): the intent of
+        # `options.tools` is a deny-all and the listed tools' allows. v2's own normalisation of the v1 form would allow
+        # `shell` again after them [V, recorded], which is why the array is native.
         if "list" in options.tools:
             raise AdapterError("options.tools: list has no OpenCode v2 permission action (glob and read cover it)")
         actions = list(dict.fromkeys(TOOL_ACTIONS[tool] for tool in options.tools))
         rules += [_rule("*", "deny"), *(_rule(action, "allow") for action in actions)]
     else:
+        # An allow-list (L4-OCV-015): the refuse-all comes first and the allows after it, so OpenCode's own tools
+        # (worktrees, sessions, models, MCP resources, `execute`) and any tool a later version adds start refused.
+        # Two tools stay offered: `worktree_remove`, which OpenCode gates with `edit`, and `skill`, which it offers in
+        # every mode.
         actions = ["edit", "read", "glob", "grep", "shell"]
-        rules += [_rule(action, "allow") for action in actions]
-    if "shell" in actions:  # the harness commits, never the agent
-        rules += [_rule("shell", "deny", pattern) for pattern in GIT_WRITES]
+        rules += [_rule("*", refuse), *(_rule(action, "allow") for action in actions)]
+    if "shell" in actions:  # the harness commits, never the agent, and the agent's shell starts no OpenCode CLI
+        # L4-OCV-016: a guard, the sandbox is the boundary (`sh -c`, `env`, `npx` or a copy of the binary get past it).
+        # The path pattern is `*bin/opencode*`: not `*/opencode*`, which would refuse any command that names a source
+        # path holding `/opencode`, and not `*/bin/opencode*`, which misses npm's `.bin` (design D3).
+        rules += [_rule("shell", "deny", pattern) for pattern in (*GIT_WRITES, *OPENCODE_CLI)]
     rules += [
         _rule("external_directory", "deny"), _rule("external_directory", "allow", f"{result_dir}/**"),
         _rule("external_directory", "allow", f"{result_dir}/*"),
@@ -278,9 +303,9 @@ def _number(value: object) -> int | float:
 def usage_from_export(export: Mapping[str, Any] | None) -> Usage | None:
     """Usage from `session export` (L4-OCV-008): per assistant message `tokens.input`, `tokens.output` and
     `tokens.cache.read` are summed, the cost is `info.cost` else the messages' sum, and the context peak is the
-    largest `input + cache.read + cache.write` of one message. Fallback `sum_messages` (U11): whether a multi-step run
-    exports one message per step is not recorded; the recorded single message equals `info.tokens`, which this sum
-    also gives. None when the export holds no assistant message (the stream's `step_finish` sums stand in)."""
+    largest `input + cache.read + cache.write` of one message. Fallback `sum_messages` (U11): a multi-step export holds
+    one message per finished step, and their sum equals `info.tokens` [V, 2.2.6]. None when the export holds no
+    assistant message (the stream's `step_finish` sums stand in)."""
     if not isinstance(export, Mapping):
         return None
     messages = [m for m in export.get("messages") or () if isinstance(m, Mapping) and m.get("type") == "assistant"]
@@ -348,7 +373,6 @@ def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, no
 class OpenCodeV2Adapter:
     name = "opencode"  # both majors are the `opencode` adapter; the factory tells them apart by `cli_major`
     model_unverified: ClassVar[bool] = True  # SPEC 8.1: run mode does not report the served model
-    experimental: ClassVar[bool] = True  # announced once per profile until B9 removes it (L4-OCV-013)
 
     def __init__(self, runner: ProcRunner | None = None) -> None:
         self._proc = runner or ProcRunner()
@@ -387,9 +411,17 @@ class OpenCodeV2Adapter:
         bound = step_bound(req.permission_policy, options)
         content = config_content_v2(req.permission_policy, step_dir, model, options)
         config_dir = _fresh_dir(step_dir / CONFIG_DIR)  # empty: no user config can leak in
+        data_dir: Path | None = None
+        uv_env: dict[str, str] | None = None
+        if no_stored_login(req.profile):  # L4-OCV-017: a data home of this step alone, for the run and its export
+            data_dir = _fresh_dir(step_dir / DATA_DIR)  # empty and 0700 now, and not touched before the export reads it
+            uv_env = uv_dirs(req.host_env, Path(req.host_env["HOME"]) if req.host_env.get("HOME") else Path.home())
 
         def environment(state_name: str, config: Path) -> dict[str, str]:  # each call: its own empty state (SCN-OCV-06)
-            return {**req.env, **isolation_env_v2(config, _fresh_dir(step_dir / state_name), content)}
+            isolation = isolation_env_v2(
+                config, _fresh_dir(step_dir / state_name), content, data_dir=data_dir, extra=uv_env
+            )  # L4-OCV-017: both calls get the same data home, and uv's directories where the sandbox binds them
+            return {**req.env, **isolation}
 
         argv = self.build_command(req, exe=exe, workdir=workdir)
         with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
@@ -484,7 +516,7 @@ class OpenCodeV2Adapter:
         elif exit_code != 0:  # 3
             result.detail = _unsupported_version(stderr_tail) or f"opencode2 exited with code {exit_code}"
         elif stream.step_starts >= step_bound:
-            # 4: fallback `not_ok_named` (U7): a bounded run's export outcome is not recorded, so a run that reached
+            # 4: fallback `not_ok_named` (U7): a bounded run's export says `succeeded` [V, 2.2.6], so a run that reached
             # `agents.build.steps` is never ok, whatever the export says
             if stream.denials:
                 result.status = "permission_blocked"
@@ -495,13 +527,13 @@ class OpenCodeV2Adapter:
         elif has_outcome:  # 5
             if outcome == "succeeded":
                 self._attach_result(result, judge, result_text, schema)
-            else:  # fallback `not_ok_named` (U7): only `succeeded` has been seen; any other outcome is named, not ok
+            else:  # fallback `not_ok_named` (U7): `succeeded` and `failed` have been seen; any other is named, not ok
                 shown = outcome if isinstance(outcome, str) else json.dumps(outcome, default=str)[:80]
                 result.detail = f"opencode2 session outcome {shown}"
                 result.length_stop = stream.last_reason == "length"  # the reply hit the output limit (L4-VER-071)
         elif stream.last_reason == "stop":  # 6
-            # fallback `export_decides` (U5): how often the final `step_finish` is missing on long runs is not recorded
-            # (3 of 16 recorded runs emit it), so it counts only when the export cannot decide: the v1 rule
+            # fallback `export_decides` (U5): the final `step_finish` is often missing on 2.0.32 (3 of 16 runs emit it)
+            # and was once in 23 runs on 2.2.6 [V], so it counts only when the export cannot decide: the v1 rule
             self._attach_result(result, judge, result_text, schema)
         elif stream.denials:
             result.status = "permission_blocked"
@@ -541,7 +573,7 @@ def probe_opencode_v2(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> Probe
     if step == "auth":
         if (decided := credential_auth(profile, ctx)) is not None:  # OPENCODE_API_KEY decides (L4-PRV-028)
             return decided
-        if model.startswith(FREE_PREFIX):
+        if model.startswith(FREE_PREFIX):  # with the key, these two start no process (L4-OCV-017): no `opencode.db`
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
         with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-auth-") as scratch:
@@ -608,6 +640,11 @@ def _auth_result_v2(output: str, provider: str) -> ProbeResult:
     return ProbeResult("auth", True, {"logged_in": True, "provider": provider})
 
 
+_STORED_LOGIN_UNUSED = (
+    "a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY"
+)
+
+
 def _hello_v2(
     profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None = None
 ) -> ProbeResult:
@@ -630,8 +667,14 @@ def _hello_v2_once(
         work.mkdir()
         config_dir.mkdir(mode=0o700)
         state.mkdir(mode=0o700)
+        data: Path | None = None
+        if no_stored_login(profile):  # L4-OCV-017: an empty data home of the hello's own, removed with its scratch
+            data = Path(scratch) / "data"
+            data.mkdir(mode=0o700)
         content = config_content_v2(PermissionPolicy("judge"), work, model, options)
-        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env_v2(config_dir, state, content)})
+        env = probe_env(
+            ctx, {**credential_env(profile, ctx)[1], **isolation_env_v2(config_dir, state, content, data_dir=data)}
+        )
         argv = v2_argv(exe, "run", "--format", "json", "-m", model, "--title", "l4 hello", ctx.hello_prompt)
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan_v2((done.stdout or "").splitlines())
@@ -647,6 +690,8 @@ def _hello_v2_once(
             failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
         elif status in (401, 403) or error.get("type") == "provider.auth" or _AUTH_FAILED.search(message):
             failure, kind = "opencode2 authentication failed (login expired or rejected)", "auth"
+            if no_stored_login(profile) and profile_credential_variable(profile) != OPENCODE_API_KEY:
+                failure += f"; {_STORED_LOGIN_UNUSED}"  # a free model without the key: the way out (L4-OCV-017)
         else:
             failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
             kind = error_class(status, message)
