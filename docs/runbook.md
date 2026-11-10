@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.55 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.56 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.55](#11-known-limits-of-0455)
+11. [Known limits of 0.4.56](#11-known-limits-of-0456)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -1868,7 +1868,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.55 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.56 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -1937,7 +1937,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.55 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.56 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -2359,7 +2359,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.55. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.56. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -2551,7 +2551,7 @@ roles:
 
 OpenCode 2 (`@opencode/cli`, binary `opencode2`) was checked live on `@opencode/cli` 2.2.6 through L4's own probe and
 run, with a paid `opencode-go/` key and a free `opencode/` model, in a Linux container with L4's sandbox and on macOS.
-A full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. Still watch the `verification.md` of the first unit you run on it in your repository. The rows that
+A full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on 0.4.56 (one run, about 160 s), with the real data home's database untouched. Still watch the `verification.md` of the first unit you run on it in your repository. The rows that
 the check did not record sit on named fallbacks (the table at the end). It is in no default role chain and no `l4 init`
 output names it.
 
@@ -2660,7 +2660,7 @@ a unit test pin by name, and a later run replaces it only where it records the r
 | U10 | The exit code after SIGINT. | [U] | `harness_interrupt`: the harness's own interrupt flag decides `cancelled`. |
 | U11 | How a multi-step run's export lays out its messages. | [V] one assistant message per finished step, summing to `info.tokens` (`live-implement`, `live-cli-disturbed`) | `sum_messages`: usage is the sum over the assistant messages. |
 
-## 11. Known limits of 0.4.55
+## 11. Known limits of 0.4.56
 
 These limits make operation more difficult. Know them before you start.
 
