@@ -39,6 +39,18 @@ def _inside(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
+def uv_dirs(host_env: Mapping[str, str], home: Path) -> dict[str, str]:
+    """The directories uv keeps its managed Pythons and tools in, as `UV_PYTHON_INSTALL_DIR` and `UV_TOOL_DIR` would
+    name them: the variable when the host sets it, else `<data home>/uv/python` and `<data home>/uv/tools`, where the
+    data home is `XDG_DATA_HOME` or `~/.local/share`. `derive_tool_paths` binds these two directories, and an adapter
+    that moves `XDG_DATA_HOME` for its agent sets the variables to them (L4-OCV-017), so one helper names both."""
+    data = Path(host_env["XDG_DATA_HOME"]) if host_env.get("XDG_DATA_HOME") else home / ".local" / "share"
+    return {
+        "UV_PYTHON_INSTALL_DIR": host_env.get("UV_PYTHON_INSTALL_DIR") or str(data / "uv" / "python"),
+        "UV_TOOL_DIR": host_env.get("UV_TOOL_DIR") or str(data / "uv" / "tools"),
+    }
+
+
 def _expand(raw: str, home: Path) -> Path:
     return home / raw[2:] if raw.startswith("~/") else Path(raw)
 
@@ -196,9 +208,9 @@ def derive_tool_paths(
                 if target.is_file() and under_hidden(target) and not _inside(target, entry):
                     add(_package_dir(target) or target)
     add(l4_home(host_env))
-    data = Path(host_env["XDG_DATA_HOME"]) if host_env.get("XDG_DATA_HOME") else home / ".local" / "share"
-    add(Path(host_env["UV_PYTHON_INSTALL_DIR"]) if host_env.get("UV_PYTHON_INSTALL_DIR") else data / "uv" / "python")
-    add(Path(host_env["UV_TOOL_DIR"]) if host_env.get("UV_TOOL_DIR") else data / "uv" / "tools")
+    uv = uv_dirs(host_env, home)
+    add(Path(uv["UV_PYTHON_INSTALL_DIR"]))
+    add(Path(uv["UV_TOOL_DIR"]))
     add(Path(host_env["COREPACK_HOME"]) if host_env.get("COREPACK_HOME") else home / ".cache" / "node" / "corepack")
     from l4.gates import coverage, trace  # late: the gates package imports the sandbox package
 

@@ -146,6 +146,11 @@ judge, plus one `cli_major: 1` profile. One unit end to end. The orchestrator re
 `tests/fixtures/recorded/opencode/2.0.32/live-*`, scrubbed. The adapter's `experimental` flag comes off only when
 every row above has a fixture or a LIVE check (L4-NFR-006).
 
+Status, 2026-11-10: the live check on `@opencode/cli` 2.2.6 (change `opencode-v2-current`) replaced B8 for U2, U5, U7,
+U9 (in part) and U11. Those rows now have `live-` fixtures under `tests/fixtures/recorded/opencode/2.2.6/`, and each kept
+its fallback because the recording matched it. B9 was done without a parser change. Rows U1, U3, U4, U6 and U10 stay open
+on their fallbacks, with U9's cause and `steps: 1`, and U8 stays open for a profile with a stored login.
+
 ## 5. Order
 
 1. Change A (two implementer groups), released in 0.4.18. It needs nothing from B.
@@ -156,3 +161,8 @@ Status, 2026-10-24: A is done (released in 0.4.18). B1 to B7 are done and ship i
 and not yet checked against a live run (design E8, the owner's decision). B8 (the live validation) and B9 (replacing
 fallbacks by recorded behaviour, removing the experimental flag) are deferred to a later release. Every [U] row of
 section 4 is still open.
+
+Status, 2026-11-10: B8 and B9 were replaced in part by change `opencode-v2-current` (0.4.56): the live check on
+`@opencode/cli` 2.2.6 recorded U2, U5, U7, U9 (in part) and U11, and the adapter is supported, no longer experimental.
+The rows of section 4 that stay open are U1, U3, U4, U6 and U10, U9's cause and `steps: 1`, and U8 for a profile with
+a stored login. The matrix in section 1 keeps its 2.0.32 facts as they are, because they are history.

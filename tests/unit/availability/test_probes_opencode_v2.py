@@ -1,5 +1,6 @@
 """The OpenCode v2 probe (L4-OCV-001 probe part, -010, -011 hello, -012; SCN-OCV-02, -06 for the probes, -21, -22, -23,
-amendment E1). Every answer is a recorded 2.0.32 fixture or a synthetic one that says so; no binary is started."""
+amendment E1). Every answer is a recorded 2.0.32 or 2.2.6 fixture or a synthetic one that says so; no binary is
+started."""
 
 import json
 import os
@@ -16,8 +17,9 @@ from l4.provision.catalog import effective_pins
 from .conftest import RECORDED, FakeRun
 
 OC2 = RECORDED / "opencode" / "2.0.32"
+OC2_LIVE = RECORDED / "opencode" / "2.2.6"
 FREE_MODEL, GO_MODEL = "opencode/big-pickle", "opencode-go/deepseek-v4.1-flash"
-V2_VERSION = {("--version",): CmdResult(0, (OC2 / "version.stdout.txt").read_text(), "")}
+V2_VERSION = {("--version",): CmdResult(0, (OC2_LIVE / "live-version.stdout.txt").read_text(), "")}
 SWITCHES = {
     "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE",
@@ -39,6 +41,7 @@ class SpyRun(FakeRun):
         super().__init__(rules)
         self.states: list[list[str] | None] = []
         self.configs: list[tuple[list[str], int] | None] = []  # (listing, mode) of `XDG_CONFIG_HOME` at the start
+        self.datas: list[tuple[list[str], int] | None] = []  # (listing, mode) of `XDG_DATA_HOME` at the start
 
     def __call__(self, argv, cwd, env, timeout):
         state = env.get("XDG_STATE_HOME")
@@ -46,6 +49,10 @@ class SpyRun(FakeRun):
         config = env.get("XDG_CONFIG_HOME")
         self.configs.append(
             (sorted(os.listdir(config)), os.stat(config).st_mode & 0o777) if config and os.path.isdir(config) else None
+        )
+        data = env.get("XDG_DATA_HOME")
+        self.datas.append(
+            (sorted(os.listdir(data)), os.stat(data).st_mode & 0o777) if data and os.path.isdir(data) else None
         )
         return super().__call__(argv, cwd, env, timeout)
 
@@ -72,14 +79,14 @@ def test_a_v1_binary_at_opencode2_fails_binary_with_the_v2_reason_and_no_hello_r
     out, run = probe(FREE, "hello", rules, make_ctx)
     assert not out.ok and out.step == "binary"
     assert out.reason is not None and out.reason.startswith("opencode2 1.18.34 is OpenCode v1; this profile runs v2")
-    assert "options.cli_major: 2" in out.reason and "@opencode/cli@2.0.32" in out.reason
+    assert "options.cli_major: 2" in out.reason and "install @opencode/cli@2.2.6" in out.reason
     assert [c[0][1:] for c in run.calls] == [["--version"]] and run.calls[0][0][0].endswith("/opencode2")
 
 
 def test_the_recorded_v2_version_passes_binary_with_major_two_and_the_opencode2_pin(make_ctx):
     out, run = probe(FREE, "binary", {}, make_ctx)
-    assert out.ok and out.detail["version"] == "2.0.32" and out.detail["major"] == 2
-    assert out.detail["pin"] == "2.0.32" and out.detail["pin_source"] == "catalog"
+    assert out.ok and out.detail["version"] == "2.2.6" and out.detail["major"] == 2
+    assert out.detail["pin"] == "2.2.6" and out.detail["pin_source"] == "catalog"
     assert run.calls[0][0][0].endswith("/opencode2")
 
 
@@ -247,7 +254,36 @@ def test_scn_ocv_23_the_same_leaked_text_still_fails_the_v1_hello_as_unexpected_
 def test_the_recorded_free_tier_403_fails_the_hello_as_auth_not_a_limit(make_ctx):
     out, _ = probe(FREE, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
     assert not out.ok and out.failure_class == "auth" and out.limit is None
-    assert out.reason == "opencode2 authentication failed (login expired or rejected)"
+    assert out.reason.startswith("opencode2 authentication failed (login expired or rejected)")
+
+
+HINT = "a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY"
+
+
+def test_an_auth_failed_hello_of_a_free_model_without_the_key_says_a_stored_login_is_not_used(make_ctx):
+    """A profile classed as needing no stored login only because its model is `opencode/` (L4-OCV-017): a login stored
+    by `opencode2 auth login` is not read, so the failure names the way out."""
+    out, _ = probe(FREE, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
+    assert not out.ok and out.failure_class == "auth"
+    assert out.reason.endswith(HINT) and out.reason.count("opencode2 authentication failed") == 1
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        pytest.param(v2(FREE_MODEL, auth="api_key"), id="free-with-the-key"),
+        pytest.param(v2(GO_MODEL, auth="api_key"), id="paid-with-the-key"),
+        pytest.param(v2(GO_MODEL), id="stored-login"),
+    ],
+)
+def test_the_hint_is_for_the_free_model_without_the_key_only(make_ctx, profile):
+    out, _ = probe(profile, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
+    assert out.failure_class == "auth" and out.reason == "opencode2 authentication failed (login expired or rejected)"
+
+
+def test_the_hint_is_for_an_auth_class_failure_only(make_ctx):
+    out, _ = probe(FREE, "hello", {("run",): CmdResult(1, "", "")}, make_ctx)
+    assert not out.ok and out.failure_class != "auth" and "stored opencode2 login" not in (out.reason or "")
 
 
 def test_the_hello_argv_carries_standalone_the_title_and_the_prompt_and_no_v1_flags(make_ctx):
@@ -385,3 +421,61 @@ def test_the_adapter_probe_is_the_v2_probe_and_never_starts_opencode(make_ctx):
     for step in ("binary", "auth", "quota", "hello"):
         assert OpenCodeV2Adapter().probe(GO, step, ctx).ok
     assert {os.path.basename(c[0][0]) for c in run.calls} == {"opencode2"}
+
+
+# --- SCN-OCV-38, SCN-OCV-39: a private data home for a profile that needs no stored login (L4-OCV-017) ---
+
+API_KEY_GO = v2(GO_MODEL, auth="api_key")
+SECRET = "oc-test-VALUE-123"
+
+
+def with_env(ctx, **extra):
+    return type(ctx)(**{**ctx.__dict__, "environ": {**ctx.environ, **extra}})
+
+
+def test_scn_ocv_39_the_hello_of_such_a_profile_has_an_empty_private_data_directory_of_its_own(make_ctx):
+    for candidate in (API_KEY_GO, FREE):
+        run = SpyRun({**V2_VERSION, ("run",): out_of("hello-ok-step-finish.jsonl")})
+        ctx, _ = make_ctx({}, run=run)
+        assert OpenCodeV2Adapter().probe(candidate, "hello", with_env(ctx, OPENCODE_API_KEY=SECRET)).ok
+        hello = hello_call(run)
+        env = hello[2]
+        data = env["XDG_DATA_HOME"]
+        assert run.datas[run.calls.index(hello)] == ([], 0o700)  # it existed, empty and private, when the hello started
+        assert os.path.basename(data) == "data" and os.path.dirname(data) == os.path.dirname(env["XDG_STATE_HOME"])
+        assert not os.path.exists(data)  # gone with the hello's scratch directory
+        assert "UV_PYTHON_INSTALL_DIR" not in env and "UV_TOOL_DIR" not in env  # tools are off in a hello
+
+
+def test_scn_ocv_39_the_auth_step_of_such_a_profile_starts_no_process(make_ctx):
+    run = SpyRun({**V2_VERSION})
+    ctx, _ = make_ctx({}, run=run)
+    ctx = with_env(ctx, OPENCODE_API_KEY=SECRET)
+    first = OpenCodeV2Adapter().probe(API_KEY_GO, "auth", ctx)
+    assert first.ok and first.detail == {"auth_method": "env"}
+    second = OpenCodeV2Adapter().probe(FREE, "auth", ctx)
+    assert second.ok and second.skipped and second.detail["login"] == "not needed"
+    assert [c for c in run.calls if c[0][1] != "--version"] == []  # no `auth list`, no hello
+
+
+def test_scn_ocv_38_a_profile_with_a_stored_login_keeps_the_real_data_home_in_the_hello_and_the_auth_step(make_ctx):
+    for candidate in (GO, OPENROUTER):
+        rules = {("run",): out_of("hello-ok-step-finish.jsonl"), ("auth", "list"): out_of("auth-list-env-key.json")}
+        run = SpyRun({**V2_VERSION, **rules})
+        ctx, _ = make_ctx({}, run=run)
+        OpenCodeV2Adapter().probe(candidate, "auth", ctx)
+        OpenCodeV2Adapter().probe(candidate, "hello", ctx)
+        for argv, _, env, _ in run.calls:
+            assert not {"XDG_DATA_HOME", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(env), argv
+
+
+@pytest.mark.parametrize("profile", [FREE, GO, OPENROUTER], ids=["free", "paid", "stored-login"])
+def test_no_auth_or_hello_argv_carries_a_flag_that_skips_the_permission_rules(make_ctx, profile):
+    """The free model's `ask` refusals rely on it (L4-OCV-015)."""
+    rules = {("run",): out_of("hello-ok-step-finish.jsonl"), ("auth", "list"): out_of("auth-list-env-key.json")}
+    argvs = []
+    for step in ("auth", "hello"):
+        _, run = probe(profile, step, rules, make_ctx)
+        argvs += [call[0] for call in run.calls if call[0][1] != "--version"]
+    assert any(a[1] == "run" for a in argvs)
+    assert not {"--auto", "--yolo", "--dangerously-skip-permissions"} & {flag for a in argvs for flag in a}, argvs

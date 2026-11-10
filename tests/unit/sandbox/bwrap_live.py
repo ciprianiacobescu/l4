@@ -110,7 +110,9 @@ def make_world(
     def bench(unit: str, run_id: str, adapter: str) -> Workbench:
         app = AppContext(repo, None, "human", 0, run_id, host_env, Redactor({}))
         ref = UnitRef(Framework.OPENSPEC, unit, repo / "openspec" / "changes" / unit)
-        selected = SimpleNamespace(profile=SimpleNamespace(adapter=adapter))
+        selected = SimpleNamespace(
+            profile=SimpleNamespace(adapter=adapter, opencode_options=lambda: None)
+        )  # no options
         return make_workbench(
             cfg=cfg or L4Config(), app=app, ref=ref, provider=None, worktree=repo, git=Git(repo, environ=host_env),  # type: ignore[arg-type]
             ledger=None, sandbox=NoSandbox(allow_none=True), selected=selected, iteration=1,  # type: ignore[arg-type]

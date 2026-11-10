@@ -204,17 +204,17 @@ def v2_cfg(*, v1: bool = False, **ci) -> L4Config:
 
 def test_a_v2_profile_is_compared_with_the_opencode2_pin(make_ctx, monkeypatch):  # SCN-OCV-04
     monkeypatch.setattr("l4.doctor.checks_env.detect_platform", lambda: "linux-x64")
-    ctx, _ = make_ctx(tools={"opencode2": "opencode v2.0.32"}, cfg=v2_cfg())
+    ctx, _ = make_ctx(tools={"opencode2": f"opencode v{catalog.OPENCODE2_VERSION}"}, cfg=v2_cfg())
     result, _ = outcome(ctx)
-    assert result.status == "pass" and result.message == "opencode2 2.0.32 at its pin"
+    assert result.status == "pass" and result.message == f"opencode2 {catalog.OPENCODE2_VERSION} at its pin"
     ctx, _ = make_ctx(tools={"opencode2": "opencode v2.0.33"}, cfg=v2_cfg())
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
-    assert "opencode2 2.0.33 at /fake/bin/opencode2, pinned 2.0.32" in result.message
+    assert f"opencode2 2.0.33 at /fake/bin/opencode2, pinned {catalog.OPENCODE2_VERSION}" in result.message
     assert (
         "--prefix" in result.fix_hint
         and "npm-opencode2" in result.fix_hint
-        and "@opencode/cli@2.0.32" in result.fix_hint
+        and f"@opencode/cli@{catalog.OPENCODE2_VERSION}" in result.fix_hint
     )
 
 
@@ -222,14 +222,14 @@ def test_an_opencode2_override_is_named_and_compared(make_ctx):  # SCN-OCV-28
     ctx, _ = make_ctx(tools={"opencode2": "opencode v2.0.33"}, cfg=v2_cfg(cli_versions={"opencode2": "2.0.33"}))
     result, _ = outcome(ctx)
     assert result.status == "pass"
-    assert "opencode2 2.0.33 held by ci.cli_versions; L4 pins 2.0.32" in result.message
+    assert f"opencode2 2.0.33 held by ci.cli_versions; L4 pins {catalog.OPENCODE2_VERSION}" in result.message
 
 
 def test_both_majors_are_compared_with_their_own_pins(make_ctx, monkeypatch):
     monkeypatch.setattr("l4.doctor.checks_env.detect_platform", lambda: "linux-x64")
-    tools = {"opencode": "1.18.34", "opencode2": "opencode v2.0.32"}
+    tools = {"opencode": "1.18.34", "opencode2": f"opencode v{catalog.OPENCODE2_VERSION}"}
     ctx, _ = make_ctx(tools=tools, cfg=v2_cfg(v1=True))
-    assert outcome(ctx)[0].message == "opencode 1.18.34, opencode2 2.0.32 at their pins"
+    assert outcome(ctx)[0].message == f"opencode 1.18.34, opencode2 {catalog.OPENCODE2_VERSION} at their pins"
     ctx, _ = make_ctx(tools={**tools, "opencode": "1.18.35"}, cfg=v2_cfg(v1=True))
     result, _ = outcome(ctx)
     assert "opencode 1.18.35" in result.message and "pinned 1.18.34" in result.message
@@ -256,8 +256,8 @@ def test_ci_fix_installs_opencode2_and_rechecks_its_pin(world, capsys, monkeypat
         paths.local_bin.mkdir(parents=True, exist_ok=True)
         (paths.local_bin / name).write_text("#!/bin/sh\n")
         (paths.local_bin / name).chmod(0o755)
-    versions = {"uv": "uv 0.12.22", "node": "v22.23.0", "opencode2": "opencode v2.0.32"}
-    runner = OpenCode2Runner(paths, environ, versions, reports="opencode v2.0.32")
+    versions = {"uv": "uv 0.12.22", "node": "v22.23.0", "opencode2": f"opencode v{catalog.OPENCODE2_VERSION}"}
+    runner = OpenCode2Runner(paths, environ, versions, reports=f"opencode v{catalog.OPENCODE2_VERSION}")
     monkeypatch.setattr(checks_provision, "_runner", lambda: runner)
     _, before = doctor(repo, environ, capsys, "--ci")
     assert "no agent CLI to compare with its pin" in env_015(before)["message"]
@@ -266,4 +266,4 @@ def test_ci_fix_installs_opencode2_and_rechecks_its_pin(world, capsys, monkeypat
     assert fix["status"] == "applied" and (paths.local_bin / "opencode2").is_symlink()
     assert not (paths.local_bin / "opencode").exists()
     check = env_015(after)
-    assert check["status"] == "pass" and "opencode2 2.0.32 at its pin" in check["message"], check
+    assert check["status"] == "pass" and f"opencode2 {catalog.OPENCODE2_VERSION} at its pin" in check["message"], check

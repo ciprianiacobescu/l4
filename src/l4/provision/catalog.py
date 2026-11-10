@@ -30,8 +30,8 @@ CLAUDE_VERSION = "2.1.288"
 CODEX_VERSION = "0.160.0"
 OPENCODE_VERSION = "1.18.34"
 # OpenCode 2 (`options.cli_major: 2`, opt-in): another package under another binary name (L4-OCV-002). Its gate key
-# is `opencode2` (`profile_cli`); the pin follows the recorded fixtures (`tests/fixtures/recorded/opencode/2.0.32`).
-OPENCODE2_VERSION = "2.0.32"
+# is `opencode2` (`profile_cli`); the pin follows the recorded fixtures (`tests/fixtures/recorded/opencode/2.2.6`).
+OPENCODE2_VERSION = "2.2.6"
 OPENCODE2_PACKAGE = "@opencode/cli"
 # Laya (System One, L4-ADO-019): the pin is `defaults.LAYA_VERSION` (the doctor compares against it); the checkpoint
 # is the folder of `LAYA_REPO` that `laya-serve` loads. `scripts/runner/prereqs.sh` carries the same two defaults.
@@ -158,8 +158,7 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "OpenCode v{major}",
         "opencode-ai {supported}.x",
         "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
-        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 "
-        "(experimental)",
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2",
     ),
     "opencode2": MajorWords(
         "OpenCode",

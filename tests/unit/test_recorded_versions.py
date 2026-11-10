@@ -50,4 +50,4 @@ def test_scn_fac_48_the_byok_and_no_token_fixtures_are_not_a_recorded_version(tm
 
 
 def test_the_packaged_file_lists_opencode_two() -> None:
-    assert "2.0.32" in recordedversions.load()["opencode"]
+    assert {"2.0.32", "2.2.6"} <= set(recordedversions.load()["opencode"])

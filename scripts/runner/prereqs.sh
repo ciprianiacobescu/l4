@@ -29,7 +29,7 @@ OPENSPEC_VERSION=${OPENSPEC_VERSION:-1.14.0}
 CLAUDE_VERSION=${CLAUDE_VERSION:-2.1.288}
 CODEX_VERSION=${CODEX_VERSION:-0.160.0}
 OPENCODE_VERSION=${OPENCODE_VERSION:-1.18.34}
-OPENCODE2_VERSION=${OPENCODE2_VERSION:-2.0.32}   # @opencode/cli, the catalog's pin (a drift test compares them); opt-in, installed as opencode2
+OPENCODE2_VERSION=${OPENCODE2_VERSION:-2.2.6}   # @opencode/cli, the catalog's pin (a drift test compares them); opt-in, installed as opencode2
 SERENA_VERSION=${SERENA_VERSION:-1.7.0}
 PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION:-1.63.0}
 # Kiro CLI: the catalog's pin (l4.provision.catalog, a drift test compares them) and the sha256 of its four Linux archives.
@@ -168,7 +168,7 @@ step PRQ-11 "OpenCode >= $OPENCODE_VERSION" check_opencode apply_opencode
 # options.cli_major: 2. A machine-wide script cannot read a repository's profiles, so it is a switch. The package also
 # ships a bin named `opencode`, which must never be found as the v1 `opencode` of PRQ-11: it gets its own prefix, and only
 # its `opencode2` bin is linked into ~/.local/bin (never over a regular file). `opencode2 --version` prints `opencode
-# v2.0.32`; any other version, or another major under this name, is not accepted.
+# v2.2.6`; any other version, or another major under this name, is not accepted.
 check_opencode2() { local v p
   v=$(as_runner 'opencode2 --version' 2>/dev/null </dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   p=$(as_runner 'command -v opencode2' 2>/dev/null </dev/null)

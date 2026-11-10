@@ -170,7 +170,7 @@ def test_kiro_major_problem_names_the_cause_and_the_pin():  # SCN-OCG-11
 def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
     assert catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34") == (
         "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
+        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2"
     )
     words = catalog.MAJOR_WORDS["opencode"]
     assert words.product == "OpenCode"
@@ -382,21 +382,21 @@ def _v2_cfg(*, v1: bool = False, v2: bool = True, **versions):
 
 
 def test_opencode2_is_pinned_and_in_catalog_pins():  # SCN-OCV-04
-    assert catalog.OPENCODE2_VERSION == "2.0.32" and catalog.OPENCODE2_PACKAGE == "@opencode/cli"
-    assert catalog.CLI_PINS == {**catalog.ADAPTER_PINS, "opencode2": "2.0.32"}
+    assert catalog.OPENCODE2_VERSION == "2.2.6" and catalog.OPENCODE2_PACKAGE == "@opencode/cli"
+    assert catalog.CLI_PINS == {**catalog.ADAPTER_PINS, "opencode2": "2.2.6"}
     pins = catalog.catalog_pins()
-    assert pins["agent:opencode2"] == "2.0.32" and pins["npm:opencode2"] == "@opencode/cli"
+    assert pins["agent:opencode2"] == "2.2.6" and pins["npm:opencode2"] == "@opencode/cli"
     assert pins["agent:opencode"] == "1.18.34" and pins["npm:opencode"] == "opencode-ai"
     assert "opencode2" not in catalog.ADAPTER_PINS and "opencode2" not in catalog.NPM_PACKAGES  # keyed by adapter
 
 
 def test_effective_pins_cover_opencode2_and_name_their_source():  # SCN-OCV-28
-    assert catalog.effective_pins(None)["opencode2"] == ("2.0.32", "catalog")
+    assert catalog.effective_pins(None)["opencode2"] == ("2.2.6", "catalog")
     assert set(catalog.effective_pins(None)) == set(catalog.CLI_PINS)
     held = catalog.effective_pins(_v2_cfg(opencode2="2.0.33"))
     assert held["opencode2"] == ("2.0.33", "ci.cli_versions") and held["opencode"] == ("1.18.34", "catalog")
     assert catalog.gate_pin(_v2_cfg(opencode2="2.0.33"), "opencode2") == "2.0.33"  # one source of pins
-    assert catalog.gate_pin(None, "opencode2") == "2.0.32"
+    assert catalog.gate_pin(None, "opencode2") == "2.2.6"
 
 
 def test_required_tools_follow_the_major_of_each_profile():  # SCN-OCV-04
@@ -409,7 +409,7 @@ def test_required_tools_follow_the_major_of_each_profile():  # SCN-OCV-04
     assert list(only_v2) == ["opencode2"]
     v2 = only_v2["opencode2"]
     assert (v2.binary, v2.version, v2.min_version, v2.adapter, v2.pin_source) == (
-        "opencode2", "2.0.32", "2.0.30", "opencode", "catalog",
+        "opencode2", "2.2.6", "2.0.30", "opencode", "catalog",
     )  # fmt: skip
     assert v2.gate_key == "opencode2" and only_v1["opencode"].gate_key == "opencode"
     both = tools(_v2_cfg(v1=True))
@@ -444,7 +444,7 @@ def test_opencode2_is_installed_by_hand_into_its_own_prefix():
     (tool,) = [t for t in catalog.required_tools(config, openspec_active=False) if t.name == "opencode2"]
     command = catalog.manual_command(tool, "linux-x64", "/home/u/.local/share/l4")
     assert "npm install --prefix /home/u/.local/share/l4/npm-opencode2 " in command
-    assert command.count("@opencode/cli@2.0.32") == 1 and "opencode-ai" not in command
+    assert command.count("@opencode/cli@2.2.6") == 1 and "opencode-ai" not in command
     assert "ln -sf /home/u/.local/share/l4/npm-opencode2/node_modules/.bin/opencode2 ~/.local/bin/opencode2" in command
     assert "--prefix /home/u/.local/share/l4/npm " not in command  # never the v1 prefix
 

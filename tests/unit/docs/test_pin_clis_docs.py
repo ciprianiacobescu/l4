@@ -42,7 +42,7 @@ def test_the_runner_readme_has_prq12_and_prq21() -> None:
     row21 = next(line for line in readme.splitlines() if line.startswith("| PRQ-21 |"))
     assert "DISABLE_AUTOUPDATER" in row21 and "app.disableAutoupdates" in row21
     row20 = next(line for line in readme.splitlines() if line.startswith("| PRQ-20 |"))  # opencode-v2, E3
-    assert "2.0.32" in row20 and "opencode2" in row20 and "npm-opencode2" in row20 and "--with-opencode2" in row20
+    assert "2.2.6" in row20 and "opencode2" in row20 and "npm-opencode2" in row20 and "--with-opencode2" in row20
     assert "@opencode/cli" in row20 and "never" in row20 and "reserved" not in readme
 
 

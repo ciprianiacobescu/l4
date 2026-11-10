@@ -19,6 +19,7 @@ from l4.implementer.workbench import Workbench
 from l4.proc import run_process
 from l4.redact import Redactor
 from l4.sandbox.base import WrappedCommand
+from l4.sandbox.home import uv_dirs
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "opencode" / "2.0.32"
 CLI_MAJOR = Path(__file__).parents[2] / "fixtures" / "cli_major" / "opencode"
@@ -105,6 +106,30 @@ def judge_request(tmp_path: Path, **kw) -> RunRequest:
     return request(tmp_path, role="judge", permission_policy=PermissionPolicy("judge"), **kw)
 
 
+# --- no argv the adapter builds skips the permission rules (L4-OCV-015) ---
+
+PERMISSION_BYPASSES = {"--auto", "--yolo", "--dangerously-skip-permissions"}
+
+
+@pytest.mark.parametrize("model", [FREE, PAID])
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+def test_no_run_or_export_argv_carries_a_flag_that_skips_the_permission_rules(tmp_path, model, role):
+    """The free model's `ask` refusals rely on it: a flag that auto-answers or skips every permission prompt would turn
+    each refusal of the allow-list into an allow."""
+    proc = text_run()
+    make = judge_request if role == "judge" else request
+    kw = {"result_schema": JUDGE_SCHEMA} if role == "judge" else {}
+    OpenCodeV2Adapter(proc).run(make(tmp_path, profile=profile(model), **kw))
+    assert [c["kind"] for c in proc.calls] == ["run", "export"]
+    for call in proc.calls:
+        assert not PERMISSION_BYPASSES & set(call["argv"]), call["argv"]
+
+
+def test_the_one_argv_builder_adds_no_such_flag_to_any_subcommand():
+    for subcommand in ("run", "auth list", "session export"):
+        assert not PERMISSION_BYPASSES & set(opencode_v2.v2_argv("/x/opencode2", subcommand, "--format", "json"))
+
+
 # --- the run, then the export (L4-OCV-007 run part) ---
 
 
@@ -167,7 +192,8 @@ def test_an_unusable_export_names_why(tmp_path, export, outcome, why):
 
 
 def test_an_unusable_export_with_a_final_stop_falls_back_to_the_v1_rule_export_decides(tmp_path):
-    """export_decides (U5): the export cannot decide, so the last step_finish `stop` does, as in v1."""
+    """export_decides (U5, [V] on 2.2.6, `live-cli-disturbed` in test_opencode_v2_live.py): the export cannot decide,
+    so the last step_finish `stop` does, as in v1."""
     proc = V2Proc(recorded("hello-ok-step-finish.jsonl"), "", export_outcome=ProcOutcome(1))
     assert OpenCodeV2Adapter(proc).run(request(tmp_path)).status == "ok"
 
@@ -299,7 +325,7 @@ def test_an_implementer_reads_its_result_file_and_a_leftover_is_removed_first(tm
 
 
 def test_run_and_export_each_have_an_empty_state_directory_of_their_own_and_no_data_directory(tmp_path):
-    req = request(tmp_path)
+    req = request(tmp_path, profile=profile(PAID))  # a stored login: the default profile has a private data home
     step_dir = req.result_path.parent
     stale = step_dir / "opencode2-state"
     stale.mkdir(parents=True)
@@ -317,6 +343,70 @@ def test_run_and_export_each_have_an_empty_state_directory_of_their_own_and_no_d
         assert all(env[name] == "1" for name in SWITCHES)
         assert call["config_listing"] == [] and Path(env["XDG_CONFIG_HOME"]).parent == step_dir
         assert env["PATH"] == req.env["PATH"] and env["HOME"] == "/h" and "OPENCODE_CONFIG_CONTENT" in env
+
+
+class DataProc(V2Proc):
+    """Also records the data directory at the moment each call starts, and writes a file into it during the run."""
+
+    def run(self, argv, env, cwd, **kw):
+        data = env.get("XDG_DATA_HOME")
+        seen = {
+            "data_listing": sorted(os.listdir(data)) if data and os.path.isdir(data) else None,
+            "data_mode": os.stat(data).st_mode & 0o777 if data and os.path.isdir(data) else None,
+        }
+        if data and "session" not in argv:
+            (Path(data) / "opencode.db").write_text("the session lives here")
+        out = super().run(argv, env, cwd, **kw)
+        self.calls[-1].update(seen, data_file=(Path(data) / "opencode.db").exists() if data else None)
+        return out
+
+
+@pytest.mark.parametrize("candidate", [profile(PAID, auth="api_key"), profile(FREE)], ids=["api-key", "free"])
+def test_scn_ocv_37_an_api_key_or_free_profile_runs_and_exports_with_a_private_data_home(tmp_path, candidate):
+    """L4-OCV-017: `<step dir>/opencode2-data`, empty and 0700 before the run, kept for the export, and the uv
+    directories the agent sandbox binds."""
+    host_env = {"HOME": str(tmp_path / "host"), "OPENCODE_API_KEY": "oc-test-VALUE-123"}
+    req = request(tmp_path, profile=candidate, host_env=host_env)
+    step_dir = req.result_path.parent
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    step_dir.mkdir(parents=True)
+    (step_dir / "opencode2-data").symlink_to(outside)  # planted by an earlier step
+    proc = DataProc(recorded("text-no-step-finish.jsonl"), recorded("text-no-step-finish.export.json"))
+    OpenCodeV2Adapter(proc).run(req)
+    run_call, export_call = proc.calls
+    data = step_dir / "opencode2-data"
+    for call in proc.calls:
+        assert call["env"]["XDG_DATA_HOME"] == str(data)
+        assert {k: call["env"][k] for k in ("UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR")} == uv_dirs(
+            host_env, Path(host_env["HOME"])
+        )
+    assert not data.is_symlink() and data.is_dir()  # the link was removed, never followed
+    assert (outside / "keep.txt").read_text() == "keep" and [p.name for p in outside.iterdir()] == ["keep.txt"]
+    assert run_call["data_listing"] == [] and run_call["data_mode"] == 0o700  # empty and private when the run started
+    assert export_call["data_file"] is True  # what the run wrote there is still there when the export starts
+
+
+def test_the_uv_directories_follow_the_hosts_own_settings(tmp_path):
+    host_env = {"HOME": str(tmp_path / "h"), "XDG_DATA_HOME": str(tmp_path / "xdg"), "UV_TOOL_DIR": "/opt/uv-tools"}
+    req = request(tmp_path, profile=profile(FREE), host_env=host_env)
+    proc = text_run()
+    OpenCodeV2Adapter(proc).run(req)
+    for call in proc.calls:
+        assert call["env"]["UV_TOOL_DIR"] == "/opt/uv-tools"
+        assert call["env"]["UV_PYTHON_INSTALL_DIR"] == str(tmp_path / "xdg" / "uv" / "python")
+
+
+@pytest.mark.parametrize("candidate", [profile(PAID), profile("openrouter/x")], ids=["go-stored-login", "openrouter"])
+def test_scn_ocv_38_a_profile_with_a_stored_login_keeps_the_real_data_home(tmp_path, candidate):
+    req = request(tmp_path, profile=candidate, host_env={"HOME": str(tmp_path / "host")})
+    proc = text_run()
+    OpenCodeV2Adapter(proc).run(req)
+    assert [c["kind"] for c in proc.calls] == ["run", "export"]
+    for call in proc.calls:
+        assert not {"XDG_DATA_HOME", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(call["env"])
+    assert not (req.result_path.parent / "opencode2-data").exists()
 
 
 def test_every_call_sees_eof_on_stdin_the_run_gets_the_prompt_the_export_none(tmp_path):

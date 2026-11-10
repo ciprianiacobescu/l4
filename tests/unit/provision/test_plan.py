@@ -1,4 +1,5 @@
 from l4.config.schema import L4Config
+from l4.provision.catalog import OPENCODE2_VERSION
 from l4.provision.runner import detect_platform, plan_fixes
 
 from .conftest import FakeRunner
@@ -332,22 +333,27 @@ def test_a_v2_profile_plans_opencode2_with_its_prefix_in_the_manual_command(path
     assert list(actions) == ["uv", "node", "opencode2"]  # npm-installed: Node comes along; never `opencode`
     assert actions["opencode2"].status == "planned" and actions["opencode2"].reason == "missing"
     command = actions["opencode2"].commands[0]
-    assert f"--prefix {paths.l4_home}/npm-opencode2 " in command and "@opencode/cli@2.0.32" in command
+    assert f"--prefix {paths.l4_home}/npm-opencode2 " in command and f"@opencode/cli@{OPENCODE2_VERSION}" in command
 
 
 def test_a_v1_named_opencode2_is_planned_for_the_v2_pin_with_a_named_reason(paths, env, install_fake):
     install_fake("opencode2")
     actions = plan(v2_config(), paths, env, FakeRunner({"opencode2": "1.18.34"}), openspec_active=False)
     assert actions["opencode2"].status == "planned"
-    assert actions["opencode2"].reason == "found 1.18.34 (OpenCode v1), need @opencode/cli 2.x (pinned 2.0.32)"
-    ok = plan(v2_config(), paths, env, FakeRunner({"opencode2": "opencode v2.0.32"}), openspec_active=False)
+    assert (
+        actions["opencode2"].reason
+        == f"found 1.18.34 (OpenCode v1), need @opencode/cli 2.x (pinned {OPENCODE2_VERSION})"
+    )
+    ok = plan(
+        v2_config(), paths, env, FakeRunner({"opencode2": f"opencode v{OPENCODE2_VERSION}"}), openspec_active=False
+    )
     assert ok["opencode2"].status == "already present"
 
 
 def test_ci_replaces_an_opencode2_other_than_its_effective_pin(paths, env, install_fake):  # L4-PRV-043
     install_fake("opencode2")
     config = v2_config(ci={"cli_versions": {"opencode2": "2.0.33"}})
-    runner = FakeRunner({"opencode2": "opencode v2.0.32"})
+    runner = FakeRunner({"opencode2": f"opencode v{OPENCODE2_VERSION}"})
     action = plan(config, paths, env, runner, openspec_active=False, replace_present=True)["opencode2"]
-    assert action.status == "planned" and action.reason == "found 2.0.32, pinned 2.0.33 (ci.cli_versions)"
+    assert action.status == "planned" and action.reason == f"found {OPENCODE2_VERSION}, pinned 2.0.33 (ci.cli_versions)"
     assert "@opencode/cli@2.0.33" in action.commands[0]

@@ -157,7 +157,7 @@ def test_min_version_is_enforced(make_ctx):
 
 V2_REASON = (
     "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
+    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2"
 )
 V2_VERSION = {("--version",): CmdResult(0, "opencode v2.0.32\n", "")}
 
@@ -199,7 +199,7 @@ def test_a_v1_behind_a_word_character_passes_as_major_1(make_ctx):
 V2_PROFILE = Profile(adapter="opencode", model="opencode-go/m", auth="api_key", options={"cli_major": 2})
 V2_PROFILE_REASON = (
     "opencode2 1.18.34 is OpenCode v1; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install "
-    "@opencode/cli@2.0.32 (l4 doctor --fix installs it user-locally) or remove options.cli_major"
+    "@opencode/cli@2.2.6 (l4 doctor --fix installs it user-locally) or remove options.cli_major"
 )
 
 
@@ -207,6 +207,6 @@ def test_the_binary_step_of_the_v2_binary_is_gated_by_the_opencode2_key(make_ctx
     ctx, _ = make_ctx({("--version",): CmdResult(0, "1.18.34\n", "")})
     out, _exe = _binary("opencode2", V2_PROFILE, ctx)
     assert not out.ok and out.reason == V2_PROFILE_REASON
-    ctx, _ = make_ctx({("--version",): CmdResult(0, "opencode v2.0.32\n", "")})
+    ctx, _ = make_ctx({("--version",): CmdResult(0, "opencode v2.2.6\n", "")})
     out, _exe = _binary("opencode2", V2_PROFILE, ctx)
-    assert out.ok and out.detail["major"] == 2 and out.detail["pin"] == "2.0.32"
+    assert out.ok and out.detail["major"] == 2 and out.detail["pin"] == "2.2.6"

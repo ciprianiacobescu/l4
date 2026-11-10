@@ -1,7 +1,8 @@
 """The OpenCode v2 parser (L4-OCV-006 detection, -007, -008, -009, -011; SCN-OCV-13 to -20 and -23 unit part). Every
 test reads the recorded 2.0.32 fixtures; a test that needs a shape nobody has recorded says "synthetic" and builds it
 in memory (nothing is written under the fixture directory). Each [U] fact (design D13) stays on its named fallback, and
-the test that pins the fallback carries its name."""
+the test that pins the fallback carries its name. U2, U5, U7 and U11 are [V] on 2.2.6: their `live-` fixtures are
+read by test_opencode_v2_live.py, and the tests here keep pinning the same fallbacks on the 2.0.32 recordings."""
 
 import json
 from datetime import UTC, datetime
@@ -59,7 +60,7 @@ def v2_error(status: int | None, message: str = "m", kind: str = "unknown", body
     return [event("step_start", part={}), event("error", error=error)]
 
 
-# --- SCN-OCV-13: a run that reached its step bound is never ok (not_ok_named, U7) ---
+# --- SCN-OCV-13: a run that reached its step bound is never ok (not_ok_named, U7 [V] on 2.2.6: `live-bounded`) ---
 
 
 def test_bounded_run_is_never_ok_not_ok_named(tmp_path):
@@ -85,7 +86,8 @@ def test_a_run_below_its_bound_is_not_bounded(tmp_path):
     assert not (out.detail or "").startswith("step_bound:")
 
 
-# --- SCN-OCV-14/15/16: status from the export (export_decides U5, not_ok_named U7) ---
+# --- SCN-OCV-14/15/16: status from the export (export_decides U5 [V] on 2.2.6: `live-cli-disturbed`; not_ok_named U7
+# [V] on 2.2.6: `live-bounded`, `live-error-no-route`) ---
 
 
 def test_recorded_success_without_step_finish_is_ok_by_its_export(tmp_path):
@@ -94,13 +96,14 @@ def test_recorded_success_without_step_finish_is_ok_by_its_export(tmp_path):
 
 
 def test_recorded_success_with_step_finish_and_no_export_is_ok_export_decides(tmp_path):
-    """export_decides (U5): with no export the v1 rule decides, and the last `step_finish` says `stop`."""
+    """export_decides (U5, [V] on 2.2.6, `live-cli-disturbed`): with no export the v1 rule decides, and the last
+    `step_finish` says `stop`."""
     out = parse("hello-ok-step-finish.jsonl", tmp_path, export=None, result_text='{"status":"done"}')
     assert out.status == "ok"
 
 
 def test_no_export_and_no_final_stop_is_an_error_that_names_the_export_export_decides(tmp_path):
-    """export_decides (U5): the stream ends at `text` and the export failed."""
+    """export_decides (U5, [V] on 2.2.6, `live-cli-disturbed`): the stream ends at `text` and the export failed."""
     out = parse("text-no-step-finish.jsonl", tmp_path, export=None, export_problem="exit 1")
     assert out.status == "error"
     assert out.detail == "opencode2 session export failed (exit 1) and the stream has no final stop"
@@ -120,7 +123,8 @@ def test_a_stream_with_denials_and_no_export_is_permission_blocked_export_decide
 
 
 def test_another_outcome_is_never_ok_not_ok_named(tmp_path):
-    """not_ok_named (U7): the recorded export with `outcome` changed to `failed` (synthetic edit)."""
+    """not_ok_named (U7, [V] on 2.2.6, `live-error-no-route` says `failed`): the recorded export with `outcome` changed
+    to `failed` (synthetic edit)."""
     export = recorded_export()
     export["info"]["outcome"] = "failed"
     out = parse("text-no-step-finish.jsonl", tmp_path, export=export, result_text='{"status":"done"}')
@@ -132,8 +136,8 @@ def test_another_outcome_is_never_ok_not_ok_named(tmp_path):
     [(None, "null"), (1, "1"), (True, "true"), (["succeeded"], '["succeeded"]'), ({"a": 1}, '{"a": 1}')],
 )
 def test_a_present_outcome_that_is_not_a_string_is_named_never_ok(tmp_path, value, shown):
-    """not_ok_named (U7): the export is the authority and an `outcome` key that holds no string is not `succeeded`,
-    whatever the stream's final stop says (synthetic)."""
+    """not_ok_named (U7, [V] on 2.2.6, `live-bounded`): the export is the authority and an `outcome` key that holds no
+    string is not `succeeded`, whatever the stream's final stop says (synthetic)."""
     out = parse(
         "hello-ok-step-finish.jsonl", tmp_path, export={"info": {"outcome": value}}, result_text='{"status":"done"}'
     )
@@ -182,7 +186,7 @@ def test_the_error_event_decides_before_the_exit_code_and_the_bound(tmp_path):
     assert out.status == "error" and out.detail == "opencode2 reported an error (unknown, status 500), retryable"
 
 
-# --- SCN-OCV-17: usage from the export (sum_messages U11) ---
+# --- SCN-OCV-17: usage from the export (sum_messages U11 [V] on 2.2.6: `live-implement`, `live-cli-disturbed`) ---
 
 
 def test_usage_from_the_recorded_export():
@@ -199,7 +203,8 @@ def test_parse_takes_usage_from_the_export(tmp_path):
 
 
 def test_without_an_export_usage_is_the_stream_step_finish_sums_sum_messages(tmp_path):
-    """sum_messages (U11) names the export path; with no export the `step_finish` parts are summed as in v1."""
+    """sum_messages (U11, [V] on 2.2.6, `live-implement`) names the export path; with no export the `step_finish`
+    parts are summed as in v1."""
     out = parse("hello-ok-step-finish.jsonl", tmp_path, export=None)
     assert (out.usage.input_tokens, out.usage.output_tokens, out.usage.cached_input_tokens) == (983, 11, 70)
     assert out.usage.cost_usd == 0.0 and out.usage.context_peak_tokens == 983 + 70
@@ -258,8 +263,9 @@ def test_an_export_with_no_assistant_message_leaves_the_stream_usage(tmp_path):
 
 
 def test_usage_sum_messages_over_a_synthetic_multi_step_export():
-    """sum_messages (U11): no multi-step export is recorded, so the layout is synthetic: one assistant message per step.
-    Tokens are summed, the cost falls back to the messages' sum, the peak is the largest single message."""
+    """sum_messages (U11, [V] on 2.2.6, `live-implement` and `live-cli-disturbed` in test_opencode_v2_live.py): the
+    layout here is synthetic, one assistant message per step. Tokens are summed, the cost falls back to the messages'
+    sum, the peak is the largest single message."""
 
     def assistant(inp: int, out: int, read: int, write: int, cost: float) -> dict:
         tokens = {"input": inp, "output": out, "reasoning": 9, "cache": {"read": read, "write": write}}

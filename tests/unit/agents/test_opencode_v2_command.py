@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from l4.agents.base import AdapterError, PermissionPolicy, RunRequest
+from l4.agents.opencode import GIT_WRITES
 from l4.agents.opencode_v2 import (
     IMPLEMENT_STEPS,
     JUDGE_STEPS,
+    OPENCODE_CLI,
     OpenCodeV2Adapter,
     config_content_v2,
     isolation_env_v2,
@@ -19,6 +21,7 @@ from l4.agents.opencode_v2 import (
 )
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import OpencodeOptions, Profile
+from l4.sandbox.home import uv_dirs
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "opencode" / "2.0.32"
 RESULT_DIR = Path("/tmp/l4-step/result")  # the directory the recorded normalisations were made for
@@ -98,6 +101,16 @@ def test_each_call_gets_a_state_directory_of_its_own_and_no_data_directory(tmp_p
         assert "XDG_DATA_HOME" not in env  # the credentials and opencode.db live there: never redirected
 
 
+def test_the_isolation_sets_a_data_directory_and_extra_variables_only_when_given(tmp_path):  # L4-OCV-017
+    plain = isolation_env_v2(tmp_path / "config", tmp_path / "state", "{}")
+    assert "XDG_DATA_HOME" not in plain and not {"UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(plain)
+    uv = uv_dirs({"HOME": str(tmp_path / "h")}, tmp_path / "h")
+    private = isolation_env_v2(tmp_path / "config", tmp_path / "state", "{}", data_dir=tmp_path / "data", extra=uv)
+    assert private["XDG_DATA_HOME"] == str(tmp_path / "data")
+    assert {k: private[k] for k in ("UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR")} == uv
+    assert {k: v for k, v in private.items() if k not in ("XDG_DATA_HOME", *uv)} == plain  # nothing else differs
+
+
 @pytest.mark.parametrize(
     "words",
     [("debug", "config"), ("models",), ("serve",), ("service",), ("api",), ("pair",), ("auth",), ("session",), ("",)],
@@ -144,17 +157,22 @@ def test_a_profile_without_a_model_cannot_build_a_command(tmp_path):
         OpenCodeV2Adapter().build_command(req, exe=EXE, workdir=req.cwd)
 
 
-def test_the_adapter_is_the_experimental_opencode():
+def test_the_adapter_is_the_supported_opencode():  # L4-OCV-019
     adapter = OpenCodeV2Adapter()
-    assert adapter.name == "opencode" and adapter.experimental is True
+    assert adapter.name == "opencode" and getattr(OpenCodeV2Adapter, "experimental", False) is False
 
 
 # -- SCN-OCV-09: the native rules equal the recorded normalisation ---------------------------------
 
 
-def test_implement_rules_equal_the_recorded_normalisation_followed_by_skill_and_subagent():
-    expected = [*native(recorded_permissions("config-normalised-implement.json")), rule("skill", "deny"),
-                rule("subagent", "deny")]  # fmt: skip
+def test_implement_rules_equal_the_recorded_normalisation_after_a_refuse_all_and_before_skill_and_subagent():
+    """SCN-OCV-09 as amended: `*:* deny` (L4-OCV-015) before the recorded array, the OpenCode CLI denies (L4-OCV-016)
+    after its git denies, and `skill` and `subagent` at its end."""
+    recorded = native(recorded_permissions("config-normalised-implement.json"))
+    last_git = max(i for i, item in enumerate(recorded) if item["resource"] in GIT_WRITES)
+    cli = [rule("shell", "deny", pattern) for pattern in OPENCODE_CLI]
+    expected = [rule("*", "deny"), *recorded[: last_git + 1], *cli, *recorded[last_git + 1 :],
+                rule("skill", "deny"), rule("subagent", "deny")]  # fmt: skip
     assert config_of(IMPLEMENT)["permissions"] == expected
 
 
@@ -255,8 +273,9 @@ def test_the_recorded_normalisation_of_options_tools_allows_shell_again():
 
 
 def test_tools_by_permission_only_the_listed_tools_are_allowed():
-    """Fallback `tools_by_permission` (U2): `options.tools` is a deny-all and the listed tools' allows, because
-    whether a v2 deny drops the tool's schema from the request is not recorded."""
+    """Fallback `tools_by_permission` (U2, [V] on 2.2.6, `live-tools-permission` in test_opencode_v2_live.py):
+    `options.tools` is a deny-all and the listed tools' allows. A v2 deny drops the tool from the request: the
+    recorded run had no `shell` tool."""
     rules = config_of(IMPLEMENT, tools=["read", "edit"])["permissions"]
     assert rules[:3] == [rule("*", "deny"), rule("read", "allow"), rule("edit", "allow")]
     assert not [r for r in rules if r["action"] == "shell"]  # no shell rule at all: no allow, no git deny
@@ -272,9 +291,9 @@ def test_tools_map_to_their_v2_actions_in_listed_order_once_each():
     rules = config_of(IMPLEMENT, tools=["bash", "write", "edit", "patch", "grep", "glob"])["permissions"]
     allowed = [r["action"] for r in rules if r["effect"] == "allow" and r["action"] != "external_directory"]
     assert allowed == ["shell", "edit", "grep", "glob"]
-    shell = [r for r in rules if r["action"] == "shell"]  # the git writes stay refused when shell is allowed
+    shell = [r for r in rules if r["action"] == "shell"]  # the git writes and the CLI stay refused when shell is on
     assert shell[0] == rule("shell", "allow")
-    assert [r["resource"] for r in shell[1:]] == ["git commit*", "git push*", "git reset*", "git checkout*"]
+    assert [r["resource"] for r in shell[1:]] == [*GIT_WRITES, *OPENCODE_CLI]  # the CLI denies: L4-OCV-016
     assert all(r["effect"] == "deny" for r in shell[1:])
 
 

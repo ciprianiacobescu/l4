@@ -120,16 +120,16 @@ def test_an_injected_opencode_adapter_serves_both_majors_unless_v2_has_its_own(c
     assert both.build(v1) is shared and both.build(v2) is own
 
 
-# -- SCN-OCV-26: the v2 adapter is announced as experimental -----------------------------------------------------------
+# -- SCN-OCV-26: the v2 adapter is not announced as experimental (L4-OCV-019) ---------------------------------------
 
 
-def test_a_v2_profile_selected_twice_records_one_experimental_event(ctx, monkeypatch):
+def test_a_v2_profile_selected_twice_records_no_experimental_event(ctx, monkeypatch):
     monkeypatch.setattr(OpenCodeV2Adapter, "probe", lambda self, prof, step, pctx: ProbeResult(step, True))
     sink = Sink()
     made = factory(ctx, {"oc2": profile(cli_major=2)}, events=sink)
     assert made.for_role("implementer", "u1").profile_name == "oc2"
     assert made.for_role("implementer", "u1").profile_name == "oc2"
-    assert sink.named("agent.experimental") == [{"profile": "oc2", "adapter": "opencode"}]
+    assert not sink.named("agent.experimental")
 
 
 def test_a_v1_profile_is_never_announced_as_experimental(ctx, monkeypatch):

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from l4.agents.base import AgentAdapter, McpServer
-from l4.agents.credentials import CREDENTIAL_FILE
+from l4.agents.credentials import CREDENTIAL_FILE, no_stored_login
 from l4.agents.factory import Selected
 from l4.agents.opencode import CONFIG_DIR
 from l4.agents.opencode_provider import KEY_FILE
@@ -412,6 +412,7 @@ class Workbench:
             adapter=self.selected.profile.adapter, network=True,
             caches=readonly_with_scratch(self.caches, self.agent_tmp, create=False),
             runner_tmp=runner_tmp_paths(self.host_env), cache_root=self.cache_root, tool_paths=tools,
+            hide_own_homes=no_stored_login(self.selected.profile),  # L4-OCV-018
         )  # fmt: skip
 
     def gate_spec(
