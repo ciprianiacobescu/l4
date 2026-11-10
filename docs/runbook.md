@@ -785,8 +785,16 @@ new run late, and the time is the difference between your clock and the forge's.
   quotes the clause and the reason. Answer with what the clause means for this task (the value or behaviour the code
   must have), or that it stays unasserted. The next step of the task reads the answer in its prompt, and the judge
   checks the code against it. A task asks about a criterion once: a later step that lists the same criterion again is
-  kept, and the judge gets those clauses in the section `Clauses the implementer's tests do not assert`. The delegate
-  answers such a question where the unit is in its scope and `ambiguous` is in `delegate.kinds`.
+  kept, and the judge gets those clauses in the section `Clauses the implementer's tests do not assert`. An answer
+  is for the text of the criterion it was given for: if you edit the body of that scenario afterwards (the criterion id
+  hashes the scenario's name, so it stays), the clause is asked again. A question you dismiss settles the clause with no
+  answer: the judge is told `(dismissed)`. The delegate answers such a question where the unit is in its scope and
+  `ambiguous` is in `delegate.kinds`; these questions count against `delegate.max_answers_per_task` (default 3, per task:
+  a fourth clause of one task waits for you), and a step can raise up to six against `delegate.max_questions_per_run`
+  (default 5, the rest wait for the next run). A step whose `unasserted` list is malformed (an item with no `why` or
+  `clause`, an id such as `Req 1.2`) or names a criterion id the unit does not have is **not** a question: it is a
+  failed attempt (`task.attempt_failed`, reason `the agent's result is invalid: unasserted item 2 has no why`), counted
+  against `implementer.max_task_attempts` like any invalid result, and the next attempt's prompt names the problem.
 - The **delegate** is on (`delegate.enabled: true` on `<base>`) and it escalated a question to a person: see
   [the procedure for the delegate](#procedure-the-delegate-answered-or-escalated). Without the delegate, or while it has
   not yet looked at a question, the unit waits for you as above.

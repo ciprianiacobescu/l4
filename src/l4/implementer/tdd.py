@@ -49,7 +49,14 @@ from l4.gates.trace import trace_env
 from l4.implementer import resultalias
 from l4.implementer.base_run import VIA as BASE_VIA
 from l4.implementer.base_run import BaseRunResult, combine, confirmed_by_base_run
-from l4.implementer.clauses import ClauseAsk, clause_question, recorded_entries, split_clauses
+from l4.implementer.clauses import (
+    ClauseAsk,
+    clause_question,
+    foreign_problems,
+    recorded_entries,
+    split_clauses,
+    unasserted_excerpt,
+)
 from l4.implementer.discrimination import (
     PROOF_PRE_SATISFIED,
     PROOF_RED_ASSERTION,
@@ -1091,10 +1098,16 @@ def agent_step(
         result = parse_result(normalized.obj)
     except ResultInvalid as exc:  # a defect of the normalizer: the attempt fails, the gates never see it
         return StepOutcome("failed", reason=f"the agent's result is invalid: {exc}", excerpt=values)
-    split = split_clauses(wb, task, result.unasserted)  # L4-IMP-095: a new entry makes the step a blocked step
+    # L4-IMP-095: an item the normalization dropped, or one that names a criterion the unit does not have, is a failed
+    # attempt that tells the agent (nothing is asked, so nothing is left to stop a loop of questions); a new entry is a
+    # blocked step
+    criteria = wb.provider.criteria(wb.ref) if result.unasserted or normalized.problems else ()
+    if problems := [*normalized.problems, *foreign_problems(result.unasserted, criteria)]:
+        reason = f"the agent's result is invalid: {'; '.join(problems)}"
+        return StepOutcome("failed", reason=reason, excerpt=f"{unasserted_excerpt(problems, criteria)}\n{values}")
+    split = split_clauses(wb, task, result.unasserted)
     if result.status == "blocked" or split.new:
         dropped = sum(f.count or 0 for f in normalized.fixes if f.field == "questions" and f.fix == "dropped")
-        criteria = wb.provider.criteria(wb.ref) if split.new else ()
         asks = tuple(clause_question(task, role, entry, criteria) for entry in split.new)
         return StepOutcome("blocked", result, dropped_questions=dropped, clauses=asks)
     if hits := worktree_secrets(wb.git, wb.redactor, changed):  # L4-SEC-008: before any gate or commit

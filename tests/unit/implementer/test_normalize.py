@@ -380,6 +380,52 @@ def test_unasserted_items_that_do_not_hold_the_shape_are_dropped_with_one_count(
     assert done.obj["unasserted"] == [entry(1)]
 
 
+def test_a_dropped_unasserted_item_is_also_a_problem_that_names_it():
+    """Decision 1 of the review: a dropped item must not let the step pass as if nothing was listed."""
+    bad = [
+        ({"criterion": CRITERION, "clause": "c"}, "unasserted item 2 has no why"),
+        ({"criterion": CRITERION, "clause": "c", "why": "  "}, "unasserted item 2 has no why"),
+        ({"criterion": CRITERION, "why": "w"}, "unasserted item 2 has no clause"),
+        ({"clause": "c", "why": "w"}, "unasserted item 2 has no criterion"),
+        ({"criterion": "C-0a1b2c3d (Req 1.2)", "clause": "c", "why": "w"}, '"C-0a1b2c3d (Req 1.2)"'),
+        ({"criterion": "Req 1.2", "clause": "c", "why": "w"}, '"Req 1.2"'),
+        ({"criterion": CRITERION + "\n", "clause": "c", "why": "w"}, '"C-0a1b2c3d\\n"'),  # fullmatch, not `$`
+        ({"criterion": "C-XYZ", "clause": "c", "why": "w"}, '"C-XYZ"'),
+        ("its action is recorded", "unasserted item 2 is not an object"),
+        ({"criterion": CRITERION, "clause": "c" * 5, "why": 3}, "unasserted item 2 has no why"),
+    ]
+    for item, said in bad:
+        done = run(valid(unasserted=[entry(1), item]))
+        assert [said in p and p.startswith("unasserted item 2 ") for p in done.problems] == [True], (
+            item,
+            done.problems,
+        )
+        assert done.obj["unasserted"] == [entry(1)]  # the item is still dropped, and the fix still recorded
+        assert done.fixes == [Fix("unasserted", "dropped", count=1)]
+
+
+def test_every_dropped_item_is_named_with_its_place_in_the_list():
+    done = run(valid(unasserted=[{"criterion": "Req 1.2", "clause": "c", "why": "w"}, entry(2), {"clause": "c"}]))
+    assert len(done.problems) == 2
+    assert done.problems[0].startswith("unasserted item 1 ") and done.problems[1].startswith("unasserted item 3 ")
+    assert "no criterion" in done.problems[1] and "no why" in done.problems[1]
+
+
+def test_an_unasserted_that_is_not_a_list_is_a_problem():
+    assert run(valid(unasserted="its action is recorded")).problems == ["unasserted is not a list"]
+
+
+def test_a_criterion_in_upper_case_hex_is_lowered_and_kept():
+    done = run(valid(unasserted=[entry(1, criterion="C-0A1B2C3D"), entry(2)]))
+    assert done.problems == [] and [e["criterion"] for e in done.obj["unasserted"]] == [CRITERION, CRITERION]
+    assert done.fixes == [Fix("unasserted.criterion", "replaced", count=1)]
+
+
+def test_a_clean_object_has_no_problem():
+    assert run(valid()).problems == [] and run(valid(unasserted=[entry(1)])).problems == []
+    assert run(valid(unasserted=[entry(n) for n in range(1, 5)])).problems == []  # a cut is no problem
+
+
 def test_unasserted_after_three_the_rest_are_cut_in_order():
     done = run(valid(unasserted=[entry(n) for n in range(1, 5)]))
     assert done.fixes == [Fix("unasserted", "cut", count=1)]

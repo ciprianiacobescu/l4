@@ -25,7 +25,9 @@ def test_the_unit_waits_while_the_question_is_open_and_resumes_the_task_after_th
     parked = run_l4([red_listing()])
     assert parked.code == 11 and parked.outcome["units"][0]["phase_after"] == "awaiting_human"
     [raised] = parked.events("question.raised")
-    assert raised["kind"] == "ambiguous" and raised["clause"] == {"criterion": KNOWN, "phase": "red"}
+    assert raised["kind"] == "ambiguous"
+    assert {k: v for k, v in raised["clause"].items() if k != "text_sha"} == {"criterion": KNOWN, "phase": "red"}
+    assert raised["clause"]["text_sha"]
     assert "- [ ] 1.1" in parked.pushed(f"{UNIT_DIR}/tasks.md")
 
     waiting = run_l4([red_step(), green_step()])  # the question is still open

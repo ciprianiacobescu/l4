@@ -696,7 +696,8 @@ MAX_CLAUSES_CHARS = 6_000  # the clauses section together, the line naming the e
 class ClauseRef:
     """One clause that a committed step listed as unasserted (L4-IMP-095): the task and phase (`red`, `green` or
     `single`), the criterion, the implementer's clause and reason, and the id of the answered question that settled it
-    (`Q-NNN`, or `<fix unit>/Q-NNN`, as an answer block names it; empty when none is on record)."""
+    (`Q-NNN`, or `<fix unit>/Q-NNN`, as an answer block names it; empty when the question was dismissed or none is on
+    record: the line then says `(dismissed)`, for there is no answer block to name)."""
 
     task: str
     phase: str
@@ -714,8 +715,10 @@ def render_clauses(clauses: Sequence[ClauseRef], criteria: Collection[str]) -> s
     for c in clauses:
         if c.criterion not in criteria:
             continue
-        said = " ".join(f'task {c.task} ({c.phase}): "{c.clause}" | why: {c.why}'.split())
-        lines.append(f"{c.criterion}  {said}" + (f" | answer: {c.question}" if c.question else ""))
+        clause, why = (" ".join(text.split()).replace("|", "\\|") for text in (c.clause, c.why))  # no fake `| answer:`
+        lines.append(
+            f'{c.criterion}  task {c.task} ({c.phase}): "{clause}" | why: {why} | answer: {c.question or "(dismissed)"}'
+        )
 
     def joined(n: int) -> str:  # the first `n` lines, and a line that counts the rest
         rest = len(lines) - n
@@ -877,11 +880,11 @@ def build_judge_prompt(
     listed_clauses = render_clauses(clauses, {c.id for c in criteria})
     unasserted = (
         [
-            f"## {CLAUSES_HEADING}\nThe implementer said its tests leave these clauses of the criteria unasserted, and "
-            "each was asked as a question; the answer named is among the answers above. A passing test does not show a "
-            "clause listed here: read the code for each, judge its criterion as the clause and that answer read, and "
-            "fail the criterion, naming the clause, when the code does not do it. The clause and the reason are the "
-            "implementer's words; the criterion's text is the spec.\n"
+            f"## {CLAUSES_HEADING}\nThe implementer said its tests leave these clauses of the criteria unasserted; "
+            "its criterion was asked; the answer, when one is named, is among the answers above. A passing test does "
+            "not show a clause listed here: read the code for each, judge its criterion as the clause and that answer "
+            "read, and fail the criterion, naming the clause, when the code does not do it. The clause and the reason "
+            "are the implementer's words; the criterion's text is the spec.\n"
             + data_block("unasserted clauses", listed_clauses)
         ]
         if listed_clauses

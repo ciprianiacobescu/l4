@@ -143,3 +143,40 @@
   check src tests`, `uv run --frozen ruff format --check src tests` and `openspec validate unasserted-clause-question
   --strict`. Do not run the whole suite more than once, never two at a time, and never wait on a process with a
   `while pgrep` loop.
+
+## 8. The review (D1, D2, D3b, D5)
+
+No new scenario id is used: the cases are folded into SCN-IMP-514 (a dropped item fails the attempt), SCN-IMP-516 (a
+dismissed answer, a pipe in a clause, a fix unit's task name), SCN-IMP-517 (`minLength`) and SCN-IMP-519 (a foreign
+criterion id, a scenario whose body was edited).
+
+- [x] 8.1 A malformed `unasserted` item is a failed attempt (MAJOR, fail-open). Tests first:
+  `tests/unit/implementer/test_normalize.py` (a dropped item, an empty `why`, an annotated id, an alias, a trailing
+  newline, a non-object, a non-list each give a problem text with the item's place; upper-case hex is lowered, kept and
+  recorded as a `replaced` fix; a cut is no problem) and `tests/unit/implementer/test_unasserted_clauses.py` (each case
+  is a `task.attempt_failed` whose retry prompt names the item, no question, nothing kept; three failures trip the
+  breaker). Then `normalize._unasserted` (lowercase, `fullmatch`, `Normalized.problems`) and the failed return in
+  `tdd.agent_step` (design D3b).
+- [x] 8.2 A criterion id that is not the unit's is a failed attempt (MAJOR, unbounded). Tests first in
+  `test_unasserted_clauses.py`: four runs with four different foreign ids give failed attempts, no question and the
+  breaker; the retry prompt names the id and lists the unit's criteria; a failing step (and a blocked result) that lists a
+  foreign id is not turned into blocked. Then `clauses.foreign_problems` and `clauses.unasserted_excerpt`, and the
+  `is not one of this unit's criteria` sentence is gone from the clause question.
+- [x] 8.3 `unasserted` criterion ids are matched with `fullmatch` (minor). Covered by the trailing-newline case of 8.1.
+  `criteria_ids` keeps its pattern (design Risks).
+- [x] 8.4 A dismissed question names no answer (minor). Tests first: `Split.dismissed`, `recorded_entries` and a run
+  through `run_task` record no `question` for it; `render_clauses` ends the line with `| answer: (dismissed)`; the
+  instruction no longer says each was asked as a question (`test_judge_clauses.py`). Then `clauses.py` and `judge.py`.
+- [x] 8.5 Documented, no code: clause questions count against `delegate.max_answers_per_task` and one step can raise up
+  to six questions against `delegate.max_questions_per_run` (design Risks, runbook 7.1).
+- [x] 8.6 An answer settles the criterion's text it was given for (minor). Tests first: an edited scenario body (same
+  id) makes the entry new in `split_clauses`, in `recorded_entries` and in a run (asked again as Q-002); a question with
+  no `text_sha` settles nothing; `question.raised.clause` holds `text_sha`. Then `clauses.text_sha`, `ClauseAsk.text_sha`
+  and `loop._raise_blocked`.
+- [x] 8.7 Nits. (a) a fix unit's entry shows `<fix unit>/1.1` on the judge line (`ladder._clauses`); (b) `|` in a clause or
+  a reason is written `\|` (`render_clauses`); (c) `split_clauses` and `recorded_entries` return at once with no entry (a
+  test that makes the ledger read fail); (d) `clause` and `why` have `minLength: 1` in the packaged schema, its fixture,
+  SPEC 7.4 and the Codex strict copy (`test_result.py`, `test_codex.py`).
+- [x] 8.8 SPEC.md (L4-IMP-095, the normalization list, row 123, SCN-IMP-514/516/517/519), the spec delta, the design, the
+  runbook 7.1 and the changelog follow. `python3 scripts/check_spec.py docs/SPEC.md`, `openspec validate
+  unasserted-clause-question --strict`, `uv run --frozen ruff check` and `ruff format --check` on the touched files.

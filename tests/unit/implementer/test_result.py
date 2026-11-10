@@ -55,6 +55,8 @@ def test_bytes_and_mappings_are_accepted_and_nulls_mean_absent():
         ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c"}]}, r"unasserted[0]"),
         ({"unasserted": [{"criterion": "C-XYZ", "clause": "c", "why": "w"}]}, r"unasserted[0].criterion"),
         ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c" * 301, "why": "w"}]}, r"unasserted[0].clause"),
+        ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "", "why": "w"}]}, r"unasserted[0].clause"),
+        ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c", "why": ""}]}, r"unasserted[0].why"),
     ],
 )
 def test_schema_violations_name_the_path(patch: dict, where: str):

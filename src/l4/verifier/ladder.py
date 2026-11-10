@@ -425,7 +425,8 @@ def _notes(events: Sequence[LedgerEvent]) -> str:
 def _clauses(events: Sequence[LedgerEvent]) -> list[ClauseRef]:
     """The clauses that committed steps listed as unasserted and recorded (L4-IMP-095), in ledger order: the
     `unasserted` of a `task.red_ok`, of a green `task.done` and of a single step's (`tdd: exempt`). A record that does
-    not hold the shape is skipped. A fix unit's question id is named as its answer block names it."""
+    not hold the shape is skipped. A fix unit's task and question id are named as `_done_tasks` and an answer block do.
+    """
     found = []
     for e in events:
         if e.type not in ("task.red_ok", "task.done") or not isinstance(e.data.get("unasserted"), list):
@@ -441,7 +442,8 @@ def _clauses(events: Sequence[LedgerEvent]) -> list[ClauseRef]:
             qid = question if isinstance(question, str) else ""
             if qid and isinstance(fix, str) and fix:
                 qid = f"{fix}/{qid}"
-            found.append(ClauseRef(str(e.data.get("task")), phase, item["criterion"], item["clause"], item["why"], qid))
+            task = f"{fix}/{e.data.get('task')}" if isinstance(fix, str) and fix else str(e.data.get("task"))
+            found.append(ClauseRef(task, phase, item["criterion"], item["clause"], item["why"], qid))
     return found
 
 

@@ -2360,7 +2360,8 @@ prompt would cut a source, naming the file and the key that set the budget.
     "unasserted": {"type": "array", "maxItems": 3, "items": {
       "type": "object", "required": ["criterion", "clause", "why"],
       "properties": {"criterion": {"type": "string", "pattern": "^C-[0-9a-f]{8}$"},
-        "clause": {"type": "string", "maxLength": 300}, "why": {"type": "string", "maxLength": 300}}},
+        "clause": {"type": "string", "minLength": 1, "maxLength": 300},
+        "why": {"type": "string", "minLength": 1, "maxLength": 300}}},
       "description": "clauses of the cited scenarios that this step's tests or code leave unasserted or undecided, for any reason; a step that lists one is not kept, and each becomes a question that holds the task"},
     "tdd_exemption": {"type": ["object", "null"], "properties": {"reason": {"type": "string"}}},
     "notes_for_verifier": {"type": "string", "maxLength": 2000},
@@ -2459,8 +2460,10 @@ The normalization SHALL apply these rules, with the limits, enums and pattern re
 - a `notes_for_verifier` that is not a string is dropped; a `criteria_ids` entry that is not a string with the
   pattern, a `suppressions` item without a string `file`, an integer `line`, a string `rule` and a string `reason`,
   and a `tdd_exemption` or `lesson_proposals` of the wrong shape are dropped;
-- an `unasserted` that is not a list is dropped; an item that is not an object with a `criterion` string with the
-  pattern, a string `clause` and a string `why` is dropped; after three items the rest are cut (L4-IMP-095);
+- an `unasserted` that is not a list is dropped; the hex digits of an `unasserted` criterion id are lowered; an item
+  that is not an object with a `criterion` string that is wholly `C-` and 8 hex digits, a non-empty string `clause` and
+  a non-empty string `why` is dropped, and the drop is also a problem that fails the step's attempt; after three items
+  the rest are cut (L4-IMP-095);
 - a `summary`, `notes_for_verifier`, suppression `reason`, or `unasserted` `clause` or `why` longer than its limit keeps
   its start and ends with `[cut by L4: <n> characters removed]`, all within the limit.
 
@@ -2513,51 +2516,67 @@ with `outcome` one of `accepted`, `discarded`, `failed`, and the call's cost as 
 SHALL end the step as an agent limit does (L4-AVL-006). A kiro-cli or command step MUST NOT get a repair call.
 
 **L4-IMP-095 A clause a step leaves unasserted is asked before the task goes on, and the judge checks it.** The result
-object (L4-IMP-005) SHALL have the optional property `unasserted`: an array of at most 3 objects, each with the
-required `criterion` (a string with the pattern of `criteria_ids`), `clause` (a string of at most 300 characters: the
-clause of the criterion's scenario, quoted) and `why` (a string of at most 300 characters). The file-result schema
-(L4-IMP-019) SHALL keep it, and the strict schema of a native adapter (L4-FAC-009) SHALL make it nullable, `null`
-meaning absent. The normalization (L4-IMP-020) SHALL drop an `unasserted` that is not an array and an item that does
-not hold that shape, cut the items after the third, and cut a `clause` or `why` over its limit with the cut marker,
-each recorded as a fix; it SHALL NOT add an entry. The red template (`red@14`) SHALL tell the agent to list there each
-clause of a scenario the task cites that its tests leave unasserted, for any reason, and the green template (`green@7`)
-each value or behaviour of a cited scenario that its code would have to choose and the spec does not settle; both SHALL
-say not to say it only in `notes_for_verifier`, and that a step that lists a clause no answer of the task settles is not
-kept. The harness SHALL NOT read the words of `notes_for_verifier` or `summary` as such a list.
+object (L4-IMP-005) SHALL have the optional property `unasserted`: an array of at most 3 objects, each with the required
+`criterion` (a string with the pattern of `criteria_ids`), `clause` (a string of 1 to 300 characters: the clause of the
+criterion's scenario, quoted) and `why` (a string of 1 to 300 characters). The file-result schema (L4-IMP-019) SHALL
+keep it, and the strict schema of a native adapter (L4-FAC-009) SHALL make it nullable, `null` meaning absent. The
+normalization (L4-IMP-020) SHALL lower the hex digits of a criterion id, drop an `unasserted` that is not an array and
+an item that does not hold that shape (a criterion id is matched whole: a trailing newline, an annotation such as
+`C-1a2b3c4d (Req 1.2)` and an alias such as `Req 1.2` do not hold it), cut the items after the third, and cut a `clause`
+or `why` over its limit with the cut marker, each recorded as a fix; it SHALL NOT add an entry. The red template
+(`red@14`) SHALL tell the agent to list there each clause of a scenario the task cites that its tests leave unasserted,
+for any reason, and the green template (`green@7`) each value or behaviour of a cited scenario that its code would have
+to choose and the spec does not settle; both SHALL say not to say it only in `notes_for_verifier`, and that a step that
+lists a clause no answer of the task settles is not kept. The harness SHALL NOT read the words of `notes_for_verifier`
+or `summary` as such a list.
+
+A step whose normalization dropped an `unasserted` item (or the whole list), or one of whose entries names a criterion
+id that is not one of the unit's criteria, SHALL be a failed attempt, whatever its status: nothing of the step is kept,
+it is counted as an invalid result is (`task.attempt_failed` with the reason `the agent's result is invalid:
+<problems>`, bounded by `implementer.max_task_attempts` and subject to the escalation rules), no question is raised, and
+the next prompt carries an excerpt that names each problem (`unasserted item 2 has no why`, `unasserted: C-99999999 is
+not one of this unit's criteria`) and the unit's criterion ids. Such a step SHALL NOT be a `blocked` step, and a step
+that fails for another reason SHALL NOT become one by listing an id that is not the unit's.
 
 An entry SHALL be *settled* when the unit's ledger holds a `question.raised` of the same task and fix unit (or of none)
-whose `clause.criterion` is the entry's criterion, and that question is answered (L4-QMD-005); the newest such question
-settles it. Any other entry SHALL be *new*. The key is the task and the criterion, not the clause's words, so a task asks
-about a criterion once. When a red, green or single step lists a new entry, the harness SHALL handle it as a `blocked`
-step (L4-IMP-008, L4-IMP-021), whatever its status: nothing of the step is kept (red and single back to the step's base,
-green back to the red commit), it is not a failed attempt, and the harness SHALL raise the result's own questions and then one question per
-new entry, in order, of kind `ambiguous`, with Blocking tasks the task, the criterion on its Criteria line when it is one
-of the unit's, the title `Task <k> (<phase>) left a clause of <criterion> unasserted: <clause>`, and a context that
-quotes the clause and the reason, says `<criterion> is not one of this unit's criteria.` when it is not, and says that
-the step was not kept and that the next step of the task reads the answer. Each such question SHALL be recorded as
-`question.raised{..., clause: {criterion, phase}}`. A `blocked` result with a new entry and no question of its own SHALL
-NOT also get the question made from its summary. The question SHALL hold the task as any implementer question does
-(L4-QMD-005): the task stays pending, so the unit goes to the clarifier or to `awaiting_human` and SHALL NOT reach
-verification while the question is open; the delegate answers it where the unit is in its scope and `ambiguous` is in
-`delegate.kinds` (L4-DLG-003); and the next step of the task reads the answer (L4-CLR-006). A question whose task is
-done holds nothing, which is why the step is not kept: verification is held through the pending task, not by a new rule.
+whose `clause.criterion` is the entry's criterion and whose `clause.text_sha` is the hash of that criterion's text as
+the unit has it now, and that question is answered (L4-QMD-005); the newest such question settles it. Any other entry
+SHALL be *new*, so an answer given before the scenario's body was edited (a criterion id hashes the scenario's name, not
+its body) settles nothing. The key is the task and the criterion, not the clause's words, so a task asks about a
+criterion once. When a red, green or single step lists a new entry, the harness SHALL handle it as a `blocked` step
+(L4-IMP-008, L4-IMP-021), whatever its status: nothing of the step is kept (red and single back to the step's base,
+green back to the red commit), it is not a failed attempt, and the harness SHALL raise the result's own questions and
+then one question per new entry, in order, of kind `ambiguous`, with Blocking tasks the task, the criterion on its
+Criteria line, the title `Task <k> (<phase>) left a clause of <criterion> unasserted: <clause>`, and a context that
+quotes the clause and the reason and says that the step was not kept and that the next step of the task reads the
+answer. Each such question SHALL be recorded as `question.raised{..., clause: {criterion, phase, text_sha}}`. A
+`blocked` result with a new entry and no question of its own SHALL NOT also get the question made from its summary. The
+question SHALL hold the task as any implementer question does (L4-QMD-005): the task stays pending, so the unit goes to
+the clarifier or to `awaiting_human` and SHALL NOT reach verification while the question is open; the delegate answers
+it where the unit is in its scope and `ambiguous` is in `delegate.kinds` (L4-DLG-003); and the next step of the task
+reads the answer (L4-CLR-006). A question whose task is done holds nothing, which is why the step is not kept:
+verification is held through the pending task, not by a new rule.
 
 A step whose entries are all settled SHALL be judged as today, and its `task.red_ok`, or the `task.done` of a green or
-single step, SHALL record them as `unasserted: [{criterion, clause, why, question}]`, the texts redacted. Every judge
-prompt of a round (the whole diff, each part, each batch and each follow-up) SHALL carry, in its user text after the
-answers (L4-VER-065) and before the implementer's hint, the section `## Clauses the implementer's tests do not assert
-(check each against the code)` with the harness's instruction and a data block of one line per recorded entry whose
-criterion the prompt judges, `<criterion>  task <k> (<phase>): "<clause>" | why: <why> | answer: <question>`, at most
-6,000 characters together, the lines past that counted in a last line `(+N clauses not shown)`; its length SHALL be
-charged to the judge's context budget before the spec text. The instruction SHALL say that a passing test does not show
-a listed clause, that the judge reads the code for each and judges its criterion as the clause and the named answer read
-(L4-VER-066), failing it with the clause named when the code does not do it, and that the clause and the reason are the
-implementer's words. A prompt with no such entry SHALL have no section. The judge's system text and `judge@13` SHALL NOT
-change, and the `notes_for_verifier` block SHALL keep its text and place. [V, a consumer run: a red step wrote in its
-notes that it did not assert a field because the spec text was ambiguous there; the green step chose a value, the judge
-passed the unit, and the next unit met another capability's spec that sets the field to null, which cost a verdict
-question and a spec fix. A `done` result's `questions` are not read (only a `blocked` result's are raised), and an open
-question whose task is done holds nothing.]
+single step, SHALL record them as `unasserted: [{criterion, clause, why, question}]`, the texts redacted, with
+`question` only when the settling question has an answer (answered, accepted or answered by the clarifier): a dismissed
+question settles the entry and is not named. Every judge prompt of a round (the whole diff, each part, each batch and
+each follow-up) SHALL carry, in its user text after the answers (L4-VER-065) and before the implementer's hint, the
+section `## Clauses the implementer's tests do not assert (check each against the code)` with the harness's instruction
+and a data block of one line per recorded entry whose criterion the prompt judges, `<criterion> task <k> (<phase>):
+"<clause>" | why: <why> | answer: <question>` (`answer: (dismissed)` when the entry records no question; `<k>` and the
+question id are `<fix unit>/<k>` and `<fix unit>/Q-NNN` for a fix unit's, as the done tasks and the answer blocks name
+them; a `|` in the clause or the reason is written `\|`), at most 6,000 characters together, the lines past that counted
+in a last line `(+N clauses not shown)`; its length SHALL be charged to the judge's context budget before the spec text.
+The instruction SHALL say that the criterion was asked and the answer, when one is named, is among the answers above,
+that a passing test does not show a listed clause, that the judge reads the code for each and judges its criterion as
+the clause and the named answer read (L4-VER-066), failing it with the clause named when the code does not do it, and
+that the clause and the reason are the implementer's words. A prompt with no such entry SHALL have no section. The
+judge's system text and `judge@13` SHALL NOT change, and the `notes_for_verifier` block SHALL keep its text and place.
+[V, a consumer run: a red step wrote in its notes that it did not assert a field because the spec text was ambiguous
+there; the green step chose a value, the judge passed the unit, and the next unit met another capability's spec that
+sets the field to null, which cost a verdict question and a spec fix. A `done` result's `questions` are not read (only a
+`blocked` result's are raised), and an open question whose task is done holds nothing.]
 
 ### 7.5 Post-step guards, commits and trailers
 
@@ -8936,7 +8955,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 119 | `escalate-spent-profiles` | a move along `roles.implementer` never takes a spent profile, passes over one that used its share, and a later run continues it: a profile whose failed attempts of the phase in the task's window (L4-IMP-075, earlier runs included) reached `max_task_attempts` is refused by the move's selection as a constraint (`spent: <n> failed attempts of <phase> of task <k> (implementer.max_task_attempts <m>)`), so the walk goes on to the next profile with the usual checks; a move passes over a profile which has itself failed `escalate_after` attempts while a later profile can take the step (the selection walks in two passes: the first refuses such a profile as a constraint, `used its share: <n> failed attempts of <phase> of task <k> (implementer.escalate_after <m>)`, so it is not probed, not recorded as selected and not an implementer profile of the unit; the second, run only when the first takes nothing, refuses the spent ones alone, so a profile with attempts left takes the step when nothing after it can, and a move that lands there is asked again at once); before the first attempt, when the newest `implementer.escalated` of the phase in the window moved it from a profile after the run's selected profile, the first move is asked from that profile, and a refusal is recorded with `on` (the run's profile, where the step then starts); a halt on a profile with a later profile, after a refused move, has `; no later profile can take it (<reason>)` before `; last failure:`. `l4.implementer.loop` (`Seeded.escalated_from`, `EscalationRequest.spent` and `used`, `spent_constraint`, `used_constraint`, `_escalate_if_due`, `_escalate_while_due`, `_run_task`), `Orchestrator._escalation_profile`, `ProgressLog._escalation_skipped`. A consumer's red step moved from glm to claude-sonnet before a soft deadline; the next run started on deepseek, moved one profile on to glm, which had used its share, and halted on glm's third failure with claude-sonnet unrun. Limits: a cheaper profile that the step moved past gets no attempt of it until a retry, resume or restart starts a new window; a refused continuation costs one selection walk, and a move costs a second one when the first passed over a used profile and took nothing; a move at `max_task_attempts` is still not tried; the task's profile is not carried from red to green across runs; after a move every limit fallback of the task (`Orchestrator._task_veto`, applied by `switch_profile` and `_wait_in_run`) refuses the move's spent profiles, so the step never goes back to one, and the run's profile drops that veto (L4-IMP-094, L4-IMP-017, L4-IMP-018, L4-IMP-075, SCN-IMP-500..509; `openspec/changes/escalate-spent-profiles/`) | the unit tests (`test_escalate_spent_profiles` of the implementer and the orchestrator, `test_fixloop_escalate`, `test_progress`) |
 | 120 | `delegate-quote-tolerance` | a `checked` quote of the delegate that is in the cited file word for word resolves when the delegate named a wrong line or left out the bold of a markdown file: a `path:line` quote that does not start within three lines of the named line, and that the same file (whitespace folded) holds at exactly one offset, resolves at the line where it starts, and the answered `delegate.result` records `resolved: <path>:<line>` beside the delegate's `ref`; two or more offsets, or none, do not resolve. In a `.md` or `.markdown` file a `spec:` or `path:line` quote is also compared with `**` removed from both sides, when the quote so folded keeps 12 characters, and a quote is placed only when it is alone in each form (a sentence present once plain and once in bold is ambiguous); backticks, `__` and single `*` and `_` stay significant, and other files are never folded. Each new comparison runs after today's, so every entry that resolves today resolves at its cited line. `reply._resolves` returns `Resolved | None`, with `_folds`, `_flat_md`, `_in_window` and `_line_of`; the reason, the retry and `delegate@7` are unchanged. Two consecutive units of a consumer's plan had a reply discarded and asked again: one quoted `AGENTS.md` word for word as `AGENTS.md:1`, about 62 lines off ($2.44), the next quoted a `spec:design.md` line without the `**` around its code span ($0.99). Limits: in a markdown file `a ** b` and `a b` compare equal, while `__init__` and `init` stay distinct; a quote the file holds twice off the cited line still costs a retry (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143; `openspec/changes/delegate-quote-tolerance/`) | the unit tests (`test_reply_quote_tolerance`, `test_reply`, `test_pass`) |
 | 121 | `gate-flake-rerun` | step 3 runs a failed gate again when its only failures are a few pre-existing tests, and a test that passes in one run is a minor finding, not a blocker. `l4.verifier.gate_repeat` (new): `pre_existing` (not a red test of the unit; `file_of_id` over `git ls-tree` of head, preferring a changed path; the file not in `git diff base head`), `settle` (the first `TestGateOutcome` and a callable that runs the gate again as `<gate>-repeat-<n>`; at most `verifier.flaky_repeats` runs in all, stopping once every failure passed in a run, after an unusable repeat or after a failure of a test that is not pre-existing; `MAX_REPEAT_FAILURES` 5; `FLAKY_TITLE` "a pre-existing test is flaky in the {gate} gate"; the handed-on report takes each flaky test's passing case; `verify.gate_repeat`), `repeat_name`, `is_repeat`. `l4.verifier.gates.run_test_gate` and `run_e2e_gate` take `name`; `TestGateOutcome.ok` counts blocking findings and gains `repeats` and `repeat_note`; `GateLine.status` gains `flaky`; `ladder` step 3 settles each gate, the test gate's repeats without the coverage environment, the e2e gate after the settled test gate; `fixloop.failure_set` skips the rows of repeats. A consumer's unit failed its round on one pre-existing browser test it never touched, and a person had to commit a test fix after its fix unit could change nothing (L4-VER-076, L4-VER-002, L4-VER-003, SCN-VER-05, SCN-VER-44, SCN-VER-288..297; `openspec/changes/gate-flake-rerun/`). Limits: a flake that the unit's own change caused is minor too; a pre-existing test that fails every run costs two more gate runs by default; a test in a file the unit changed, a Go id and a run with more than five failures are not repeated; new tests are never repeated; step 1's repeat (L4-VER-038) is unchanged. Review additions: `tree_reset` puts the worktree back to what run 1 started from before each repeat (entries new since run 1's start, none inside a directory that was already untracked as a whole), a repeat that fails exactly as run 1 did (`same_failures`) or that the soft deadline leaves no time for (`budget`) ends the repeats, an `L4Exit` of a repeat is an unusable repeat, a JavaScript or TypeScript id is mapped among the files of its extension only, the judge's gate summary carries the repeat note, and `verifier.flaky_repeats` is 1 to 5 | the unit tests (`test_gate_repeat`, `test_gate_repeat_ladder`, `test_fixloop`) |
-| 123 | `unasserted-clause-question` | a clause of a cited scenario that a step leaves unasserted, or a value it would decide that the spec does not settle, is asked before the task goes on, and the judge checks what a committed step still left unasserted. `l4/implementer-result@1` gains `unasserted` (at most 3 `{criterion, clause, why}`, 300 characters each text; the packaged schema, its fixture and SPEC 7.4; the file-result schema keeps it; the Codex strict copy makes it nullable, the recorded 0.160.0 strict schema stays as recorded) and `ImplementerResult.unasserted`; `normalize._unasserted` drops a malformed item, cuts after three and cuts a long text. `l4.implementer.clauses` (new): `split_clauses` gives the new entries and the settled ones (an answered question of the same task, fix unit and criterion recorded as `question.raised{clause: {criterion, phase}}`; the criterion, never the clause's words, is the key) and `clause_question` the `ambiguous` question (`Task <k> (<phase>) left a clause of <criterion> unasserted: <clause>`, the clause and reason quoted, Blocking tasks the task). `l4.implementer.tdd.agent_step` returns a `blocked` step when the result lists a new entry, whatever its status; `StepOutcome`, `RedOutcome` and `GreenOutcome` carry the `clauses`, `loop._questions` and `_raise_blocked` raise them after the result's own questions (no summary question then), so the question holds the still pending task and the unit cannot reach verification while it is open, with no new rule in the orchestrator, the delegate or the planner. `task.red_ok` and the green and single `task.done` record the settled entries (`unasserted: [{criterion, clause, why, question}]`); `ladder._clauses` reads them and `judge.build_judge_prompt(clauses=)` shows those of the prompt's criteria in the section `## Clauses the implementer's tests do not assert (check each against the code)`, after the answers and before the hint, at most 6,000 characters, charged to the judge's budget; the system text stays `judge@13`. Templates `red@14` and `green@7` say when to fill the field; `contract@13` and `output@1` are unchanged; the lock is regenerated. A consumer's red step wrote in its notes that it did not assert a field because the spec text was ambiguous; green chose a value, the judge passed, and the next unit met another capability's spec that sets the field to null (L4-IMP-095, L4-IMP-005, L4-IMP-020, SCN-IMP-280, SCN-VER-170, SCN-IMP-510..519; `openspec/changes/unasserted-clause-question/`). Limits: an agent that writes only a note is judged as today; a later clause of a criterion already asked for the task is not asked, only shown to the judge; the questions of a `done` result are still not read | a red step that lists an unasserted clause parks the unit with an `ambiguous` question and runs again with the answer; the unit tests (`test_unasserted_clauses`, `test_judge_clauses`, `test_unasserted_clause`, `test_normalize`, `test_result`, `test_codex`, `test_template_lock`) |
+| 123 | `unasserted-clause-question` | a clause of a cited scenario that a step leaves unasserted, or a value it would decide that the spec does not settle, is asked before the task goes on, and the judge checks what a committed step still left unasserted. `l4/implementer-result@1` gains `unasserted` (at most 3 `{criterion, clause, why}`, 1 to 300 characters each text; the packaged schema, its fixture and SPEC 7.4; the file-result schema keeps it; the Codex strict copy makes it nullable, the recorded 0.160.0 strict schema stays as recorded) and `ImplementerResult.unasserted`; `normalize._unasserted` lowers the hex of a criterion id, drops a malformed item (matched whole) with a problem text, cuts after three and cuts a long text; `agent_step` fails the attempt, like an invalid result, for a dropped item or a criterion id that is not the unit's (`clauses.foreign_problems`), so neither is ever asked. `l4.implementer.clauses` (new): `split_clauses` gives the new entries and the settled ones (an answered question of the same task, fix unit and criterion, recorded as `question.raised{clause: {criterion, phase, text_sha}}` and still for the criterion's text, whose hash is `text_sha`; the criterion, never the clause's words, is the key) and `clause_question` the `ambiguous` question (`Task <k> (<phase>) left a clause of <criterion> unasserted: <clause>`, the clause and reason quoted, Blocking tasks the task). `l4.implementer.tdd.agent_step` returns a `blocked` step when the result lists a new entry, whatever its status; `StepOutcome`, `RedOutcome` and `GreenOutcome` carry the `clauses`, `loop._questions` and `_raise_blocked` raise them after the result's own questions (no summary question then), so the question holds the still pending task and the unit cannot reach verification while it is open, with no new rule in the orchestrator, the delegate or the planner. `task.red_ok` and the green and single `task.done` record the settled entries (`unasserted: [{criterion, clause, why, question}]`, `question` only for an answered, accepted or clarified one; a dismissed question settles the entry, and the judge line says `answer: (dismissed)`); `ladder._clauses` reads them and `judge.build_judge_prompt(clauses=)` shows those of the prompt's criteria in the section `## Clauses the implementer's tests do not assert (check each against the code)`, after the answers and before the hint, at most 6,000 characters, charged to the judge's budget; the system text stays `judge@13`. Templates `red@14` and `green@7` say when to fill the field; `contract@13` and `output@1` are unchanged; the lock is regenerated. A consumer's red step wrote in its notes that it did not assert a field because the spec text was ambiguous; green chose a value, the judge passed, and the next unit met another capability's spec that sets the field to null (L4-IMP-095, L4-IMP-005, L4-IMP-020, SCN-IMP-280, SCN-VER-170, SCN-IMP-510..519; `openspec/changes/unasserted-clause-question/`). Limits: an agent that writes only a note is judged as today; a later clause of a criterion already asked for the task is not asked, only shown to the judge; the questions of a `done` result are still not read | a red step that lists an unasserted clause parks the unit with an `ambiguous` question and runs again with the answer; the unit tests (`test_unasserted_clauses`, `test_judge_clauses`, `test_unasserted_clause`, `test_normalize`, `test_result`, `test_codex`, `test_template_lock`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -12719,13 +12738,18 @@ scenario is a spec defect (§26).
 - **Then** no step of task 1.1 runs, no verification round starts, the unit stays `awaiting_human` with exit 11, and with
   `delegate.enabled` and the unit in scope the delegate pass asks that question
 
-#### SCN-IMP-514 (−) A malformed or excess entry is dropped or cut · L4-IMP-095, L4-IMP-020
+#### SCN-IMP-514 (−) A malformed or excess entry is dropped or cut, and a dropped one fails the attempt · L4-IMP-095, L4-IMP-020
 - **Given** a result whose `unasserted` holds an item without `why`, an item whose `criterion` is `C-XYZ`, and four
   well-formed items, the first of which has a clause of 400 characters
 - **When** the result is normalized
 - **Then** `result.normalized` records `{field: unasserted, fix: dropped, count: 2}`, `{field: unasserted, fix: cut,
   count: 1}` and `{field: unasserted.clause, fix: cut, length: 400}`; three entries are left, and the long clause ends
-  with `[cut by L4: … characters removed]` within 300 characters
+  with `[cut by L4: … characters removed]` within 300 characters; and the step is a failed attempt, not a kept one:
+  `task.attempt_failed` with the reason `the agent's result is invalid: unasserted item 1 has no why; unasserted item 2
+  has criterion "C-XYZ" that is not a criterion id (...)`, nothing of the step kept, no question raised, and the next
+  prompt names both items. The same holds for an item with an empty `why` or `clause`, an annotated id `C-1a2b3c4d (Req
+  1.2)`, an alias `Req 1.2` and an id with a trailing newline; a criterion `C-1A2B3C4D` is read as `C-1a2b3c4d` (a fix
+  `{field: unasserted.criterion, fix: replaced, count: 1}`) and kept
 
 #### SCN-IMP-515 (−) The words of a note are not a signal · L4-IMP-095
 - **Given** a red step whose `notes_for_verifier` says `I did not assert entry.action, because the spec text is
@@ -12739,15 +12763,18 @@ scenario is a spec defect (§26).
 - **When** the judge prompt of a round is built
 - **Then** it has the section `## Clauses the implementer's tests do not assert (check each against the code)`, after the
   answers and before the implementer's hint, whose data block has the line `C-1a2b3c4d  task 1.1 (red): "<clause>" |
-  why: <why> | answer: Q-001`; a batch or follow-up prompt that does not judge `C-1a2b3c4d` has no such line; a unit with
-  no entry has no section; the system text is unchanged and the version is `judge@13`
+    why: <why> | answer: Q-001`; a batch or follow-up prompt that does not judge `C-1a2b3c4d` has no such line; a unit with
+  no entry has no section; the system text is unchanged and the version is `judge@13`. An entry whose question was
+  dismissed is recorded without `question` and its line ends `| answer: (dismissed)`, the instruction says the answer
+  is named only when there is one, a fix unit's entry names its task as `<fix unit>/1.1`, and a `|` in the clause or
+  the reason is written `\|`, so a clause cannot fake an answer
 
 #### SCN-IMP-517 (+) The strict and the file schemas carry the field · L4-IMP-095, L4-IMP-005, L4-FAC-009
 - **Given** the canonical schema `l4/implementer-result@1`
 - **When** the strict copy is made for Codex, and the file-result schema is derived
 - **Then** in the strict copy `unasserted` is a nullable array of at most 3 objects with `additionalProperties: false`
-  and the required `criterion`, `clause` and `why`, a reply with `"unasserted": null` parses with no entry, and the
-  file-result schema has the property as the canonical schema has it
+  and the required `criterion`, `clause` and `why` (the last two of 1 to 300 characters), a reply with `"unasserted":
+  null` parses with no entry, and the file-result schema has the property as the canonical schema has it
 
 #### SCN-IMP-518 (+) The red and green prompts say when to fill the field · L4-IMP-095, L4-IMP-004
 - **Given** the templates `red.md` and `green.md`
@@ -12762,7 +12789,11 @@ scenario is a spec defect (§26).
   whose step lists a new entry
 - **When** the step ends
 - **Then** two questions are raised, the result's own first, and no `Task 1.1 is blocked` question; the fix unit's
-  question is in the fix unit's `questions.md`, holds the fix unit's task, and its `question.raised` carries `fix_unit`
+  question is in the fix unit's `questions.md`, holds the fix unit's task, and its `question.raised` carries `fix_unit`.
+  Two cases are not asked as before: a step that lists a well-formed criterion id that is not one of the unit's (four
+  runs with four different ids) is a failed attempt each time, counted against `max_task_attempts` and escalated, with no
+  question, and a failing step that lists such an id stays failed; and an entry whose question was answered before the
+  body of its scenario was edited (the id stays, `question.raised.clause.text_sha` differs) is new and asked again
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

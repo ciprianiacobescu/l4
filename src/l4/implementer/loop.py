@@ -234,7 +234,17 @@ def _raise_blocked(
         chore = {"chore": True} if chore_unit and question.kind is QuestionKind.TECHNICAL else {}
         # `chore`: a blocked fix chore's technical question, which carries the fix-task note (L4-DLG-025)
         ask = clause_of.get(qid)
-        which = {"clause": {"criterion": ask.criterion, "phase": phase}} if ask is not None else {}
+        which = (
+            {
+                "clause": {
+                    "criterion": ask.criterion,
+                    "phase": phase,
+                    **({"text_sha": ask.text_sha} if ask.text_sha else {}),
+                }
+            }
+            if ask is not None
+            else {}
+        )
         wb.emit(
             "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **chore, **which,
             **wb.asker(),

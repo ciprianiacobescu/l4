@@ -48,8 +48,8 @@ The canonical schema `l4/implementer-result@1` (the packaged `implementer-result
 "unasserted": {"type": "array", "maxItems": 3, "items": {
   "type": "object", "required": ["criterion", "clause", "why"],
   "properties": {"criterion": {"type": "string", "pattern": "^C-[0-9a-f]{8}$"},
-                 "clause": {"type": "string", "maxLength": 300},
-                 "why": {"type": "string", "maxLength": 300}}},
+                                  "clause": {"type": "string", "minLength": 1, "maxLength": 300},
+                 "why": {"type": "string", "minLength": 1, "maxLength": 300}}},
   "description": "clauses of the cited scenarios that this step's tests or code leave unasserted or undecided, for any reason; a step that lists one is not kept, and each becomes a question that holds the task"}
 ```
 
@@ -69,11 +69,18 @@ The canonical schema `l4/implementer-result@1` (the packaged `implementer-result
   checks the new property's strict form. The recorded replies, which have no `unasserted`, stay valid against the
   recorded schema and against the canonical one.
 - The normalization (L4-IMP-020) gains one rule, `_unasserted`, among the drops and the cuts: an `unasserted` that is
-  not a list is dropped (`{field: "unasserted", fix: "dropped"}`); an item that is not an object with a `criterion`
-  string of the pattern, a string `clause` and a string `why` is dropped (`count`); after three items the rest are cut
+  not a list is dropped (`{field: "unasserted", fix: "dropped"}`); the hex digits of a criterion id are lowered first
+  (`C-1A2B3C4D` is `C-1a2b3c4d`; `{field: "unasserted.criterion", fix: "replaced", count}`); an item that is not an
+  object with a `criterion` string that is wholly `C-` and 8 hex digits (`fullmatch`: the pattern's `$` lets a trailing
+  newline through, and `criteria_ids` keeps that pre-existing pattern, see the Risks), a non-empty string `clause` and a
+  non-empty string `why` is dropped (`count`); after three items the rest are cut
   (`{field: "unasserted", fix: "cut", count}`); a `clause` or `why` over 300 characters keeps its start and ends with
   the cut marker (`{field: "unasserted.clause"` or `"unasserted.why", fix: "cut", length}`). The limits are read from
-  the schema, as the others are. The normalization never adds an entry.
+  the schema, as the others are. The normalization never adds an entry. A drop is not a pass: it also gives
+  `Normalized.problems`, one text for each dropped item or list (`unasserted item 2 has no why`, `unasserted item 1 has
+  criterion "Req 1.2" that is not a criterion id ...`, `unasserted is not a list`), and `agent_step` turns any problem
+  into a failed attempt (D3b). Before the review a dropped item was only a fix on the ledger and the step went on as if
+  nothing had been listed: the fail-open that the field exists to close.
 
 *Alternative rejected:* read words of `notes_for_verifier` (`ambiguous`, `unclear`, `did not assert`). A test can show
 that a note with the word is caught, never that a note without it means nothing is open, and prose that quotes the word
@@ -85,8 +92,9 @@ judged as today (SCN-IMP-515).
 An entry is *settled* when the unit's ledger (`_answer_events(wb)`: the run's ledger, and a fix unit's own) holds a
 `question.raised` whose `task` is the step's task, whose `fix_unit` is the step's (`wb.event_context.get("fix_unit")`,
 or absent for both), and whose `clause.criterion` is the entry's criterion, and whose question in the step's
-`questions.md` is answered (`is_answered`: answered, accepted, answered by the clarifier, dismissed). Its question is the
-newest such one. Every other entry is *new*. `clauses.split_clauses(wb, task, entries) -> Split(new, settled)`, with
+`questions.md` is answered (`is_answered`: answered, accepted, answered by the clarifier, dismissed), and whose
+`clause.text_sha` is the hash of the criterion's text as the unit has it now (`clauses.text_sha`: SHA-256 of the text
+with each run of whitespace one space, 16 hex digits). Its question is the newest such one. Every other entry is *new*. `clauses.split_clauses(wb, task, entries) -> Split(new, settled)`, with
 `settled` as `(entry, question_id)` pairs, is the one place this is decided.
 
 The key is the task and the criterion, not the clause's text. A clause re-quoted in other words, or a second clause of
@@ -95,6 +103,12 @@ the loop "list, ask, answer, list again" is bounded by the task's criteria. What
 recorded and shown to the judge (D5). A text key (the hash of the normalised clause) was rejected for that reason: an
 agent that re-quotes a clause differently after the answer would park the unit again, and nothing else bounds it (a
 `blocked` step is no failed attempt, D3).
+
+An OpenSpec criterion id hashes the scenario's *name*, not its body, so an edit of the body keeps the id: without
+`text_sha` an answer given for the old body would settle a clause of the new one. `_raise_blocked` records the hash in
+`question.raised.clause` (`ClauseAsk.text_sha`); an entry whose question has none, or another, is new and is asked
+again; so is an entry of a criterion that is no longer the unit's. A dismissed question settles the entry (a person
+decided there is nothing to say) but is in `Split.dismissed`: it has no answer, so D5 records no `question` for it.
 
 Only an answered question settles. An open one cannot meet a running step of its task (it holds the task), and if it
 did (a person resumed by hand), asking again is the safe side: it never lets a step pass with the question open. A
@@ -129,15 +143,34 @@ one per new entry from `clauses.clause_question(task, phase, entry, criteria)`:
   or that it stays unasserted. The next step of the task reads the answer, and the judge checks the code against it.
   ```
 
-  with `<criterion> is not one of this unit's criteria.` after the quote when the id is not the unit's (the entry is
-  still asked: a wrong id is the agent's mistake, and the clause may be a real gap);
-- no options.
+  - no options. A criterion id that is not one of the unit's is never asked (D3b).
 
 The summary question (`Task <k> is blocked`) is made only when there is neither a question of the result nor a new
-entry. `_raise_blocked` records each entry's question as `question.raised{..., clause: {criterion, phase}}` (the
+entry. `_raise_blocked` records each entry's question as `question.raised{..., clause: {criterion, phase, text_sha}}` (the
 workbench adds `fix_unit`), which is what D2 reads. The clause and the reason are the agent's text: `questions.md`
 redacts and escapes them as it does every context (`_block`), and the event holds no text of the agent beyond the title,
 as today.
+
+### D3b. A malformed or foreign entry is a failed attempt
+
+Two kinds of entry are never asked, because nothing would bound the questions (a `blocked` step counts no attempt):
+
+- an item the normalization dropped (missing or empty `why` or `clause`, a criterion id that is not `C-` and 8 hex
+  digits after lowering the hex: an annotated `C-1a2b3c4d (Req 1.2)`, an alias `Req 1.2`, a trailing newline), or a list
+  that is not a list (D1);
+- an item whose criterion id is well-formed but is not one of the unit's (`wb.provider.criteria(wb.ref)`):
+  `clauses.foreign_problems` gives `unasserted: C-99999999 is not one of this unit's criteria`. Before the review such
+  an entry was asked as a new question each time (the key was the id, so a different id was a new key), counted no
+  attempt, and a step that was failing for another reason became `blocked` by listing one.
+
+In `agent_step`, after `parse_result` and before `split_clauses`, any such problem returns `StepOutcome("failed",
+reason="the agent's result is invalid: <problems>", excerpt=<unasserted_excerpt> + the values line)`, whatever the
+status. The rest is the existing path of an invalid result: `run_red`, `run_green` and `run_single` return `failed`,
+`_run_task` counts it (`task.attempt_failed`, `max_task_attempts`, `escalate_after`, the breaker), the changes are
+discarded as for any failed step, and the next prompt carries the reason and the excerpt, which names each problem with
+its place in the list and gives the unit's criterion ids (at most 12) and what an item is. Nothing of the step is kept,
+so no entry of it is lost silently: the agent sees the list is invalid and lists again. The excerpt quotes at most 40
+characters of a bad id.
 
 ### D4. Blocking decision: the question holds the task
 
@@ -176,7 +209,8 @@ resets to the red commit and deletes the unit's WIP ref).
 ### D5. Settled entries are recorded, and the judge checks them
 
 A step whose entries are all settled goes on as today. The event that carries the step's notes records them as
-`unasserted: [{criterion, clause, why, question}]`, the settled entries in the result's order, `clause` and `why`
+`unasserted: [{criterion, clause, why, question}]`, the settled entries in the result's order, `question` only when
+the settling question has an effective answer (answered, accepted, answered by the clarifier; not dismissed), `clause` and `why`
 redacted with `wb.redactor.redact_text` (each at most 300 characters already); an empty list is not written. Those
 events are `task.red_ok` (both emits in `run_red`: the red commit and the already-satisfied commit; the
 already-satisfied `task.done` that follows repeats its notes and does not repeat the entries), the `task.done` of
@@ -184,7 +218,8 @@ already-satisfied `task.done` that follows repeats its notes and does not repeat
 writes no notes, because the saved result is not what the person read, and writes no entries either. `split_clauses` is
 called again where the event is written, so a replayed held step (L4-IMP-065), which does not pass through
 `agent_step`, records the same; an entry that is no longer settled there (its question was superseded meanwhile) is
-recorded without `question`.
+recorded without `question`. `split_clauses` and `recorded_entries` return at once, with no ledger and no `questions.md`
+read, when the step listed no entry.
 
 `ladder._clauses(events) -> list[ClauseRef]` reads those records from the same events `_notes` reads, in ledger order,
 one `ClauseRef(task, phase, criterion, clause, why, question)` per entry; `phase` is `red` for a `task.red_ok`, `single`
@@ -194,14 +229,19 @@ prompt's `criteria` (a part, a batch and a follow-up each judge their own criter
 
 ```
 ## Clauses the implementer's tests do not assert (check each against the code)
-The implementer said its tests leave these clauses of the criteria unasserted, and each was asked as a question; the
-answer named is among the answers above. A passing test does not show a clause listed here: read the code for each,
+The implementer said its tests leave these clauses of the criteria unasserted; its criterion was asked; the answer,
+when one is named, is among the answers above. A passing test does not show a clause listed here: read the code for each,
 judge its criterion as the clause and that answer read, and fail the criterion, naming the clause, when the code does
 not do it. The clause and the reason are the implementer's words; the criterion's text is the spec.
 <l4:data source="unasserted clauses">
 C-1a2b3c4d  task 1.1 (red): "the entry's action is null" | why: the spec does not say which value | answer: Q-004
 </l4:data>
 ```
+
+A line ends `| answer: <id>`, or `| answer: (dismissed)` when the entry records no question (a dismissed question has
+no answer block, so the line must not name one). A fix unit's entry shows its task as `<fix unit>/1.1`, as `_done_tasks`
+writes it. The clause and the reason are one line each with every `|` written `\|`, so a clause cannot fake `| answer:
+Q-…` for the judge.
 
 The lines together are at most `MAX_CLAUSES_CHARS = 6_000`; the lines past it are left out and counted in a last line
 `(+N clauses not shown)`. A prompt with no such entry has no section, so every prompt of a unit without entries is
@@ -252,6 +292,12 @@ template versions that tests and SPEC scenarios name move: `contract@13+red@14`,
 - **A green whose code would pass is discarded when it lists a new entry.** Nothing of it is kept, as for any blocked
   green (its gates are not even run); the next green, with the answer, usually writes the same code with the answered
   value.
+- **Clause questions count against the delegate's limits.** `delegate.max_answers_per_task` (default 3) counts the
+  answers per task, so a task with more than three clause questions (a task asks once per criterion) has the rest left
+  to a person; and one step can raise up to six questions (three of its own, three entries) against
+  `delegate.max_questions_per_run` (default 5), the rest waiting for the next run. No code changes for this.
+- **A pre-existing pattern:** `criteria_ids` is checked with `^C-[0-9a-f]{8}$` by `re.search`, so an id with a trailing
+  newline passes there. It is left as it is; only `unasserted` ids are matched whole.
 - **Up to six questions from one step** (three of its own, three entries). Each is a delegate call; `delegate.batch_size`
   batches verdict questions only, not these.
 - **The questions of a `done` result stay unread.** An agent that puts a question there instead of in `unasserted` is

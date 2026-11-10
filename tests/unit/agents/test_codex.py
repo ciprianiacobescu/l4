@@ -53,6 +53,8 @@ def test_the_strict_unasserted_is_a_nullable_array_of_closed_objects():
     assert strict["type"] == ["array", "null"] and strict["maxItems"] == 3
     assert strict["items"]["additionalProperties"] is False
     assert strict["items"]["required"] == ["criterion", "clause", "why"]
+    assert strict["items"]["properties"]["clause"]["minLength"] == 1  # an empty clause or reason is no entry
+    assert strict["items"]["properties"]["why"]["minLength"] == 1
     assert strict["description"] == CANONICAL["properties"]["unasserted"]["description"]
     assert "unasserted" in strictify_schema(CANONICAL)["required"]
 
