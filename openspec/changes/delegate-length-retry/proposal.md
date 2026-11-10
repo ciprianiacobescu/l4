@@ -21,8 +21,8 @@ is not enough: the line a person reads must carry it.
   the refusal names every rule it breaks, joined by `; `, each in today's words; a reply that breaks one rule has
   today's reason word for word.
 - An `escalate` reply that breaks only length rules is cut to the limits at once, with no retry, even when an attempt
-  is left. Its reason is redacted whole, then cut after 1000 characters and ended with ` … [cut at 1000 of <n>
-  characters]`. Its entries whose `ref` is over 300 characters, and then those after the 20th, are dropped. It is
+  is left. Its reason is redacted, folded and redacted again, then measured and, over 1000 characters, cut there (never
+  inside a placeholder) and ended with ` … [cut at 1000 of <n> characters]`. Its entries whose `ref` is over 300 characters, and then those after the 20th, are dropped. It is
   recorded `delegate.result{status: escalated, decision: escalate, cut}`. The outcome is an escalation either way, and
   a retry would cost a paid call and delay the person (design D4).
 - For any other decision (`answer`, `accept`, `reject`, `retry`), a length refusal is retryable like a reference that

@@ -52,8 +52,9 @@ per broken rule, in this fixed order, each in today's words:
 
 - `the reason has <n> characters: the limit is 1000`;
 - `the reply has <n> checked entries: the limit is 20`;
-- `a checked ref has <n> characters: the limit is 300`, then the same for `quote` and `claim` (600 each). `<n>` is the
-  longest value of that field among the entries; today the code names the first entry that is over.
+- `a checked ref has <n> characters: the limit is 300`, then the same for `quote` and `claim` (600 each); in these
+  clauses `<n>` is the longest value of that field among the entries (today the code names the first entry that is
+  over), and the reason's and the count's clauses carry their own `<n>`.
 
 For an `escalate`, problems lead to the cut of D4. For any other decision they lead to a refusal whose reason is the
 clauses joined by `; `, so a reply that breaks one rule has today's reason word for word. Naming every broken rule lets
@@ -138,11 +139,15 @@ the limits gives the `Kept` of today. `_settle` needs no new branch: it takes th
 
 `_cut_escalation(reason, checked, redactor) -> Kept`:
 
-- **The reason.** It is redacted whole first (`redactor.redact_text(reason)`): a cut inside a secret would leave a
-  prefix the redactor cannot see, the reason L4-IMP-064 and L4-DLG-004 redact before any cut. When the redacted
-  reason is over 1000 characters, it keeps its first 1000, followed by `CUT_MARK = " … [cut at {limit} of {n}
-  characters]"`, with `limit` 1000 and `n` the redacted reason's length. The mark says that the text is cut and how much
-  is missing; it is the harness's, in brackets, at the end.
+- **The reason.** It is redacted as written, folded and redacted again (`clean_reason`: the one order of every record
+  of a delegate's reason; the first pass sees a configured value that holds a line break, which the fold would turn
+  into a space): a cut inside a secret would leave a prefix the redactor cannot see, the reason L4-IMP-064 and
+  L4-DLG-004 redact before any cut. It is measured after that. When the redacted, folded reason is over 1000 characters,
+  it keeps its first 1000, followed by `CUT_MARK = " … [cut at {limit} of {n} characters]"`, with `limit` 1000 and `n`
+  that text's length, so the line is bounded at 1000 and the mark even when placeholders lengthen it. A cut that
+  falls inside a `[REDACTED:…]` placeholder is made just before it. The mark says that the text is cut and how much is
+  missing; it is the harness's, in brackets, at the end. Within 1000 characters the reason is returned as it is, redacted
+  and folded.
 - **The entries.** An entry whose `ref` is over 300 characters is dropped, then entries after the 20th are dropped,
   in reply order. Each kept entry is `{"ref": <redacted ref>}`, as an escalation records today. A ref is a locator
   (`path:line`, `spec:<file>#<anchor>`, `test:<id>`): one cut in the middle locates nothing, and one over 300 characters
@@ -171,13 +176,13 @@ text whose decision cannot change the outcome.
 end would be shown as its first 300 characters, and the mark would never be seen. A delegate's escalate reason of 301
 to 1000 characters is already cut that way today. So `_escalate` takes `whole: bool = False` and `cut: Sequence[str] =
 ()`. The kept-escalate branch of `_settle` (an `escalate`, cut or not) passes `whole=True` and `cut=kept.cut`. The
-reason is then redacted and its whitespace folded, but it is not cut: `check_reply` already bounds it at 1000
+reason is then redacted, folded and redacted again, but it is not cut: `check_reply` already bounds it at 1000
 characters, or 1000 and the mark. Every other escalation keeps 300 characters: a discarded reply, a limit, a refused
 write, an unusable chain, a served-model veto. Those texts are the harness's; for a discarded reply the text is the
 harness's reason, not the delegate's.
 
-The `delegate.result` reason holds the same text as the line, as today. The sticky section and `l4 status` are summaries
-that name the question and point to `questions.md`; they keep 300 characters. L4-DLG-008's cap is amended for a
+The `delegate.result` reason holds the same text as the line, as today. The sticky section and `l4 status` (its text and its
+`--json` `reason`) are summaries that name the question and point to `questions.md`; they keep 300 characters. L4-DLG-008's cap is amended for a
 delegate's own `escalate` reason.
 
 ### D6. No `maxLength` or `maxItems` in the result schemas

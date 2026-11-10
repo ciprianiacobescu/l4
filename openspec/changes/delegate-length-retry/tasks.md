@@ -21,8 +21,9 @@
     does not fit a verdict question`, not retryable; an `escalate` for Q-002 to Q-001 with a long reason is refused
     `the reply answers Q-002, not Q-001`, not retryable, a `Discarded` (not cut).
   - SCN-DLG-152: a `Redactor` that knows a 40-character token placed at characters 990 to 1030 of a 1100-character
-    escalate reason: the cut reason holds the placeholder and no prefix of the token of 4 characters or more, and ends
-    with the mark.
+    escalate reason: the cut reason is cut before the placeholder (never inside it), holds no prefix of the token of 4
+    characters or more, and ends with the mark; a configured value with a line break in a 900-character reason is
+    redacted and the reason kept whole.
   - SCN-DLG-150: `delegate_schema()` and `batch_schema(5)` have no `maxLength` and no `maxItems` under `reason`,
     `checked`, `checked.items.properties.{ref,quote,claim}` (for the batch, under `results.items`); `batch_schema(5)
     ["properties"]["results"]["maxItems"] == 5`; a reply with a reason of 1028 characters has `validate(reply,
@@ -110,3 +111,15 @@
   `tests/unit/delegate/test_review_fixes.py`, `tests/unit/test_template_lock.py` and `tests/unit/docs` (the whole of
   `tests/unit/delegate` takes more than ten minutes). Then `ruff check` and `ruff format --check` on the changed files, `python scripts/check_spec.py
   docs/SPEC.md`, and `openspec validate delegate-length-retry --strict`. Report the counts.
+
+## 3. Review fixes
+
+- [x] 3.1 One order for every recorded delegate reason, `reply.clean_reason`: redact as written, fold whitespace,
+  redact again; `_cut_escalation` returns it whether it is cut or not, measures after it and cuts at 1000 with `n` the
+  length of that text, never inside a `[REDACTED:…]` placeholder; `_escalate` and the length deferral use it. Tests:
+  `test_reply_length_retry.py` (the configured multi-line secret, the folded and the grown reason, the placeholder
+  cut), `test_pass.py` (a token and a multi-line configured secret in a long escalate reason reach no record).
+- [x] 3.2 `l4 status --json` caps the delegate `reason` at 300 like its text (`lines.status_json`); tests:
+  `test_status_delegate.py`, `test_needs_person_label.py` (the sticky section shows 300 of a 900-character reason),
+  `test_pass.py` (a harness escalation reason of 400 characters stays cut to 300).
+- [x] 3.3 The spec says `<n>` once, per clause, and SCN-DLG-146 and SCN-DLG-152 read redact, then cut.

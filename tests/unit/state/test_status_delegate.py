@@ -111,3 +111,20 @@ def test_the_line_of_a_kiro_answer_names_its_credits(unit_repo, trailers, capsys
     _, js, _ = run_cli(unit_repo, capsys, "status", "--json")
     row = next(r for r in json.loads(js)["units"][0]["delegate"] if r["question"] == "Q-003")
     assert row["credits"] == 1.84 and row["counted_usd"] == 3.0
+
+
+LONG = "".join(str(n % 10) for n in range(900))  # a delegate's own escalate reason, kept whole in the record
+
+
+def test_a_long_escalation_reason_is_cut_to_300_in_the_text_and_the_json(unit_repo, trailers, capsys):  # SCN-DLG-146
+    long = ("delegate.result", {
+        "question": "Q-004", "id": "Q-004", "status": "escalated", "kind": "product", "decision": "escalate",
+        "reason": LONG, "called": True,
+    })  # fmt: skip
+    push(unit_repo, trailers, DECIDED[0], DECIDED[1], long)
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x")
+    assert f"Delegate: Q-004 escalated by the delegate: {LONG[:300]}\n" in out and LONG[:301] not in out
+    _, out, _ = run_cli(unit_repo, capsys, "status", "--unit", "openspec:add-x", "--json")
+    (unit,) = json.loads(out)["units"]
+    (row,) = [r for r in unit["delegate"] if r["question"] == "Q-004"]
+    assert row["reason"] == LONG[:300] and row["text"].endswith(LONG[:300]) and LONG[:301] not in row["text"]

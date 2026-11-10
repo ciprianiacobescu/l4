@@ -335,16 +335,35 @@ def _length_problems(reason: str, checked: Sequence[Mapping[str, str]]) -> list[
     return problems
 
 
+_PLACEHOLDER = re.compile(r"\[REDACTED:[^\]]*\]")
+
+
+def clean_reason(text: str, redactor: Redactor) -> str:
+    """A delegate's reason as it may be recorded, in the one order every record uses (L4-DLG-029): redacted as it was
+    written (a configured value with a line break matches only so), its whitespace folded, redacted again."""
+    return redactor.redact_text(" ".join(redactor.redact_text(text).split()))
+
+
+def _cut_point(text: str, limit: int) -> int:
+    """Where to cut `text` at `limit` characters: never inside a `[REDACTED:...]` placeholder, so before it."""
+    for found in _PLACEHOLDER.finditer(text):
+        if found.start() < limit < found.end():
+            return found.start()
+    return limit
+
+
 def _cut_escalation(reason: str, checked: Sequence[Mapping[str, str]], redactor: Redactor) -> Kept:
     """An `escalate` kept at the limits (L4-DLG-029; the person decides the question whatever the delegate writes next).
-    The reason is redacted whole first, so that a cut never leaves a prefix of a secret, then cut after
-    `MAX_REASON_CHARS` with `CUT_MARK`. An entry whose `ref` is over the limit is dropped, then those after the 20th;
-    the kept ones record their redacted `ref` only, so the length of a quote or a claim does not matter. Within every
-    limit this is the escalation as it always was."""
+    The reason is redacted, folded and redacted again first (`clean_reason`: a cut never leaves a prefix of a secret,
+    and a secret with a line break is seen), and measured after that: over `MAX_REASON_CHARS` it is cut there, never
+    inside a placeholder, and ends with `CUT_MARK`; within it, it is returned as it is, redacted. An entry whose `ref`
+    is over the limit is dropped, then those after the 20th; the kept ones record their redacted `ref` only, so the
+    length of a quote or a claim does not matter. Within every limit this is the escalation as it always was."""
     cut: list[str] = []
-    if len(reason) > MAX_REASON_CHARS and len(whole := redactor.redact_text(reason)) > MAX_REASON_CHARS:
-        mark = CUT_MARK.format(limit=MAX_REASON_CHARS, n=len(whole))
-        reason = whole[:MAX_REASON_CHARS] + mark
+    reason = clean_reason(reason, redactor)
+    if len(reason) > MAX_REASON_CHARS:
+        mark = CUT_MARK.format(limit=MAX_REASON_CHARS, n=len(reason))
+        reason = reason[: _cut_point(reason, MAX_REASON_CHARS)] + mark
         cut.append("reason")
     kept = [e for e in checked if len(e.get("ref", "")) <= MAX_CHECKED_CHARS["ref"]]
     if len(kept) < len(checked) or len(kept) > MAX_CHECKED:

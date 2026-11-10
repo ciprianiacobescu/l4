@@ -18,7 +18,7 @@ from ..delegate.conftest import (  # noqa: F401
     run_l4,
 )
 from ..implementer.conftest import green_step, red_step
-from ..orchestrator.conftest import edit_questions_on_origin
+from ..orchestrator.conftest import UNIT_DIR, edit_questions_on_origin
 from .conftest import forge_env, use_fake_gitlab
 
 REASON = "no project document decides this"
@@ -50,3 +50,18 @@ def test_an_answered_question_has_no_label(delegate_run, forge_env, use_fake_git
     (note,) = gitlab.notes[1]
     assert "Answered by the delegate" in note["body"] and "Q-001" in note["body"]
     assert "delegate-model-1 via fake" in note["body"]
+
+
+def test_the_sticky_section_shows_300_characters_of_a_long_escalate_reason(  # SCN-DLG-146
+    delegate_run, forge_env, use_fake_gitlab
+):
+    gitlab = use_fake_gitlab
+    reason = "".join(str(n % 10) for n in range(900))
+    run = delegate_run([delegate_blocked("product"), escalation(why=reason)])
+    assert run.code == 11
+    assert f"Escalated by:** the delegate (delegate-model-1 via fake): {reason}\n" in run.pushed(
+        f"{UNIT_DIR}/questions.md"
+    )  # the line holds it whole
+    (note,) = gitlab.notes[1]
+    assert f"Q-001 (product): Which error 1?: {reason[:300]}\n" in note["body"] + "\n"
+    assert reason[:301] not in note["body"]

@@ -70,7 +70,7 @@ from l4.delegate.prompt import (
     report_test_ids,
     verdict_material,
 )
-from l4.delegate.reply import Discarded, HeadTree, Kept, check_reply
+from l4.delegate.reply import Discarded, HeadTree, Kept, check_reply, clean_reason
 from l4.delegate.scope import PlansView, in_scope, plan_cost, plans_view
 from l4.delegate.settings import DelegateSettings, delegate_settings
 from l4.exitcodes import ExitCode, L4Exit
@@ -700,7 +700,7 @@ class _Pass:
             why = f"the reply was discarded: {kept.reason}" if kept.status == "discarded" else kept.reason
             if kept.retryable and attempts_used(events, key) + 1 < self.cfg.max_attempts_per_question:
                 # a reference that did not resolve: asked again once, with the reason in the next prompt (L4-DLG-005)
-                shown = self.s.app.redactor.redact_text(" ".join(kept.reason.split()))
+                shown = clean_reason(kept.reason, self.s.app.redactor)
                 self._defer(
                     target, key, shared, f"the reply was discarded: {shown}; it is asked again",
                     self._now() + timedelta(seconds=RETRY_AFTER_S), who, reply, discarded=shown,
@@ -1050,11 +1050,12 @@ class _Pass:
         called: bool = False, cost: float | None = None, status: str = "escalated", decision: str | None = None,
         checked: Sequence[Any] = (), whole: bool = False, cut: Sequence[str] = (),
     ) -> None:  # fmt: skip
-        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger. `whole`:
-        the reason is a delegate's own `escalate` (`check_reply` bounds it at 1000 characters and the mark), so it is
-        redacted but not cut to `ESCALATED_CHARS` (L4-DLG-029); `cut` is what `check_reply` cut from it."""
+        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger. The
+        reason is redacted, folded and redacted again (`clean_reason`), then cut to `ESCALATED_CHARS`, except when
+        `whole`: it is a delegate's own `escalate`, which `check_reply` already redacted, folded and bounded at 1000
+        characters and the mark (L4-DLG-029); `cut` is what `check_reply` cut from it."""
         s = self.s
-        shown = s.app.redactor.redact_text(" ".join(reason.split()))
+        shown = clean_reason(reason, s.app.redactor)
         if not whole:
             shown = shown[:ESCALATED_CHARS]
         more: dict[str, Any] = {}

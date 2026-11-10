@@ -164,9 +164,61 @@ def test_a_reason_is_redacted_whole_before_it_is_cut(tmp_path):  # SCN-DLG-152
     got = check(tmp_path, escalation(reason=reason), redactor=Redactor({"TOKEN": token}))
     assert isinstance(got, Kept) and got.cut == ("reason",)
     redacted = len(reason) - 40 + len("[REDACTED:TOKEN]")
-    assert got.reason.endswith(MARK.format(n=redacted)) and "[REDACTED:" in got.reason
+    assert got.reason.endswith(MARK.format(n=redacted))
+    assert "[REDACTED:" not in got.reason  # the placeholder starts at 990: cut before it, not inside it
     for size in range(4, 41):
         assert token[:size] not in got.reason, size
+
+
+SECRET = "line-one-secret\nline-two-secret"  # a configured multi-line value: it matches only as it was written
+GHTOKEN = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"
+
+
+def whole_view(text: str) -> str:
+    """What every place that records a reason shows of it (redacted, whitespace folded, redacted again)."""
+    redactor = Redactor({"MULTI": SECRET})
+    return redactor.redact_text(" ".join(redactor.redact_text(text).split()))
+
+
+def test_a_configured_multi_line_secret_never_reaches_a_kept_escalation(tmp_path):  # SCN-DLG-152
+    redactor = Redactor({"MULTI": SECRET})
+    for reason in (
+        "x" * 500 + " " + SECRET + " tail",  # within the limits: kept, not cut
+        "x" * 900 + SECRET + "y" * 100,  # over the limit as written
+        "y" * 700 + SECRET * 12,  # over as written, within once the placeholders replace the secrets
+    ):
+        got = check(tmp_path, escalation(reason=reason), redactor=redactor)
+        assert isinstance(got, Kept) and "line-one" not in got.reason and "line-two" not in got.reason, reason
+        assert got.reason == whole_view(got.reason) and "[REDACTED:MULTI]" in got.reason
+
+
+def test_a_kept_escalation_reason_is_redacted_and_folded_even_when_it_is_not_cut(tmp_path):  # SCN-DLG-152
+    got = check(tmp_path, escalation(reason=f"a\n\nb {GHTOKEN}"))
+    assert isinstance(got, Kept) and got.cut == () and got.reason == "a b [REDACTED:github-token]"
+
+
+def test_the_reason_is_measured_after_redaction_and_folding(tmp_path):  # SCN-DLG-146, SCN-DLG-152
+    folded = check(tmp_path, escalation(reason=("word" + "\n" * 9) * 100))  # 1300 as written, 499 folded
+    assert isinstance(folded, Kept) and folded.cut == () and len(folded.reason) == 499 and "\n" not in folded.reason
+    red = Redactor({"A_VERY_LONG_CONFIGURED_SECRET_NAME": "s3cr3tv4"})  # 8 characters become 36
+    grown = check(tmp_path, escalation(reason="s3cr3tv4 " * 111), redactor=red)  # 999 as written, 4,000 redacted
+    text = "[REDACTED:A_VERY_LONG_CONFIGURED_SECRET_NAME] " * 111
+    text = text.rstrip()
+    assert isinstance(grown, Kept) and grown.cut == ("reason",)
+    assert grown.reason.endswith(MARK.format(n=len(text))) and len(grown.reason) <= 1000 + len(MARK.format(n=len(text)))
+
+
+def test_a_reason_is_never_cut_inside_a_placeholder(tmp_path):  # SCN-DLG-152
+    token = "FAKEK2mV7pL4nB8wR3tY6uH1cJ5dF0gS4aE7iO2k"
+    for before in (990, 995, 999, 1000):  # the placeholder `[REDACTED:TOKEN]` starts before, at the cut, or after it
+        reason = "a" * before + token + "b" * 100
+        got = check(tmp_path, escalation(reason=reason), redactor=Redactor({"TOKEN": token}))
+        assert isinstance(got, Kept) and got.cut == ("reason",)
+        body = got.reason.split(" … [cut at")[0]
+        assert body.count("[REDACTED:") == body.count("]"), (before, body[-30:])
+        assert len(body) <= 1000
+    short = check(tmp_path, escalation(reason="a" * 995 + token + "b" * 100), redactor=Redactor({"TOKEN": token}))
+    assert short.reason.startswith("a" * 995 + " … [cut at 1000 of ")  # cut just before the placeholder
 
 
 # -- the result schemas carry no length limit (SCN-DLG-150) -----------------------------------------------------------

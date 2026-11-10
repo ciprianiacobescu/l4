@@ -6,8 +6,11 @@ The length rules of L4-DLG-005 (a `reason` over 1000 characters, more than 20 `c
 before any other rule of the entries.
 A reply whose decision is `escalate` and that breaks length rules SHALL be kept at once as an escalation cut to the
 limits, with no retry, also when an attempt is left:
-- its reason, redacted whole first, keeps its first 1000 characters and ends with ` … [cut at 1000 of <n>
-  characters]`;
+- its reason is redacted as written, its whitespace folded and the result redacted again (the one order of every
+  record of a delegate's reason, so that a configured value with a line break is redacted too), and only then
+  measured: over 1000 characters it keeps its first 1000 and ends with ` … [cut at 1000 of <n> characters]`, `<n>` the
+  length of that redacted, folded reason, a cut that would fall inside a `[REDACTED:…]` placeholder being made just
+  before it; within 1000 characters it is kept whole, redacted and folded;
 - its entries whose `ref` is over 300 characters, and then those after the 20th, are dropped; the kept ones record
   their redacted `ref` only, so a quote's or a claim's length does not matter;
 - it is recorded `delegate.result{status: escalated, decision: escalate, cut}`, where `cut` names `reason` and/or
@@ -15,9 +18,10 @@ limits, with no retry, also when an attempt is left:
 
 An `escalate` that breaks a rule checked before the length rules (the schema, the question id, a decision that fits
 no kind) SHALL keep today's path, discarded and never cut.
-For any other decision the refusal SHALL name every length rule the reply breaks, in that order, joined by `; `:
-`the reason has <n> characters: the limit is 1000`, `the reply has <n> checked entries: the limit is 20`, `a checked
-<ref|quote|claim> has <n> characters: the limit is <m>` (`<n>` the longest value of that field). A reply that breaks
+For any other decision the refusal SHALL name every length rule the reply breaks, in that order, one clause for each,
+joined by `; `: `the reason has <n> characters: the limit is 1000`, `the reply has <n> checked entries: the limit is 20`,
+and for each of the fields `ref`, `quote` and `claim` that is over its limit `a checked <ref|quote|claim> has <n>
+characters: the limit is <m>` (there `<n>` is the longest value of that field among the entries). A reply that breaks
 one rule SHALL be refused with today's reason word for word. The refusal SHALL be retryable like a reference that does
 not resolve: with an attempt left it is recorded `delegate.result{status: deferred, discarded}` and asked again, and
 with no attempt left the reply SHALL be discarded as before (`the reply was discarded: <reason>`). The next prompt
@@ -30,8 +34,8 @@ reference, a short quote, a timeout or an error does. No rule SHALL add an attem
 default 2 a question's raise is called at most twice, whatever discarded its first reply: a reference retry and a
 length retry never both happen. With a larger budget each retry takes one attempt, as two reference retries do.
 The `Escalated by:` line and the `delegate.result` reason of a delegate's `escalate` decision, cut or not, SHALL carry
-its reason whole, redacted, in place of L4-DLG-008's 300 characters. Every other escalation reason, the PR's sticky
-section and `l4 status` SHALL keep 300. `l4/delegate-result@1` and the results of `l4/delegate-batch@1` SHALL carry no
+its reason whole (as cut above), redacted, in place of L4-DLG-008's 300 characters. Every other escalation reason,
+the PR's sticky section and `l4 status` (its text and its `--json` `reason`) SHALL keep 300. `l4/delegate-result@1` and the results of `l4/delegate-batch@1` SHALL carry no
 `maxLength` or `maxItems` for `reason`, `checked`, `ref`, `quote` or `claim`: a schema break is not retryable, fails a
 whole batch and loses the reply.
 
@@ -57,8 +61,8 @@ whole batch and loses the reply.
 - **WHEN** `max_attempts_per_question` is 2 and the first reply to Q-001 is `escalate` with a `reason` of 1028
   characters
 - **THEN** Q-001 is escalated on that call, with one `delegate.asked` and no deferral: `delegate.result{status:
-  escalated, decision: escalate, cut: [reason]}` has as `reason` the reply's first 1000 characters, redacted, then
-  ` … [cut at 1000 of 1028 characters]`, and the `Escalated by:` line holds that reason whole, mark included, in place
+  escalated, decision: escalate, cut: [reason]}` has as `reason` the reply's reason redacted and folded (redact, then cut), cut
+  to its first 1000 characters, then ` … [cut at 1000 of 1028 characters]`, and the `Escalated by:` line holds that reason whole, mark included, in place
   of `the reply was discarded: …`
 - **AND** a second reply `escalate` over the limit after a reference deferral is cut the same way, and a kept
   `escalate` whose reason has 900 characters is written whole, while the sticky section and `l4 status` show its first
@@ -99,9 +103,12 @@ whole batch and loses the reply.
 
 #### Scenario: SCN-DLG-152 (+) a reason is redacted whole before it is cut
 - **WHEN** a reply `escalate` has a reason of 1100 characters that holds a token the redactor knows from character 990
-  to 1030
-- **THEN** the cut reason holds the redactor's placeholder and no prefix of the token, and ends with the mark; no part
-  of the token is in `delegate.result` or `questions.md`
+  to 1030, or a reason of 900 characters that holds a configured value with a line break
+- **THEN** the reason is redacted, folded and redacted again, and only then measured: the cut reason holds no prefix of
+  the token, is cut just before the placeholder that would have been cut in two, and ends with the mark, whose `<n>` is
+  the length of the redacted, folded reason; the 900-character reason is kept whole with the placeholder in place of
+  the value
+- **AND** no part of either secret is in `delegate.result`, `questions.md` or the ledger
 
 #### Scenario: SCN-DLG-153 (+) in a batch, a result over a limit is judged on its own
 - **WHEN** a batch of three verdict questions gets a reply with one result for each, the second an `accept` whose

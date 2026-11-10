@@ -764,3 +764,51 @@ def test_a_larger_attempt_budget_defers_both_discards_and_asks_a_third_time(dele
     run = delegate_run([reply()], delegate=budget)
     assert [e["status"] for e in results(run)] == ["deferred", "deferred", "answered"]
     assert len(run.events("delegate.asked")) == 3 and status_of(run) == "answered"
+
+
+# -- the 300 of a harness escalation stays, and a reason is redacted on the whole path (review of the change) ---------
+
+GHTOKEN = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"
+MULTI_LINE = "line-one-secret\nline-two-secret"  # a configured value (an environment variable) with a line break
+
+
+def test_a_harness_escalation_reason_is_still_cut_to_300(delegate_run, monkeypatch):  # SCN-DLG-146, L4-DLG-008
+    def refuse(*args, **kwargs):
+        raise Refusal("x" * 400, "set its Status").exit()
+
+    monkeypatch.setattr(pass_module, "build_edit", refuse)
+    run = delegate_run([blocked("technical"), reply()])
+    (result,) = results(run)
+    assert result["status"] == "escalated" and "cut" not in result
+    assert result["reason"].startswith("the answer could not be written: ") and len(result["reason"]) == 300
+    assert line_of(run) == result["reason"]  # the line holds 300 characters of a text that is the harness's
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        long_reason(950) + " " + GHTOKEN + " " + long_reason(50),  # cut at 1000
+        long_reason(500) + " " + GHTOKEN,  # kept whole
+        GHTOKEN + " " + long_reason(900),  # kept whole, the token first
+    ],
+)
+def test_a_token_in_a_long_escalate_reason_reaches_no_record(delegate_run, reason):  # SCN-DLG-152
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    (result,) = results(run)
+    assert "[REDACTED:github-token]" in result["reason"] and result["reason"] == line_of(run)
+    for text in (run.pushed(QUESTIONS), result["reason"], str(run.ledger())):
+        for size in range(6, len(GHTOKEN) + 1):
+            assert GHTOKEN[:size] not in text, (size, len(reason))
+
+
+def test_a_multi_line_configured_secret_in_a_long_escalate_reason_reaches_no_record(
+    delegate_run, tdd_repo
+):  # SCN-DLG-152
+    tdd_repo.environ["OPENAI_API_KEY"] = MULTI_LINE
+    reason = long_reason(850) + " " + MULTI_LINE + " " + long_reason(40)
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    (result,) = results(run)
+    assert result["status"] == "escalated" and "cut" not in result
+    assert "[REDACTED:OPENAI_API_KEY]" in result["reason"] and result["reason"] == line_of(run)
+    for text in (run.pushed(QUESTIONS), str(run.ledger())):
+        assert "line-one" not in text and "line-two" not in text and "secret" not in text.replace("secretary", "")
