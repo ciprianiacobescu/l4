@@ -17,18 +17,20 @@ is not enough: the line a person reads must carry it.
 
 ## What Changes
 
-- The length rules are one class, checked together right after the decision fits the kind. The refusal names every
-  rule the reply breaks, joined by `; `, each in today's words (a reply that breaks one rule has today's reason word for
-  word). It is retryable like a reference that does not resolve.
-- A length retry takes one of the question's attempts (`delegate.max_attempts_per_question`), as every other deferral
-  does, and no rule adds an attempt: with the default 2 a question is called at most twice, whatever discarded its first
-  reply.
+- The length rules are one class, checked together right after the decision fits the kind. When a reply breaks one,
+  the refusal names every rule it breaks, joined by `; `, each in today's words; a reply that breaks one rule has
+  today's reason word for word.
+- An `escalate` reply that breaks only length rules is cut to the limits at once, with no retry, even when an attempt
+  is left. Its reason is redacted whole, then cut after 1000 characters and ended with ` … [cut at 1000 of <n>
+  characters]`. Its entries whose `ref` is over 300 characters, and then those after the 20th, are dropped. It is
+  recorded `delegate.result{status: escalated, decision: escalate, cut}`. The outcome is an escalation either way, and
+  a retry would cost a paid call and delay the person (design D4).
+- For any other decision (`answer`, `accept`, `reject`, `retry`), a length refusal is retryable like a reference that
+  does not resolve. The retry takes one of the question's attempts (`delegate.max_attempts_per_question`), as every
+  other deferral does, and no rule adds an attempt: with the default 2 a question is called at most twice, whatever
+  discarded its first reply. With no attempt left the reply is discarded as today.
 - The retry's prompt says how to fix each overrun, for example `Shorten the reason to at most 1000 characters; it had
   1028.`, in place of the sentence about references. The system text and its version `delegate@7` do not change.
-- With no attempt left, an `escalate` reply that breaks only length rules is kept as an escalation cut to the limits.
-  Its reason is redacted whole, then cut after 1000 characters and ended with ` … [cut at 1000 of <n> characters]`.
-  Its entries after the 20th, and those whose `ref` is over 300 characters, are dropped. It is recorded
-  `delegate.result{status: escalated, decision: escalate, cut}`. A reply with any other decision is discarded as today.
 - The `Escalated by:` line and the `delegate.result` reason of a delegate's own `escalate` decision carry its reason
   whole: redacted, bounded by the 1000-character rule, plus the mark when it was cut. They are no longer cut at 300.
   The harness's own escalation reasons, the PR's sticky section and `l4 status` keep 300.
@@ -37,14 +39,15 @@ is not enough: the line a person reads must carry it.
 
 ## Impact
 
-- Code: `l4.delegate.reply` (`_length_problems`, `_cut_escalation`, `CUT_MARK`, `Kept.cut`, `Discarded.escalation`, the
-  order of the checks), `l4.delegate.run` (`_settle` uses the cut escalation when it does not defer; `_escalate` takes
-  `whole` and `cut`), `l4.delegate.prompt` (`_previous_part` writes the length instructions).
+- Code: `l4.delegate.reply` (`_length_problems`, `_cut_escalation`, `CUT_MARK`, `Kept.cut`, the order of the checks),
+  `l4.delegate.run` (the kept-escalate branch of `_settle` passes `whole` and `cut` to `_escalate`), `l4.delegate.prompt`
+  (`_previous_part` writes the length instructions).
 - Spec: L4-DLG-029 (new). L4-DLG-005 (its sentence on the limits and its retry exception) and L4-DLG-008 (the
   300-character cap) are amended, and so is the `delegate.result` record of §12.1 (`cut`). Adds SCN-DLG-144..153 and
   change-table row 122.
-- Behaviour: a reply over a length limit now costs one more call where it used to cost a person's time. An escalation
-  still over a limit on its last attempt now reaches the person with its reason. The question's attempts are not raised.
-  An answer, accept, reject or retry still over a limit on its last attempt is discarded as before.
+- Behaviour: an escalation over a length limit now reaches the person at once, with its reason. Before, it was discarded
+  and the person read only the limit. An answer, accept, reject or retry over a length limit costs one more call where
+  it used to cost a person's time, and is discarded as before when no attempt is left. The question's attempts are not
+  raised. An `escalate` whose quote or claim is over 600 characters is now kept (an escalation records neither).
 - Not changed: the limits themselves; the system text, `delegate@7` and the template lock; the result schemas; the
   reference rules of L4-DLG-005; `_recorded`; the sticky section and `l4 status` (300 characters).
