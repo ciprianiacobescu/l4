@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Fixed
+- A UI unit no longer raises a hold for every criterion that a unit test already covers. In a consumer run a unit that changed one web file had ten criteria, all treated as UI criteria; the UI test writer said it could not test eight of them in a browser ("pure functions"), and those eight were the criteria that red-then-green tests already covered, yet the round raised ten UI holds, twelve verdict questions for the delegate or a person. Now a UI criterion that step 4 covers with a discriminating test (a red-proved, audit, repaired, people's or chore's test; not a pass-to-pass test and not a red record that no run proved) and for which the writer returns `not_testable` is a note: its row of the generated UI tests table says `covered by step 4: <tests>; a note, not a hold`, `verify.generated` carries `covered_by`, no hold is raised and no fix unit is made for its gap; the criterion still needs the judge's pass with an adequate test. Every other case keeps its hold (nothing discriminating traces the criterion, a writer failure, an uncollectable file, a test that fails at head, ...), and a reused round keeps the stored answer. The writer is also shown the e2e suite's `e2e/conftest.py` and helper modules as they are at the merge base (at most six files and 20,000 characters, the rest named), and its rules say to use their fixtures and helpers, so a generated test can sign in with the suite's own helper (`testwriter@6`). Which criteria count as UI criteria is unchanged (L4-VER-067, L4-VER-077).
+
 ## 0.4.55 (2026-11-08)
 
 ### Fixed
