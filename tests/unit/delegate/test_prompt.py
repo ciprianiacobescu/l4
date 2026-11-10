@@ -362,6 +362,95 @@ def test_a_previous_discard_is_redacted_and_capped():
     assert Material().previous == ""
 
 
+# -- a length refusal tells the retry which limit and by how much (delegate-length-retry; L4-DLG-029) ----------------
+
+REFERENCES = "Write each reference in the form the rules give; the quote is copied word for word."
+REASON = "the reason has 1028 characters: the limit is 1000"
+ENTRIES = "the reply has 23 checked entries: the limit is 20"
+REF = "a checked ref has 301 characters: the limit is 300"
+QUOTE = "a checked quote has 812 characters: the limit is 600"
+CLAIM = "a checked claim has 640 characters: the limit is 600"
+INSTRUCTIONS = {
+    REASON: "Shorten the reason to at most 1000 characters; it had 1028.",
+    ENTRIES: "Keep at most 20 checked entries; it had 23.",
+    REF: "Shorten each checked ref to at most 300 characters; the longest had 301.",
+    QUOTE: "Shorten each checked quote to at most 600 characters, still copied word for word; the longest had 812.",
+    CLAIM: "Shorten each checked claim to at most 600 characters; the longest had 640.",
+}
+ALL_THREE = f"{ENTRIES}; {QUOTE}; {CLAIM}"
+
+
+def previous_block(user: str) -> str:
+    return user.split('<l4:data kind="previous" source="harness">', 1)[1].split("</l4:data>", 1)[0]
+
+
+def told_text(told: str) -> str:
+    return f"The previous reply to this question was discarded: {told}."
+
+
+@pytest.mark.parametrize("clause", list(INSTRUCTIONS))
+def test_each_length_clause_is_told_to_the_retry_word_for_word(clause):  # SCN-DLG-144, SCN-DLG-145
+    block = previous_block(prompt(m=material(previous=clause)).user)
+    assert block.strip() == f"{told_text(clause)} {INSTRUCTIONS[clause]}"
+    assert REFERENCES not in block
+    in_batch = previous_block(batch(batch_items(3, {2: {"previous": clause}})).user)
+    assert in_batch.strip() == block.strip()
+
+
+def test_three_length_clauses_are_told_together_in_the_order_of_the_clauses():  # SCN-DLG-145
+    expected = (
+        f"{told_text(ALL_THREE)} Keep at most 20 checked entries; it had 23. Shorten each checked quote to at most "
+        "600 characters, still copied word for word; the longest had 812. Shorten each checked claim to at most 600 "
+        "characters; the longest had 640."
+    )
+    assert previous_block(prompt(m=material(previous=ALL_THREE)).user).strip() == expected
+    assert previous_block(batch(batch_items(3, {1: {"previous": ALL_THREE}})).user).strip() == expected
+
+
+def test_a_length_refusal_that_check_reply_gives_is_told_without_the_sentence_about_references(tmp_path):
+    from .test_reply import check, cite, reply
+
+    entries = [cite(f"src/pkg/store.py:{n}") for n in range(1, 22)]
+    bodies = {
+        "reason": reply(reason="r" * 1028),
+        "count": reply(checked=entries),
+        "ref": reply(checked=[{**cite(), "ref": "r" * 301}]),
+        "quote": reply(checked=[{**cite(), "quote": "q" * 812}]),
+        "claim": reply(checked=[{**cite(), "claim": "c" * 640}]),
+        "mix": reply(
+            reason="r" * 1028, checked=[*entries, {**cite(), "quote": "q" * 700}, {**cite(), "claim": "c" * 640}]
+        ),
+    }
+    for name, body in bodies.items():
+        got = check(tmp_path, body)
+        assert got.retryable, name
+        block = previous_block(prompt(m=material(previous=got.reason)).user)
+        assert REFERENCES not in block and ("Shorten" in block or "Keep" in block), name
+        assert block.strip().startswith(told_text(got.reason)), name
+    mixed = previous_block(prompt(m=material(previous=check(tmp_path, bodies["mix"]).reason)).user)
+    assert mixed.count("Shorten") == 3 and "Keep at most 20 checked entries; it had 23." in mixed
+
+
+def test_a_reason_that_mixes_a_length_clause_with_another_text_keeps_the_sentence_about_references():
+    for told in (
+        f"{REASON}; checked spec:spec.md does not resolve",
+        f"checked spec:spec.md does not resolve; {REASON}",
+        "x",
+    ):
+        block = previous_block(prompt(m=material(previous=told)).user)
+        assert block.strip() == f"{told_text(told)} {REFERENCES}", told
+        assert "Shorten" not in block
+
+
+def test_a_length_instruction_is_not_made_of_a_clause_with_other_words_around_it():
+    for told in (
+        f"the reply was discarded: {REASON}",
+        f"{REASON} and more",
+        "the reason has many characters: the limit is x",
+    ):
+        assert REFERENCES in previous_block(prompt(m=material(previous=told)).user), told
+
+
 # -- the batch prompt `delegate-batch@1` and its result `l4/delegate-batch@1` (L4-DLG-028; SCN-DLG-127) ------------
 
 

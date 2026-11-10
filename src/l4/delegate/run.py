@@ -114,7 +114,8 @@ RETRY_AFTER_S = 300  # a timeout or an adapter error: the question is taken agai
 MAX_TURNS = 40  # `--max-turns` of the Claude Code read-only run
 BATCH_TURNS = 20  # ... and the turns each question after the first adds to a batch's run (L4-DLG-028)
 MAX_BATCH_TURNS = 140
-ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long
+ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long (a delegate's own escalate
+# reason is the exception: it is kept whole, L4-DLG-029)
 MAX_VERIFICATION_BYTES = 400_000
 # the adapters whose agent may load an instruction file from the directory of a file it reads (L4-DLG-016, D4)
 MASKED_TREE_ADAPTERS = ("opencode", "copilot-cli")
@@ -714,6 +715,7 @@ class _Pass:
             self._escalate(
                 target, question, key, shared, kept.reason or "the delegate could not check the claim", who=who,
                 called=True, cost=reply.cost, status="escalated", decision="escalate", checked=kept.checked,
+                whole=True, cut=kept.cut,
             )  # fmt: skip
         else:
             self._answer(target, question, key, shared, kept, who, reply)
@@ -1046,16 +1048,22 @@ class _Pass:
     def _escalate(
         self, target: _Target, question: Question, key: str, shared: dict[str, Any], reason: str, *, who: Any,
         called: bool = False, cost: float | None = None, status: str = "escalated", decision: str | None = None,
-        checked: Sequence[Any] = (),
+        checked: Sequence[Any] = (), whole: bool = False, cut: Sequence[str] = (),
     ) -> None:  # fmt: skip
-        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger."""
+        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger. `whole`:
+        the reason is a delegate's own `escalate` (`check_reply` bounds it at 1000 characters and the mark), so it is
+        redacted but not cut to `ESCALATED_CHARS` (L4-DLG-029); `cut` is what `check_reply` cut from it."""
         s = self.s
-        shown = s.app.redactor.redact_text(" ".join(reason.split()))[:ESCALATED_CHARS]
+        shown = s.app.redactor.redact_text(" ".join(reason.split()))
+        if not whole:
+            shown = shown[:ESCALATED_CHARS]
         more: dict[str, Any] = {}
         if decision:
             more["decision"] = decision
         if checked:
             more["checked"] = [dict(c) for c in checked]
+        if cut:
+            more["cut"] = list(cut)
         self._result(target, key, shared, status, reason=shown, who=who, called=called, cost=cost, **more)
         path = target.path / QUESTIONS_FILENAME
         file = self._file(target)

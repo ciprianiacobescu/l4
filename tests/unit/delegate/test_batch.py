@@ -628,3 +628,35 @@ def test_the_money_fit_reads_the_unit_cap_the_plan_share_and_the_pending_calls()
         max_cost_usd=4.0, delegate_cost_usd=3.0
     )  # a share of 1: less than one answer
     assert p._money_fit([]) == 1  # each question passed its own limit check: at least one
+
+
+def test_a_result_over_a_length_limit_is_judged_on_its_own(
+    delegate_run, valid_spec, fake_clock, monkeypatch
+):  # SCN-DLG-153
+    told = []
+    real = pass_module.build_prompt
+
+    def spy(question, material, **kwargs):
+        told.append((question.id, material.previous))
+        return real(question, material, **kwargs)
+
+    monkeypatch.setattr(pass_module, "build_prompt", spy)
+    park(delegate_run, 3)
+    long = "".join(str(i % 10) for i in range(1028))
+    limit = "the reason has 1028 characters: the limit is 1000"
+    got = [
+        accept("Q-001"),
+        accept("Q-002", reason=long),
+        escalation("Q-003", why=long).structured,
+    ]
+    run = delegate_run([batch_reply(*got)], profiles=JUDGE)
+    assert len(run.adapter.requests) == 1
+    done = results_of(run)
+    assert [done[q]["status"] for q in ("Q-001", "Q-002", "Q-003")] == ["answered", "deferred", "escalated"]
+    assert done["Q-002"]["discarded"] == limit and "asked again" in done["Q-002"]["reason"]
+    assert done["Q-003"]["cut"] == ["reason"] and done["Q-003"]["reason"].endswith("… [cut at 1000 of 1028 characters]")
+    assert {r["reason"] != "error" for r in done.values()} == {True}  # the batch did not fail
+    assert [status_of(run, q) for q in ("Q-001", "Q-002", "Q-003")] == ["answered", "open", "open"]
+    fake_clock.advance(timedelta(minutes=6))
+    delegate_run([reply("Q-002", "accept", text="Waived: the proposal covers it.")], profiles=JUDGE)
+    assert told[-1] == ("Q-002", limit)  # the next ask carries the limit it broke
