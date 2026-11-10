@@ -4,7 +4,7 @@ you changed.
 
 ## 1. A covered criterion the writer cannot test is a note (L4-VER-067 amendment; design D1 to D6)
 
-- [ ] 1.1 Write the tests first, in `tests/unit/verifier/test_ui_step.py` (pure, with its `crit` helper and
+- [x] 1.1 Write the tests first, in `tests/unit/verifier/test_ui_step.py` (pure, with its `crit` helper and
   `CriterionEvidence`/`TracingTest` built by hand):
   - SCN-VER-298 and SCN-VER-299, `covered_by_step4(trace)`: a criterion `covered` with a passing `zero_value` test maps
     to that id; so do `pre_satisfied`, `red_assertion`, `repair`, `audit`, `generated`, `human` and `chore`; with two
@@ -23,7 +23,7 @@ you changed.
   and `unclosed_holds` closing `status == "not_testable" and covered_by`. The test at `test_ui_step.py:125`
   (SCN-VER-252, the hold id whatever the status) stays as it is: its outcomes have no `covered_by`.
 
-- [ ] 1.2 `src/l4/verifier/generate.py` (D2). Tests first, in `tests/unit/verifier/test_generate.py` with its `web`
+- [x] 1.2 `src/l4/verifier/generate.py` (D2). Tests first, in `tests/unit/verifier/test_generate.py` with its `web`
   bench and `Writer`, calling `generate_ui_tests(bench.wb, writer, [CRITERION], base_sha=base, ui_diff=…,
   snapshot=…, covered=…)`:
   - SCN-VER-298: a `not_testable` reply with `covered={CID: ("tests.test_x::test_a",)}` gives an outcome with that
@@ -38,7 +38,7 @@ you changed.
   `covered.get(cid)`; the `verify.generated` emit adds `covered_by=list(done.covered_by)` only when it is not empty.
   The docstring of the module says the event may carry `covered_by`.
 
-- [ ] 1.3 The readers (D2, D3). Tests first:
+- [x] 1.3 The readers (D2, D3). Tests first:
   - `tests/unit/verifier/test_report_m15.py`: a result whose `generated` holds `GeneratedOutcome(CID, "not_testable",
     reason="pure functions", covered_by=("tests.a::t1", "tests.a::t2", "tests.a::t3", "tests.a::t4"))` renders the row
     `| C-… | not_testable | … | pure functions; covered by step 4: tests.a::t1, tests.a::t2, tests.a::t3 (+1 more); a
@@ -62,7 +62,7 @@ you changed.
   `_finalize` computes `covered_by_step4` (D3): a reused round keeps what the round stored. The `_generate_step`
   docstring says so.
 
-- [ ] 1.4 Flows (`tests/unit/verifier/test_ui_flow.py`, `tests/unit/verifier/test_memory_flow.py`). In the fixture unit
+- [x] 1.4 Flows (`tests/unit/verifier/test_ui_flow.py`, `tests/unit/verifier/test_memory_flow.py`). In the fixture unit
   both criteria are covered by step 4 with `zero_value` tests (`tests.test_discount::test_known_code`,
   `tests.test_discount::test_unknown_code`; checked on amaster with a probe run of the flow below: the evidence row of
   C-d80f494d reads `covered | tests.test_discount::test_unknown_code (passed, zero_value)` and the run exits 11 on its UI
@@ -94,7 +94,7 @@ you changed.
 
 ## 2. The e2e suite's support files for the writer (L4-VER-077; design D7)
 
-- [ ] 2.1 Write the tests first, in `tests/unit/verifier/test_conventions.py` (its `commit` helper and a small git
+- [x] 2.1 Write the tests first, in `tests/unit/verifier/test_conventions.py` (its `commit` helper and a small git
   repository), against `e2e_support_files(git, base_sha)`:
   - SCN-VER-304: with `e2e/conftest.py`, `e2e/helpers/a11y.py`, `e2e/test_sign_in.py` and `e2e/pages/x_test.py` at the
     base, and a head commit that changes `e2e/conftest.py` and adds `e2e/helpers.py`, the blocks are `e2e/conftest.py`
@@ -114,7 +114,7 @@ you changed.
   the directory taken from `testwriter.test_path("e2e", …)`'s parent or a shared constant, not a new config key). The
   module docstring names the function.
 
-- [ ] 2.2 The writer gets them (`src/l4/verifier/generate.py`, `src/l4/verifier/testwriter.py`,
+- [x] 2.2 The writer gets them (`src/l4/verifier/generate.py`, `src/l4/verifier/testwriter.py`,
   `src/l4/verifier/ladder.py`). Tests first:
   - `tests/unit/verifier/test_generate.py`, SCN-VER-304: a bench whose base has an `e2e/conftest.py` defining `login`
     and whose head changes it (extend `stage_base_and_head` in `tests/unit/_web_bench.py` with optional extra base and
@@ -138,15 +138,15 @@ you changed.
 
 ## 3. Documents and checks
 
-- [ ] 3.1 The spec commit has SPEC.md (L4-VER-067 amended, L4-VER-077, the step-5 row of L4-VER-002, the
+- [x] 3.1 The spec commit has SPEC.md (L4-VER-067 amended, L4-VER-077, the step-5 row of L4-VER-002, the
   `verify.generated` entry of §12.1, SCN-VER-298..306, row 124) and the CHANGELOG bullet. Check each against the code as
   built (the names, the event field, the row text, the note text, the bounds, the rule's words) and correct the text
   where the code had to differ.
-- [ ] 3.2 `docs/runbook.md`, the entry of the hold `UI criterion C-… has no end-to-end test` (about line 1074): say that
+- [x] 3.2 `docs/runbook.md`, the entry of the hold `UI criterion C-… has no end-to-end test` (about line 1074): say that
   from 0.4.56 a UI criterion that a discriminating test of step 4 covers and that the writer calls `not_testable` raises
   no hold (its row says `covered by step 4`), and that the writer is shown the suite's `e2e/conftest.py` and helpers at
   the merge base.
-- [ ] 3.3 Run once each: the test files changed in 1 and 2 (`test_ui_step.py`, `test_generate.py`, `test_report_m15.py`,
+- [x] 3.3 Run once each: the test files changed in 1 and 2 (`test_ui_step.py`, `test_generate.py`, `test_report_m15.py`,
   `test_resume.py`, `test_fixunit.py`, `test_ui_flow.py`, `test_memory_flow.py`, `test_conventions.py`,
   `test_testwriter.py`, `test_testwriter_weak.py`), `tests/unit/test_template_lock.py`, `tests/unit/docs`; `uv run
   --frozen python scripts/check_spec.py docs/SPEC.md`; `ruff check` and `ruff format --check` on the changed files;
