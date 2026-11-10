@@ -1,6 +1,6 @@
 ## 1. The checks, the retry and the cut (D1 to D6)
 
-- [ ] 1.1 Write the tests first, in a new file `tests/unit/delegate/test_reply_length_retry.py` (import `check`,
+- [x] 1.1 Write the tests first, in a new file `tests/unit/delegate/test_reply_length_retry.py` (import `check`,
   `cite`, `reply` and `STORE`/`FILES` as needed from `.test_reply`, as `test_reply_quote_tolerance.py` does), at the
   `check_reply` level:
   - SCN-DLG-144: an `answer` whose reason has 1001 characters gives a `Discarded` with `retryable` true and the reason
@@ -45,7 +45,7 @@
   and leave `_recorded` as it is. Update the docstrings of the module and `Kept` (L4-DLG-029, delegate-length-retry;
   D6: why the schemas carry no length limit).
 
-- [ ] 1.2 `src/l4/delegate/run.py` (D2, D4, D5):
+- [x] 1.2 `src/l4/delegate/run.py` (D2, D4, D5):
   - `_settle`: no new branch. The deferral branch (`retryable and attempts_used(events, key) + 1 <
     max_attempts_per_question`) is unchanged: there is no new counter, and a cut escalation is a `Kept`.
   - `_escalate`: add `whole: bool = False` (no cut to `ESCALATED_CHARS`, still redacted and whitespace folded) and
@@ -78,7 +78,7 @@
   (no `reason: error`); the next ask's `material.previous` for Q-002 is that text (the batch heading `# Your previous
   reply to Q-002` is a prompt test of 1.3).
 
-- [ ] 1.3 `src/l4/delegate/prompt.py` (D3): add `_LENGTH_CLAUSES` (the five clause forms of D1) and
+- [x] 1.3 `src/l4/delegate/prompt.py` (D3): add `_LENGTH_CLAUSES` (the five clause forms of D1) and
   `_length_instructions(told) -> str | None` (the instructions of D3 when every `; `-separated clause of `told` is a
   length clause, else None). `_previous_part` writes them in place of `Write each reference in the form the rules give;
   the quote is copied word for word.` when they exist. `SYSTEM`, `PROMPT_VERSION`, `BATCH_SYSTEM` and the schemas do not
@@ -93,17 +93,17 @@
 
 ## 2. Docs and checks
 
-- [ ] 2.1 The spec commit has docs/SPEC.md (L4-DLG-029 in §9.1; the amended sentences of L4-DLG-005 and L4-DLG-008;
+- [x] 2.1 The spec commit has docs/SPEC.md (L4-DLG-029 in §9.1; the amended sentences of L4-DLG-005 and L4-DLG-008;
   `cut` on `delegate.result` in §12.1; SCN-DLG-144..153; row 122), the CHANGELOG bullet, and the scenario ranges of
   `tests/unit/docs/test_delegate_docs.py` and `tests/unit/docs/test_delegate_0422_docs.py` (`range(116, 154)`). Check
   each against the code as built (the clause and instruction texts, the mark, the record's field names) and correct the
   text where the code had to differ; say so in the result.
-- [ ] 2.2 `docs/runbook.md`, the common reasons of an escalated question (the paragraph that names `checked <ref>: the
+- [x] 2.2 `docs/runbook.md`, the common reasons of an escalated question (the paragraph that names `checked <ref>: the
   quote of <ref> is shorter than 12 characters`): add that a reply over a length limit (`the reason has <n>
   characters: the limit is 1000`, the entry limits) is asked again within `delegate.max_attempts_per_question`, unless
   it is an escalation, and that a delegate's escalation over the limit is escalated at once with its reason ending `…
   [cut at 1000 of <n> characters]` (its first 1000 characters).
-- [ ] 2.3 Run, once with pytest (never in a loop, never two runs at once, no `while pgrep` wait, never the whole suite),
+- [x] 2.3 Run, once with pytest (never in a loop, never two runs at once, no `while pgrep` wait, never the whole suite),
   in one invocation: `tests/unit/delegate/test_reply_length_retry.py`, `tests/unit/delegate/test_reply.py`,
   `tests/unit/delegate/test_reply_0421.py`, `tests/unit/delegate/test_reply_quote_tolerance.py`,
   `tests/unit/delegate/test_pass.py`, `tests/unit/delegate/test_batch.py`, `tests/unit/delegate/test_prompt.py`,

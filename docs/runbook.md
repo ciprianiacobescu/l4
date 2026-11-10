@@ -972,7 +972,12 @@ questions is asked alone the next time. `delegate.pass` also records `calls`, th
    nothing in a fix task), `checked <path:line> does not resolve` (the reply is discarded), `checked <ref>: the quote of <ref> is shorter than 12
    characters` (from 0.4.44 a quote under 12 characters, whitespace folded, is refused by that name, not as `does not
    resolve`; it is retried once like an unresolved reference, within `delegate.max_attempts_per_question`, and the prompt now
-   says that a quote is at least 12 characters, copied word for word), `no profile
+   says that a quote is at least 12 characters, copied word for word), `the reply was discarded: the reason has <n>
+   characters: the limit is 1000` (or `the reply has <n> checked entries: the limit is 20`, `a checked <ref|quote|claim>
+   has <n> characters: the limit is <m>`: a reply over a length limit is asked again within
+   `delegate.max_attempts_per_question`, and its prompt says which limit and by how much; a delegate's own escalation over
+   the limit is not asked again: it is escalated at once, and its reason, the delegate's first 1000 characters, ends
+   `… [cut at 1000 of <n> characters]`), `no profile
    is configured for it under roles`, `no delegate profile answers <kind> questions` (the free-model rule), `kiro-cli
    served <m>, the profile names <p>` (pin the model that the profile names, or the one that served), a reject without a
    `WHEN … THEN …` where the rules need one (a finding that cites no criterion, a hold other than a scope, coverage or
