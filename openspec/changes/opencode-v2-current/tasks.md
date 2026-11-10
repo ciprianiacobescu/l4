@@ -186,7 +186,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 6. The sandbox does not bind the real data and config homes (L4-OCV-018; SCN-OCV-40 to SCN-OCV-42; design D5)
 
-- [ ] 6.1 Tests first, new `tests/unit/sandbox/test_bwrap_own_homes.py`, on the `make_spec` fixture of
+- [x] 6.1 Tests first, new `tests/unit/sandbox/test_bwrap_own_homes.py`, on the `make_spec` fixture of
   `tests/unit/sandbox/conftest.py` (extend it with `~/.config/opencode` and `~/.cache/opencode` if it lacks them):
   - SCN-OCV-40: with `hide_own_homes=True` and `adapter="opencode"`, the argv has `--tmpfs <home>/.local/share/opencode`
     and `--tmpfs <home>/.config/opencode`, no `--bind` of either, and `--bind` of `<home>/.cache/opencode`.
@@ -197,7 +197,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
     argv of `dataclasses.replace(spec, hide_own_homes=False)`. For a `cli_major: 2` api-key profile it is True. The same
     for the readiness review's spec (`tests/unit/yolo/test_yolo_readiness_review.py` or a new file beside it).
   - `tests/unit/sandbox/test_probe_parity.py` passes unchanged.
-- [ ] 6.2 Code:
+- [x] 6.2 Code:
   - `src/l4/sandbox/base.py`: `SandboxSpec.hide_own_homes: bool = field(default=False, kw_only=True)`;
     `OWN_HOMES = {"opencode": ("~/.local/share/opencode", "~/.config/opencode")}`; `own_login_binds(spec)`; and
     `hidden_credential_paths` adds the dropped paths. A path is dropped when it is, contains or lies inside an

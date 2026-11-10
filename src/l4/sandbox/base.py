@@ -62,6 +62,9 @@ class SandboxSpec:
     # the delegate reads the repository and writes nothing (L4-DLG-004): the worktree is bound read-only, the private
     # directory (the result file) stays writable
     worktree_read_only: bool = field(default=False, kw_only=True)
+    # the profile needs no login stored in its adapter's own data and config homes (`OWN_HOMES`, L4-OCV-018): they are
+    # hidden like another adapter's login instead of bound
+    hide_own_homes: bool = field(default=False, kw_only=True)
     record_dir: Path | None = None  # writable, apart from TMPDIR: holds the gate's outcome record (a random file name)
 
     def __post_init__(self) -> None:
@@ -200,6 +203,28 @@ def readonly_with_scratch(
 NO_LOGIN_BIND = frozenset({"copilot-cli"})
 
 
+# The data and config homes of an adapter whose process keeps a private copy of both when the profile needs no stored
+# login (`hide_own_homes`): OpenCode 2 keeps `opencode.db` with every session of every step in the first, and the
+# second is where a planted plugin waits for its next process. Its cache home stays bound (L4-OCV-018).
+OWN_HOMES: Mapping[str, tuple[str, ...]] = {"opencode": ("~/.local/share/opencode", "~/.config/opencode")}
+
+
+def _related(path: Path, home: Path) -> bool:
+    """Whether `path` is, contains or lies inside `home`."""
+    return path == home or home in path.parents or path in home.parents
+
+
+def own_login_binds(spec: SandboxSpec) -> tuple[Path, ...]:
+    """The spec's own credential paths, configured or built in, that the agent sandbox binds read-write. With
+    `hide_own_homes`, each path that is, contains or lies inside one of the adapter's `OWN_HOMES` (expanded against
+    `spec.home`) is dropped, which fails closed for an odd configured path."""
+    own = spec.credential_paths.get(spec.adapter or "", ())
+    if not spec.hide_own_homes:
+        return own
+    homes = expand_credential_paths({"own": list(OWN_HOMES.get(spec.adapter or "", ()))}, spec.home)["own"]
+    return tuple(path for path in own if not any(_related(path, home) for home in homes))
+
+
 def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:
     """Every login this spawn must not see: the built-in defaults and the configured paths of every adapter but its
     own (its own too when it is in `NO_LOGIN_BIND`), so that a user override of one adapter's path (what is mounted
@@ -212,6 +237,8 @@ def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:
         for path in (*spec.credential_paths.get(adapter, ()), *builtin.get(adapter, ())):
             if path not in hidden:
                 hidden.append(path)
+    kept = own_login_binds(spec)  # the own paths that `hide_own_homes` dropped are hidden like another adapter's
+    hidden += [p for p in spec.credential_paths.get(spec.adapter or "", ()) if p not in kept and p not in hidden]
     return hidden
 
 
