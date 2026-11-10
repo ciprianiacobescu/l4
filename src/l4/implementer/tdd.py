@@ -49,6 +49,7 @@ from l4.gates.trace import trace_env
 from l4.implementer import resultalias
 from l4.implementer.base_run import VIA as BASE_VIA
 from l4.implementer.base_run import BaseRunResult, combine, confirmed_by_base_run
+from l4.implementer.clauses import ClauseAsk, clause_question, recorded_entries, split_clauses
 from l4.implementer.discrimination import (
     PROOF_PRE_SATISFIED,
     PROOF_RED_ASSERTION,
@@ -247,6 +248,7 @@ class StepOutcome:
     reason: str = ""
     excerpt: str = ""  # harness text for the next prompt (the allowed result values after `result invalid`)
     dropped_questions: int = 0  # malformed questions that the normalization dropped from a `blocked` result
+    clauses: tuple[ClauseAsk, ...] = ()  # the questions of the new `unasserted` entries (L4-IMP-095), after its own
     held: HeldCheck | None = None  # kind "held": an accepted step that cannot be replayed (L4-IMP-065)
 
     @property
@@ -267,6 +269,7 @@ class RedOutcome:
     manifest: FreezeManifest | None = None
     base_report: TestReport | None = None
     questions: Sequence[ResultQuestion] = field(default_factory=list)
+    clauses: tuple[ClauseAsk, ...] = ()  # status "blocked": the questions of the new `unasserted` entries
     summary: str = ""
     criteria: dict[str, dict[str, Any]] = field(default_factory=dict)  # criterion -> {tests, proof}
     excerpt: str = ""  # the failure text behind `reason`, for the next prompt
@@ -289,6 +292,7 @@ class GreenOutcome:
     reason: str = ""
     sha: str | None = None
     questions: Sequence[ResultQuestion] = field(default_factory=list)
+    clauses: tuple[ClauseAsk, ...] = ()  # status "blocked": the questions of the new `unasserted` entries
     summary: str = ""
     excerpt: str = ""  # the failure text behind `reason`, for the next prompt
     hung: tuple[HungTest, ...] = ()  # tests of the gate run that hit the per-test limit (SPEC L4-GAT-004)
@@ -1087,9 +1091,12 @@ def agent_step(
         result = parse_result(normalized.obj)
     except ResultInvalid as exc:  # a defect of the normalizer: the attempt fails, the gates never see it
         return StepOutcome("failed", reason=f"the agent's result is invalid: {exc}", excerpt=values)
-    if result.status == "blocked":
+    split = split_clauses(wb, task, result.unasserted)  # L4-IMP-095: a new entry makes the step a blocked step
+    if result.status == "blocked" or split.new:
         dropped = sum(f.count or 0 for f in normalized.fixes if f.field == "questions" and f.fix == "dropped")
-        return StepOutcome("blocked", result, dropped_questions=dropped)
+        criteria = wb.provider.criteria(wb.ref) if split.new else ()
+        asks = tuple(clause_question(task, role, entry, criteria) for entry in split.new)
+        return StepOutcome("blocked", result, dropped_questions=dropped, clauses=asks)
     if hits := worktree_secrets(wb.git, wb.redactor, changed):  # L4-SEC-008: before any gate or commit
         for hit in hits:
             wb.emit("guard.secret", path=hit.path, kind=hit.kind, task=task.key, phase=role, attempt=attempt)
@@ -1736,6 +1743,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         wb.emit(
             "task.red_ok", task=task.key, base=base, tests=sorted(new_tests), frozen=[], notes=notes,
             criteria=proofs, suppressions=_suppressions(result), tdd="already-satisfied",
+            **recorded_entries(wb, task, result.unasserted),
         )  # fmt: skip
         wb.emit(
             "task.done", task=task.key, base=base, parents=parents, notes=notes, tdd="already-satisfied",
@@ -1896,7 +1904,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     record_superseded()
     wb.emit(
         "task.red_ok", task=task.key, base=base, tests=sorted(new_tests), frozen=sorted(frozen.files), notes=notes,
-        criteria=proofs, suppressions=_suppressions(result),
+        criteria=proofs, suppressions=_suppressions(result), **recorded_entries(wb, task, result.unasserted),
     )  # fmt: skip
     sha = wb.commit(
         _red_commit_message(wb, task, already_satisfied=False), task=task.key, attempt=attempt, phase="red", tdd="red"
@@ -1982,7 +1990,9 @@ def _red_exit(step: StepOutcome) -> RedOutcome:
         return RedOutcome("held", held=step.held)
     if step.kind == "blocked":
         assert step.result is not None
-        return RedOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
+        return RedOutcome(
+            "blocked", questions=step.result.questions, summary=step.blocked_summary, clauses=step.clauses
+        )
     return RedOutcome("failed", step.reason, excerpt=step.excerpt)
 
 
@@ -2057,7 +2067,9 @@ def run_green(
             return GreenOutcome("held", held=step.held)
         if step.kind == "blocked":
             assert step.result is not None
-            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
+            return GreenOutcome(
+                "blocked", questions=step.result.questions, summary=step.blocked_summary, clauses=step.clauses
+            )
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     _check_opened(wb, red, unfreeze, red.manifest)
     put_back = restore_frozen(wb.git, manifest, events=wb, excludes=wb.excludes)
@@ -2101,7 +2113,7 @@ def run_green(
     # before the commit, like `task.red_ok`: the commit carries it, so a kill after it cannot lose the record
     wb.emit(
         "task.done", task=task.key, base=base, parents=parents, notes=step.result.notes_for_verifier,
-        suppressions=_suppressions(step.result),
+        suppressions=_suppressions(step.result), **recorded_entries(wb, task, step.result.unasserted),
     )  # fmt: skip
     sha = wb.commit(
         f"feat({wb.ref.name}): {task.title} [skip ci]", task=task.key, attempt=attempt, phase="green", tdd="green"
@@ -3047,7 +3059,9 @@ def _run_repair(
             return GreenOutcome("held", held=step.held)
         if step.kind == "blocked":
             assert step.result is not None
-            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
+            return GreenOutcome(
+                "blocked", questions=step.result.questions, summary=step.blocked_summary, clauses=step.clauses
+            )
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     reason, kept = _repair_review(wb, base, scope)
     if reason:
@@ -3179,7 +3193,9 @@ def run_single(
             return GreenOutcome("held", held=step.held)
         if step.kind == "blocked":
             assert step.result is not None
-            return GreenOutcome("blocked", questions=step.result.questions, summary=step.blocked_summary)
+            return GreenOutcome(
+                "blocked", questions=step.result.questions, summary=step.blocked_summary, clauses=step.clauses
+            )
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     kept: list[str] = []
     if adds_tests:
@@ -3279,7 +3295,7 @@ def run_single(
     wb.emit("task.tdd_exempt", task=task.key, sha=sha, kind="harness", finding=findings[0], findings=list(findings))
     wb.emit(
         "task.done", task=task.key, sha=sha, parents=parents, notes=step.result.notes_for_verifier, tdd="exempt",
-        suppressions=_suppressions(step.result),
+        suppressions=_suppressions(step.result), **recorded_entries(wb, task, step.result.unasserted),
     )  # fmt: skip
     wb.push()
     return GreenOutcome("ok", sha=sha)

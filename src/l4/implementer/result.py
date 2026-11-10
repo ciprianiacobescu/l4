@@ -63,6 +63,12 @@ class ResultQuestion(_Open):
     blocking_tasks: list[str] = Field(default_factory=list)
 
 
+class Unasserted(_Open):
+    criterion: str
+    clause: str
+    why: str
+
+
 class TddExemption(_Open):
     reason: str = ""
 
@@ -83,6 +89,7 @@ class ImplementerResult(_Open):
     tests_added: list[str] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
     questions: list[ResultQuestion] = Field(default_factory=list)
+    unasserted: list[Unasserted] = Field(default_factory=list)  # clauses its tests leave unasserted (L4-IMP-095)
     tdd_exemption: TddExemption | None = None
     suppressions: list[Suppression] = Field(default_factory=list)  # the suppression comments it added (step 1)
     notes_for_verifier: str = ""

@@ -37,8 +37,24 @@ def parse(name_or_lines, tmp_path, *, exit_code=0, result_text=None, schema=CANO
 
 
 def test_strictified_canonical_schema_equals_the_recorded_strict_schema():
-    assert strictify_schema(CANONICAL) == STRICT
-    assert "$id" not in strictify_schema(CANONICAL)
+    strict = strictify_schema(CANONICAL)
+    # the recorded schema is what 0.160.0 was given, before `unasserted` existed (L4-IMP-095)
+    without = {
+        **strict,
+        "properties": {k: v for k, v in strict["properties"].items() if k != "unasserted"},
+        "required": [k for k in strict["required"] if k != "unasserted"],
+    }
+    assert without == STRICT
+    assert "$id" not in strict
+
+
+def test_the_strict_unasserted_is_a_nullable_array_of_closed_objects():
+    strict = strictify_schema(CANONICAL)["properties"]["unasserted"]
+    assert strict["type"] == ["array", "null"] and strict["maxItems"] == 3
+    assert strict["items"]["additionalProperties"] is False
+    assert strict["items"]["required"] == ["criterion", "clause", "why"]
+    assert strict["description"] == CANONICAL["properties"]["unasserted"]["description"]
+    assert "unasserted" in strictify_schema(CANONICAL)["required"]
 
 
 def test_strictify_does_not_mutate_its_input():

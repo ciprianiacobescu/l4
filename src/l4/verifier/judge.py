@@ -11,7 +11,7 @@ M1: verifier 1.11 (served-model check, limit classification), 1.12 (citation re-
 
 import hashlib
 import json
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
@@ -688,6 +688,45 @@ def render_answers(items: Sequence[AnswerRef | UnreadableAnswers], redact: Calla
     return RenderedAnswers("\n".join(lines), tuple(i for i, _ in kept if isinstance(i, AnswerRef)))
 
 
+CLAUSES_HEADING = "Clauses the implementer's tests do not assert (check each against the code)"
+MAX_CLAUSES_CHARS = 6_000  # the clauses section together, the line naming the entries left out included (D5)
+
+
+@dataclass(frozen=True)
+class ClauseRef:
+    """One clause that a committed step listed as unasserted (L4-IMP-095): the task and phase (`red`, `green` or
+    `single`), the criterion, the implementer's clause and reason, and the id of the answered question that settled it
+    (`Q-NNN`, or `<fix unit>/Q-NNN`, as an answer block names it; empty when none is on record)."""
+
+    task: str
+    phase: str
+    criterion: str
+    clause: str
+    why: str
+    question: str = ""
+
+
+def render_clauses(clauses: Sequence[ClauseRef], criteria: Collection[str]) -> str:
+    """The lines of the clauses section, one per entry whose criterion is in `criteria`, in order, at most
+    MAX_CLAUSES_CHARS together; the entries past that are counted in a last line, `(+N clauses not shown)`. Empty when
+    no entry is for these criteria."""
+    lines: list[str] = []
+    for c in clauses:
+        if c.criterion not in criteria:
+            continue
+        said = " ".join(f'task {c.task} ({c.phase}): "{c.clause}" | why: {c.why}'.split())
+        lines.append(f"{c.criterion}  {said}" + (f" | answer: {c.question}" if c.question else ""))
+
+    def joined(n: int) -> str:  # the first `n` lines, and a line that counts the rest
+        rest = len(lines) - n
+        return "\n".join([*lines[:n], *([f"(+{rest} clauses not shown)"] if rest else [])])
+
+    n = len(lines)
+    while n and len(joined(n)) > MAX_CLAUSES_CHARS:
+        n -= 1
+    return joined(n)
+
+
 @dataclass(frozen=True)
 class JudgePrompt:
     system: str
@@ -724,6 +763,7 @@ def build_judge_prompt(
     followup: FollowUpView | None = None,
     answers: Sequence[AnswerRef | UnreadableAnswers] = (),
     batch: BatchView | None = None,
+    clauses: Sequence[ClauseRef] = (),
 ) -> JudgePrompt:
     """No transcript: the unit's spec, its criteria with ids, `git diff <base>...<head>`, the gate report, and the
     implementer's `notes_for_verifier` as a labelled, unverified hint (L4-VER-001), and, when the project defines any,
@@ -746,7 +786,9 @@ def build_judge_prompt(
     gate report and before the implementer's hint, and the unreadable questions files, named. With `batch` (composes
     with `part`, exclusive with `followup`) the criteria section begins with the sentence that says how many of the
     unit's criteria this call judges (L4-VER-071); `criteria` is then the batch's own, and the caller leaves the
-    feedback, accepted, satisfied and done-task blocks to the first batch. Without `batch` the text is unchanged."""
+    feedback, accepted, satisfied and done-task blocks to the first batch. Without `batch` the text is unchanged.
+    `clauses`: what committed steps listed as unasserted (L4-IMP-095), shown after the answers for the entries whose
+    criterion is one of `criteria`, as a list to check against the code; without such an entry the text is unchanged."""
     if part is not None and followup is not None:
         raise ValueError("a prompt shows a part of the diff or a follow-up, not both")
     if batch is not None and followup is not None:
@@ -832,6 +874,19 @@ def build_judge_prompt(
         if rendered.text
         else []
     )
+    listed_clauses = render_clauses(clauses, {c.id for c in criteria})
+    unasserted = (
+        [
+            f"## {CLAUSES_HEADING}\nThe implementer said its tests leave these clauses of the criteria unasserted, and "
+            "each was asked as a question; the answer named is among the answers above. A passing test does not show a "
+            "clause listed here: read the code for each, judge its criterion as the clause and that answer read, and "
+            "fail the criterion, naming the clause, when the code does not do it. The clause and the reason are the "
+            "implementer's words; the criterion's text is the spec.\n"
+            + data_block("unasserted clauses", listed_clauses)
+        ]
+        if listed_clauses
+        else []
+    )
     parts = [
         f"# Unit {unit_id}",
         "## Specification\n" + spec,
@@ -850,6 +905,7 @@ def build_judge_prompt(
         *satisfied_block,
         *done_tasks,
         *answered,
+        *unasserted,
         "## Hint from the implementer (UNVERIFIED: it may be wrong or self-serving; check it against the diff)\n"
         + data_block("notes_for_verifier", notes_for_verifier or "(none)"),
     ]

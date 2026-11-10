@@ -109,6 +109,10 @@ _CRITERION = re.compile(_PROPS["criteria_ids"]["items"]["pattern"])
 _SUMMARY_MAX: int = _PROPS["summary"]["maxLength"]
 _NOTES_MAX: int = _PROPS["notes_for_verifier"]["maxLength"]
 _REASON_MAX: int = _PROPS["suppressions"]["items"]["properties"]["reason"]["maxLength"]
+_MAX_UNASSERTED: int = _PROPS["unasserted"]["maxItems"]
+_UNASSERTED_MAX: dict[str, int] = {
+    key: _PROPS["unasserted"]["items"]["properties"][key]["maxLength"] for key in ("clause", "why")
+}
 _ALIASES = (("notes", "notes_for_verifier"), ("suppressions_list", "suppressions"))
 
 
@@ -134,6 +138,16 @@ def _suppression(item: Any) -> bool:
         and not isinstance(item["line"], bool)
         and isinstance(item.get("rule"), str)
         and isinstance(item.get("reason"), str)
+    )
+
+
+def _unasserted_item(item: Any) -> bool:
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get("criterion"), str)
+        and _CRITERION.search(item["criterion"]) is not None
+        and isinstance(item.get("clause"), str)
+        and isinstance(item.get("why"), str)
     )
 
 
@@ -269,6 +283,23 @@ def _drops(obj: dict[str, Any], fixes: list[Fix]) -> None:
             fixes.append(Fix(key, "dropped"))
 
 
+def _unasserted(obj: dict[str, Any], fixes: list[Fix]) -> None:
+    """The `unasserted` list (L4-IMP-095): keep the well-formed items, at most three. Never add an entry."""
+    if "unasserted" not in obj:
+        return
+    given = obj["unasserted"]
+    if not isinstance(given, list):
+        del obj["unasserted"]
+        fixes.append(Fix("unasserted", "dropped"))
+        return
+    kept = [item for item in given if _unasserted_item(item)]
+    if len(kept) < len(given):
+        fixes.append(Fix("unasserted", "dropped", count=len(given) - len(kept)))
+    if len(kept) > _MAX_UNASSERTED:
+        fixes.append(Fix("unasserted", "cut", count=len(kept) - _MAX_UNASSERTED))
+    obj["unasserted"] = [dict(item) for item in kept[:_MAX_UNASSERTED]]
+
+
 def _cuts(obj: dict[str, Any], fixes: list[Fix]) -> None:
     """Rule 13: an over-long text keeps its start and ends with the marker, the whole within the limit."""
     for key, limit in (("summary", _SUMMARY_MAX), ("notes_for_verifier", _NOTES_MAX)):
@@ -279,11 +310,16 @@ def _cuts(obj: dict[str, Any], fixes: list[Fix]) -> None:
         if len(item["reason"]) > _REASON_MAX:
             fixes.append(Fix("suppressions.reason", "cut", length=len(item["reason"])))
             item["reason"] = _cut(item["reason"], _REASON_MAX)
+    for item in obj.get("unasserted", []):
+        for key, limit in _UNASSERTED_MAX.items():
+            if len(item[key]) > limit:
+                fixes.append(Fix(f"unasserted.{key}", "cut", length=len(item[key])))
+                item[key] = _cut(item[key], limit)
 
 
 def normalize(found: Found, facts: StepFacts) -> Normalized:
     """The rules 1 to 13 of D4, in order, on a copy of the object. It never adds a question, a criterion, a
-    suppression or an exemption, never changes a present allowed status, and touches no file."""
+    suppression, an unasserted entry or an exemption, never changes a present allowed status, and touches no file."""
     obj: dict[str, Any] = drop_nulls(copy.deepcopy(found.obj))  # `null` means absent
     fixes: list[Fix] = []
     if found.source == "final_message":  # the agent wrote no usable result file: a person should see that
@@ -294,5 +330,6 @@ def normalize(found: Found, facts: StepFacts) -> Normalized:
     _status(obj, fixes)
     _summary(obj, found, facts, fixes)
     _drops(obj, fixes)
+    _unasserted(obj, fixes)
     _cuts(obj, fixes)
     return Normalized(obj, fixes)

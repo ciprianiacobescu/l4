@@ -21,6 +21,7 @@ from l4 import deadline
 from l4.availability.fallback import Constraint
 from l4.config.schema import Profile, duration_seconds
 from l4.gates.collection import ledger_excerpt
+from l4.implementer.clauses import ClauseAsk
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import GuardNote, guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
@@ -79,12 +80,14 @@ def _questions(
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
     exists: Callable[[str], bool] = lambda path: True,
+    clauses: Sequence[ClauseAsk] = (),
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
-    trusted). A blocked step without any question still has to reach a human, so one is made from its summary.
+    trusted), then one question for each new `unasserted` entry (`clauses`, L4-IMP-095). A blocked step without any
+    question still has to reach a human, so one is made from its summary.
     `red` is set for a green step: a technical question then ends with the harness's note on how a frozen test or
     support file is unfrozen (W-C3, D7)."""
-    if not questions:
+    if not questions and not clauses:
         return [
             NewQuestion(
                 title=f"Task {task.key} is blocked",
@@ -94,7 +97,7 @@ def _questions(
                 asked=asked,
             )  # fmt: skip
         ]
-    return [
+    own = [
         NewQuestion(
             title=q.title,
             kind=QuestionKind(q.kind),
@@ -105,6 +108,18 @@ def _questions(
         )  # fmt: skip
         for q in questions
     ]
+    ask = [
+        NewQuestion(
+            title=c.question.title,
+            kind=QuestionKind.AMBIGUOUS,
+            blocking_tasks=(task.key,),
+            context=c.question.context,
+            asked=asked,
+            criteria=(c.known,) if c.known is not None else (),
+        )  # fmt: skip
+        for c in clauses
+    ]
+    return [*own, *ask]
 
 
 def chore_question_note(unit: str | None) -> str:
@@ -203,21 +218,25 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
-    red: RedOutcome | None = None, chore_unit: str | None = None,
+    red: RedOutcome | None = None, chore_unit: str | None = None, clauses: Sequence[ClauseAsk] = (),
+    phase: str = "",
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
     batch = _questions(
         task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden,
-        lambda path: os.path.lexists(wb.worktree / path),
+        lambda path: os.path.lexists(wb.worktree / path), clauses,
     )  # fmt: skip
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
+    clause_of = dict(zip(ids[len(batch) - len(clauses) :], clauses, strict=True))  # the clauses' questions come last
     for qid, question in zip(ids, batch, strict=True):
         chore = {"chore": True} if chore_unit and question.kind is QuestionKind.TECHNICAL else {}
         # `chore`: a blocked fix chore's technical question, which carries the fix-task note (L4-DLG-025)
+        ask = clause_of.get(qid)
+        which = {"clause": {"criterion": ask.criterion, "phase": phase}} if ask is not None else {}
         wb.emit(
-            "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **chore,
+            "question.raised", id=qid, task=task.key, kind=question.kind.value, title=question.title, **chore, **which,
             **wb.asker(),
         )  # fmt: skip
     wb.commit(
@@ -575,7 +594,10 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
-                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id)
+                ids = _raise_blocked(
+                    wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id,
+                    clauses=done.clauses, phase="single",
+                )  # fmt: skip
                 return TaskOutcome("blocked", "single", ids)
             if done.status == "held":  # the discrimination check of a test chore could not decide (L4-IMP-063)
                 assert done.held is not None
@@ -587,7 +609,9 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             with deadline.timed(wb.emit):
                 outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
             if outcome.status == "blocked":
-                ids = _raise_blocked(wb, task, outcome.questions, outcome.summary, attempts["red"])
+                ids = _raise_blocked(
+                    wb, task, outcome.questions, outcome.summary, attempts["red"], clauses=outcome.clauses, phase="red"
+                )  # fmt: skip
                 return TaskOutcome("blocked", "red", ids)
             if outcome.status == "held":  # a check L4 could not decide: no attempt counted, no escalation (D7)
                 assert outcome.held is not None
@@ -606,7 +630,9 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
-                ids = _raise_blocked(wb, task, done.questions, done.summary, attempts["green"], red)
+                ids = _raise_blocked(
+                    wb, task, done.questions, done.summary, attempts["green"], red, clauses=done.clauses, phase="green"
+                )  # fmt: skip
                 return TaskOutcome("blocked", "green", ids)
             if done.status == "held":  # the test-at-red run could not decide: the red commit stays
                 assert done.held is not None

@@ -27,6 +27,15 @@ def test_a_minimal_result_parses_with_empty_defaults():
     assert result.criteria_ids == [] and result.questions == [] and result.tdd_exemption is None
 
 
+def test_an_unasserted_clause_parses_into_the_result():
+    entry = {"criterion": "C-1a2b3c4d", "clause": "its action is recorded", "why": "the spec does not say"}
+    result = parse_result({**GOOD, "unasserted": [entry]})
+    assert result.unasserted[0].criterion == "C-1a2b3c4d"
+    assert (result.unasserted[0].clause, result.unasserted[0].why) == (entry["clause"], entry["why"])
+    assert parse_result(GOOD).unasserted == []
+    assert parse_result({**GOOD, "unasserted": None}).unasserted == []
+
+
 def test_bytes_and_mappings_are_accepted_and_nulls_mean_absent():
     nulls = {**GOOD, "questions": None, "tests_added": None, "tdd_exemption": None, "notes_for_verifier": None}
     assert parse_result(json.dumps(nulls).encode()).tests_added == []
@@ -42,6 +51,10 @@ def test_bytes_and_mappings_are_accepted_and_nulls_mean_absent():
         ({"summary": "x" * 2001}, "summary"),
         ({"questions": [{"title": "t", "context": "c", "kind": "technical"}] * 4}, "questions"),
         ({"questions": [{"title": "t", "context": "c", "kind": "legal"}]}, "questions[0].kind"),
+        ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c", "why": "w"}] * 4}, "unasserted"),
+        ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c"}]}, r"unasserted[0]"),
+        ({"unasserted": [{"criterion": "C-XYZ", "clause": "c", "why": "w"}]}, r"unasserted[0].criterion"),
+        ({"unasserted": [{"criterion": "C-1a2b3c4d", "clause": "c" * 301, "why": "w"}]}, r"unasserted[0].clause"),
     ],
 )
 def test_schema_violations_name_the_path(patch: dict, where: str):

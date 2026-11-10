@@ -93,6 +93,33 @@
     }
    }
   },
+  "unasserted": {
+   "type": "array",
+   "maxItems": 3,
+   "items": {
+    "type": "object",
+    "required": [
+     "criterion",
+     "clause",
+     "why"
+    ],
+    "properties": {
+     "criterion": {
+      "type": "string",
+      "pattern": "^C-[0-9a-f]{8}$"
+     },
+     "clause": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "why": {
+      "type": "string",
+      "maxLength": 300
+     }
+    }
+   },
+   "description": "clauses of the cited scenarios that this step's tests or code leave unasserted or undecided, for any reason; a step that lists one is not kept, and each becomes a question that holds the task"
+  },
   "tdd_exemption": {
    "type": [
     "object",

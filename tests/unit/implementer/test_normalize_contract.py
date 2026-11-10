@@ -17,6 +17,12 @@ def test_file_schema_drops_what_l4_knows():
     }  # fmt: skip
 
 
+def test_file_schema_keeps_unasserted_as_the_canonical_schema_has_it():
+    assert "unasserted" in RESULT_SCHEMA["properties"]
+    assert FILE_RESULT_SCHEMA["properties"]["unasserted"] == RESULT_SCHEMA["properties"]["unasserted"]
+    assert "unasserted" not in FILE_RESULT_SCHEMA["required"]
+
+
 def test_new_run_fields_default_to_none(tmp_path):
     run = RunResult(status="ok", raw_events_path=tmp_path / "e")
     assert run.last_message is None and run.result_problem is None
