@@ -239,7 +239,7 @@ def test_audit_rules_and_header_block():
         ("project test conventions", "tests/conftest.py:5: requires_x = pytest.mark.skipif(True)"),
     ]
     system, user = build_writer_prompt("audit", ID, "c", blocks)
-    assert TEMPLATE == "testwriter@5"
+    assert TEMPLATE == "testwriter@6"
     assert "importlib.reload" in system and "sys.modules" in system and "once, at the top" in system
     assert "assert" in system.split("importlib.reload")[1] and "raw exception" in system
     assert "header of the existing test file" in system
@@ -251,6 +251,9 @@ def test_audit_rules_and_header_block():
     assert '<l4:data source="project test conventions">\ntests/conftest.py:5: requires_x' in user
     e2e, _ = build_writer_prompt("e2e", ID, "c", [])
     assert "importlib.reload" not in e2e and "header of the existing test file" not in e2e
+    assert "When e2e support files are shown, your test runs with them" in e2e  # L4-VER-077
+    assert "from conftest import login" in e2e and "Use no name they do not define" in e2e
+    assert "e2e support files" not in system  # the audit kind is unchanged
 
 
 @pytest.mark.parametrize(

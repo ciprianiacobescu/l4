@@ -25,7 +25,7 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier.e2e_trace import e2e_coverage, trace_e2e
 from l4.verifier.generate import ui_gap_finding
 from l4.verifier.playwright import ui_facing_criteria, ui_files
-from l4.verifier.traceability import PROOF_AUDIT, PROOF_GENERATED
+from l4.verifier.traceability import PASS_TO_PASS, PROOF_AUDIT, PROOF_GENERATED
 from l4.verifier.types import CriterionEvidence, Finding, GeneratedOutcome, Severity, TracingTest
 from l4.verifier.verdicts import effective_verdicts, finding_sha256, hold_id, text_sha256
 
@@ -123,14 +123,39 @@ def ui_hold_text(criterion_id: str) -> str:
     return f"UI criterion {criterion_id} has no end-to-end test; see the generated UI tests table"
 
 
+def covered_by_step4(trace: Sequence[CriterionEvidence]) -> dict[str, tuple[str, ...]]:
+    """criterion -> the sorted ids of the tests that cover it with evidence step 4 has (L4-VER-067): the criterion is
+    `covered` and not `held` (no audit test failing at head), and a tracing test passed, is adequate, is within the
+    per-test cap and has a proof that a run showed. `pass_to_pass` is not one (it says only that the criterion's text
+    is unchanged from the base specs, and no run showed that its test fails without this unit's change); nor is a
+    test with a `note` (a red record that no run proved: `not applicable: no project code`, or an accept after an
+    inconclusive check). A criterion with no such test is not in the map."""
+    out = {}
+    for e in trace:
+        if e.state != "covered" or e.held:
+            continue
+        ids = sorted(
+            t.id
+            for t in e.tests
+            if t.status == "passed" and t.adequate and t.proof != PASS_TO_PASS and not t.note and t.over_cap == 0
+        )
+        if ids:
+            out[e.criterion] = tuple(ids)
+    return out
+
+
 def unclosed_holds(gaps: Iterable[Criterion], outcomes: Iterable[GeneratedOutcome]) -> list[str]:
     """A UI criterion that step 5 did not close (no writer, or the writer's test was not accepted, and not waived) is a
-    hold: the unit waits for a human, who can accept it (a unit test may well be enough) and so waive the hold."""
+    hold: the unit waits for a human, who can accept it (a unit test may well be enough) and so waive the hold. A
+    `not_testable` outcome with `covered_by` is a note, not a hold (L4-VER-067)."""
     done = {o.criterion: o for o in outcomes}
     return [
         ui_hold_text(c.id)
         for c in gaps
-        if (outcome := done.get(c.id)) is None or not (outcome.accepted or outcome.status == "waived")
+        if (outcome := done.get(c.id)) is None
+        or not (
+            outcome.accepted or outcome.status == "waived" or (outcome.status == "not_testable" and outcome.covered_by)
+        )
     ]
 
 

@@ -31,6 +31,11 @@ def ui_test(cid: str, needle: str, name: str) -> Step:
     return Step(structured={"criterion": cid, "code": code})
 
 
+def no_test(cid: str) -> Step:
+    """A reply that is a file with no test: the fixture has no lint gate, so it ends `uncollectable` at once."""
+    return Step(structured={"criterion": cid, "code": "import pytest\n"})
+
+
 def web_green() -> Step:
     return Step(writes={"src/pytdd/pricing.py": IMPL, "app.py": HEAD_APP}, structured=green_step().structured)
 
@@ -89,18 +94,107 @@ def steps_of(run) -> dict[str, str]:
     return {e["step"]: e["status"] for e in run.events("verify.step")}
 
 
-def test_a_criterion_the_writer_calls_not_testable_stays_uncovered_and_the_unit_waits_for_a_human(
+def test_a_covered_criterion_the_writer_calls_not_testable_is_a_note_and_the_unit_passes(
     run_l4, valid_spec, web_repo
-):
+):  # SCN-VER-298
     refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
     run = run_l4([red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    made = {e["criterion"]: e for e in run.events("verify.generated")}
+    assert {c: e["status"] for c, e in made.items()} == {KNOWN: "accepted", UNKNOWN: "not_testable"}
+    assert made[UNKNOWN]["covered_by"] == ["tests.test_discount::test_unknown_code"] and "covered_by" not in made[KNOWN]
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {UNKNOWN} | not_testable |"))
+    assert "covered by step 4: tests.test_discount::test_unknown_code; a note, not a hold (L4-VER-067)" in row
+    assert f"UI criterion {UNKNOWN} has no end-to-end test; see" not in text and "## Needs a human" not in text
+    step5 = next(line for line in text.splitlines() if line.startswith("| 5 | ui test generation |"))
+    assert "1 not_testable covered by step 4: notes, no hold (L4-VER-067)" in step5
+    assert "e2e support files shown" not in step5
+    assert "verifier round 1 [skip ci]" in " ".join(run.subjects())  # the accepted test is committed all the same
+
+
+def test_step_5_says_how_many_e2e_support_files_the_writer_was_shown(
+    run_l4, valid_spec, web_repo, tdd_repo, raw
+):  # SCN-VER-304
+    (tdd_repo.repo / "e2e").mkdir(exist_ok=True)
+    (tdd_repo.repo / "e2e" / "conftest.py").write_text("def login(page):\n    page.goto('/')\n")
+    raw(tdd_repo.repo, "add", "e2e/conftest.py")
+    raw(tdd_repo.repo, "commit", "-q", "-m", "the suite's conftest")
+    raw(tdd_repo.repo, "push", "-q", "origin", "main")
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    script = [
+        red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), ui_test(UNKNOWN, "SAVE10", "code"),
+        JUDGE,
+    ]  # fmt: skip
+    run = run_l4(script, **web_repo)
+    assert run.code == 0, run.outcome
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    step5 = next(line for line in text.splitlines() if line.startswith("| 5 | ui test generation |"))
+    assert "e2e support files shown to the writer: 1" in step5 and "not shown" not in step5
+
+
+def test_a_covered_criterion_whose_generation_failed_in_another_way_keeps_its_hold(
+    run_l4, valid_spec, web_repo
+):  # SCN-VER-300
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
     assert run.code == 11
-    statuses = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
-    assert statuses == {KNOWN: "accepted", UNKNOWN: "not_testable"}
+    made = {e["criterion"]: e for e in run.events("verify.generated")}
+    assert made[UNKNOWN]["status"] == "uncollectable" and "covered_by" not in made[UNKNOWN]
     text = run.pushed(f"{UNIT_DIR}/verification.md")
     assert f"UI criterion {UNKNOWN} has no end-to-end test; see" in text and "## Needs a human" in text
-    assert f"| {UNKNOWN} | not_testable |" in text
-    assert "verifier round 1 [skip ci]" in " ".join(run.subjects())  # the accepted test is committed all the same
+
+
+def test_a_reused_round_keeps_the_note_and_raises_no_hold(run_l4, valid_spec, web_repo, tdd_repo, raw):  # SCN-VER-301
+    import json
+
+    from ..orchestrator.conftest import edit_questions_on_origin
+
+    noted = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
+    first = run_l4([red_step(), web_green(), no_test(KNOWN), noted, JUDGE], **web_repo)
+    assert first.code == 11
+    assert len(first.events("question.raised")) == 1  # KNOWN's UI hold; UNKNOWN is a note
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
+    second = run_l4([], **web_repo)  # no step at all: no writer is called
+    assert second.code == 0, second.outcome
+    assert second.adapter.requests == [] and len(second.events("question.raised")) == 1
+    reused = {e["step"]: e["status"] for e in second.events("verify.step") if e["round"] == 2}
+    assert reused["5"] == "reused" and reused["4"] == "reused"
+    text = second.pushed(f"{UNIT_DIR}/verification.md")
+    assert "reused (round 1)" in text and "covered by step 4: tests.test_discount::test_unknown_code" in text
+    assert f"UI criterion {UNKNOWN} has no end-to-end test" not in text
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    generated = {g["criterion"]: g for g in body["generated"]}
+    assert generated[UNKNOWN]["covered_by"] == ["tests.test_discount::test_unknown_code"]
+    assert not any(UNKNOWN in hold for hold in body["holds"])
+
+
+def test_a_note_does_not_pass_the_criterion_the_judge_calls_inadequate(run_l4, valid_spec, web_repo):  # SCN-VER-303
+    refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
+    inadequate = Step(
+        structured=judge_reply(
+            [KNOWN, UNKNOWN],
+            test_adequacy=[
+                {
+                    "test": "tests.test_discount::test_unknown_code",
+                    "criterion": UNKNOWN,
+                    "adequate": False,
+                    "reason": "it does not open the page",
+                }
+            ],
+        )
+    )
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, inadequate], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {UNKNOWN} |") and "needs_human" in line)
+    assert "uncovered: the tests that trace it are inadequate or did not pass" in row
+    asked = run.events("question.raised")
+    assert len(asked) == 1 and asked[0]["kind"] == "verdict" and asked[0].get("criterion", UNKNOWN) == UNKNOWN
+    assert f"UI criterion {UNKNOWN} has no end-to-end test" not in text
 
 
 def test_an_e2e_test_that_fails_at_head_fails_step_3_and_no_judge_is_called(run_l4, valid_spec, web_repo):
@@ -214,8 +308,9 @@ def test_a_generated_test_and_an_accepted_hold_of_an_earlier_round_are_not_run_o
 ):
     from ..orchestrator.conftest import edit_questions_on_origin
 
-    refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "not now"})
-    first = run_l4([red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, JUDGE], **web_repo)
+    first = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
     assert first.code == 11
     asked = first.events("question.raised")
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
@@ -226,7 +321,7 @@ def test_a_generated_test_and_an_accepted_hold_of_an_earlier_round_are_not_run_o
     second = run_l4([JUDGE], **web_repo)  # no writer call: UNKNOWN is waived by the accepted hold (L4-VER-067)
     assert second.code == 0, second.outcome
     made = [(e["criterion"], e["status"]) for e in second.events("verify.generated")]
-    assert made == [(KNOWN, "accepted"), (UNKNOWN, "not_testable"), (UNKNOWN, "waived")]  # KNOWN not asked again
+    assert made == [(KNOWN, "accepted"), (UNKNOWN, "uncollectable"), (UNKNOWN, "waived")]  # KNOWN not asked again
     [waived] = [e for e in second.events("verify.generated") if e["status"] == "waived"]
     assert waived["by"] == "Q-001" and waived["attempts"] == 0 and not waived.get("test")
     assert len(second.adapter.requests) == 1 and second.events("question.raised") == asked

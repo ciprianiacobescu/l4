@@ -29,9 +29,11 @@ SCHEMA_ID = "l4/generated-test@1"
 # 3: no reflection to find the code, no secret-shaped literal, the project's conventions (M1.11, W7)
 # 4: only names the shown sources define, no cascade of `hasattr`, nothing snapshotted that the spec excludes (M1.13)
 # 5: no `python -m` of a module with no `__main__` guard, every name imported (live wave D, W-D2)
-TEMPLATE_VERSION = 5
+# 6: the e2e writer may use the e2e suite's support files shown (L4-VER-077)
+TEMPLATE_VERSION = 6
 TEMPLATE = f"testwriter@{TEMPLATE_VERSION}"
 TestKind = Literal["audit", "e2e"]
+E2E_DIR = "e2e"  # where the e2e writer's test goes, and where the suite's support files are read from (L4-VER-077)
 _CRITERION_HEX = 8
 
 
@@ -87,6 +89,9 @@ Rules for this end-to-end test:
 - Use the pytest-playwright `page: Page` fixture (`from playwright.sync_api import Page, expect`).
 - Take the base URL from `os.environ["L4_E2E_BASE_URL"]` and request only that origin.
 - Assert what a user sees or can do, not the markup details.
+- When e2e support files are shown, your test runs with them: use their fixtures by parameter name and import their \
+helpers from the module that defines them (`from conftest import login`), with the arguments they take. Use no name \
+they do not define.
 """,
 }
 
@@ -656,7 +661,7 @@ def test_path(kind: TestKind, criterion_id: str, *, round_no: int | None = None,
         raise ValueError(f"unknown test kind: {kind!r}")
     digits = _hex(criterion_id)
     if kind == "e2e":
-        return f"e2e/test_l4_c_{digits}.py"
+        return f"{E2E_DIR}/test_l4_c_{digits}.py"
     if round_no is None:
         raise ValueError("an audit test path needs round_no")
     if type(round_no) is not int or round_no < 1:

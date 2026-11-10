@@ -13,6 +13,7 @@ from l4.specs.base import Criterion, Framework
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import CriterionEvidence, GeneratedOutcome, TracingTest
 from l4.verifier.ui_step import (
+    covered_by_step4,
     gap_findings,
     plan_generation,
     previously_generated,
@@ -135,6 +136,83 @@ def test_the_hold_of_a_criterion_keeps_its_id_whatever_the_generator_said(  # SC
 def test_a_waived_criterion_is_closed_and_raises_no_hold():
     waived = GeneratedOutcome(CID, "waived", None, 0, by="Q-004")
     assert unclosed_holds([crit(CID), crit(OTHER)], [waived]) == [ui_hold_text(OTHER)]
+
+
+def test_a_not_testable_gap_that_step_4_covers_is_a_note_and_the_other_is_a_hold():  # SCN-VER-298
+    noted = GeneratedOutcome(CID, "not_testable", reason="pure functions", covered_by=("tests.a::t",))
+    asked = GeneratedOutcome(OTHER, "not_testable", reason="pure functions")
+    assert unclosed_holds([crit(CID), crit(OTHER)], [noted, asked]) == [ui_hold_text(OTHER)]
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "writer_failed",
+        "uncollectable",
+        "fails_at_head",
+        "non_discriminating",
+        "base_error",
+        "base_unservable",
+        "lint_failed",
+    ],
+)
+def test_only_a_not_testable_outcome_with_covered_by_is_closed(status):  # SCN-VER-300
+    outcome = GeneratedOutcome(CID, status, PATH, 1, covered_by=("tests.a::t",))  # type: ignore[arg-type]
+    assert unclosed_holds([crit(CID)], [outcome]) == [ui_hold_text(CID)]
+    assert unclosed_holds([crit(CID)], []) == [ui_hold_text(CID)]
+
+
+def evidence(*tests: TracingTest, state="covered", held="") -> list[CriterionEvidence]:
+    return [CriterionEvidence(CID, CID, state, tests, held=held)]  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "proof", ["zero_value", "pre_satisfied", "red_assertion", "repair", "audit", "generated", "human", "chore"]
+)
+def test_a_criterion_covered_by_a_test_a_run_proved_maps_to_that_test(proof):  # SCN-VER-298
+    assert covered_by_step4(evidence(TracingTest("t.a::one", "passed", proof))) == {CID: ("t.a::one",)}
+
+
+def test_the_covering_tests_are_the_proved_ones_sorted_and_not_the_pass_to_pass_one():  # SCN-VER-298
+    trace = evidence(
+        TracingTest("t.a::two", "passed", "red_assertion"),
+        TracingTest("t.a::keep", "passed", "pass_to_pass"),
+        TracingTest("t.a::one", "passed", "zero_value"),
+    )
+    assert covered_by_step4(trace) == {CID: ("t.a::one", "t.a::two")}
+
+
+@pytest.mark.parametrize(
+    "trace",
+    [
+        evidence(TracingTest("t.a::one", "passed", "pass_to_pass")),
+        evidence(TracingTest("t.a::one", "passed", "zero_value", note="not applicable: no project code")),
+        evidence(
+            TracingTest("t.a::one", "passed", "red_assertion", note="accepted by Q-001: the check was inconclusive")
+        ),
+        evidence(TracingTest("t.a::one", "passed", "zero_value"), state="fail"),
+        evidence(TracingTest("t.a::one", "passed", "zero_value"), state="uncovered"),
+        evidence(TracingTest("t.a::one", "passed", "audit"), held="the audit test fails at head"),
+        evidence(TracingTest("t.a::one", "passed", "zero_value", adequate=False)),
+        evidence(TracingTest("t.a::one", "passed", "zero_value", over_cap=1)),
+        evidence(TracingTest("t.a::one", "failed", "zero_value")),
+        evidence(),
+    ],
+    ids=[
+        "pass-to-pass",
+        "no-project-code",
+        "inconclusive",
+        "fail",
+        "uncovered",
+        "held",
+        "inadequate",
+        "over-cap",
+        "failed-test",
+        "no-test",
+    ],
+)
+def test_nothing_discriminating_means_no_cover(trace):  # SCN-VER-299
+    assert covered_by_step4(trace) == {}
 
 
 def test_the_gap_finding_of_a_waived_criterion_says_who_waived_it():

@@ -214,6 +214,9 @@ class GeneratedOutcome:
     sha256: str = ""  # accepted: of the file as written, so that a later round can tell it is still ours
     support: str = ""  # the head run: base (the unit's support files at the base), head (with them) or unchanged
     by: str = ""  # waived: the answered question that waived the criterion (L4-VER-067); no writer ran
+    covered_by: tuple[
+        str, ...
+    ] = ()  # not_testable: the step-4 tests that cover the criterion; a note, no hold (L4-VER-067)
 
     @property
     def accepted(self) -> bool:

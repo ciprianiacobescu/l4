@@ -166,7 +166,14 @@ def _independence(d: Any) -> "Independence | None":
 
 
 def _generated(d: Mapping[str, Any]) -> GeneratedOutcome:
-    return GeneratedOutcome(**{**d, "tests": tuple(d.get("tests", ())), "artifacts": tuple(d.get("artifacts", ()))})
+    return GeneratedOutcome(
+        **{
+            **d,
+            "tests": tuple(d.get("tests", ())),
+            "artifacts": tuple(d.get("artifacts", ())),
+            "covered_by": tuple(d.get("covered_by") or ()),
+        }
+    )
 
 
 def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyResult:

@@ -9,7 +9,7 @@ from l4.vcs.names import UnitNames
 from ..conftest import UNIT
 from ..implementer.conftest import KNOWN, UNKNOWN, red_step
 from ..orchestrator.conftest import BRANCH, UNIT_DIR
-from .test_ui_flow import JUDGE, ui_test, web_green, web_repo  # noqa: F401
+from .test_ui_flow import JUDGE, no_test, ui_test, web_green, web_repo  # noqa: F401
 
 LESSONS = ".serena/memories/harness/lessons.md"
 
@@ -43,21 +43,19 @@ def test_finding_becomes_lesson_and_is_injected_later(run_l4, valid_spec, web_re
 
 
 def test_nothing_is_curated_when_the_final_pass_was_not_reached(run_l4, valid_spec, web_repo):  # noqa: F811
-    from l4.agents.fake import Step
-
-    refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "not now"})
-    run = run_l4([red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, JUDGE], **web_repo)
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
     assert run.code == 11
     assert not any(s.startswith("chore(memory)") for s in run.subjects()) and run.events("lessons.curated") == []
 
 
 def test_the_round_that_closes_the_gap_is_the_one_that_curates(run_l4, valid_spec, web_repo, tdd_repo, raw):  # noqa: F811
-    from l4.agents.fake import Step
-
     from ..orchestrator.conftest import edit_questions_on_origin
 
-    refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "not now"})
-    first = run_l4([red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, JUDGE], **web_repo)
+    first = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
     assert first.code == 11
     edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
     clone = tdd_repo.repo.parent / "human-answered"

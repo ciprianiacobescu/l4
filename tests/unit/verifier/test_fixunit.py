@@ -125,6 +125,18 @@ def test_a_ui_gap_waived_by_an_accepted_answer_spawns_no_fix_unit():
     assert plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups == []
 
 
+def test_a_ui_gap_noted_as_covered_by_step_4_spawns_no_fix_unit():  # SCN-VER-302
+    from l4.memory.curate import UI_GAP_TITLE
+    from l4.verifier.types import GeneratedOutcome
+
+    gap = Finding(Severity.MINOR, UI_GAP_TITLE, "d", "deterministic", "C-00000001")
+    r = result(Verdict.PASS, [gap])
+    r.generated = [GeneratedOutcome("C-00000001", "not_testable", reason="pure", covered_by=("t::a",))]
+    assert plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups == []
+    r.generated = [GeneratedOutcome("C-00000001", "not_testable", reason="pure")]
+    assert [g.criteria for g in plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups] == [("C-00000001",)]
+
+
 def test_a_minor_spec_gap_without_a_source_for_its_scenario_is_listed_not_converted():
     gap = Finding(Severity.MINOR, "Gap", "d", "judge", "C-00000001", spec_gap=True, suggested_fix="add a check")
     plan = plan_fix_unit(FAMILY, result(Verdict.PASS, [gap]), [], ordinal=1, fix_minor=True)

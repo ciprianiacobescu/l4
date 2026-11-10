@@ -228,6 +228,7 @@ from l4.verifier.types import (
     VerifyResult,
 )
 from l4.verifier.ui_step import (
+    covered_by_step4,
     edited_findings,
     gap_findings,
     plan_generation,
@@ -1208,7 +1209,10 @@ def _generate_step(
     traces; each gets a Playwright test from the verifier agent, and the test counts only if it fails at the merge
     base and passes at head (generate.py). Accepted files stay in the worktree for the round's one test commit;
     a criterion that stays without one is `needs_human` through aggregation, with a finding that says why. A criterion
-    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`."""
+    whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`. A
+    `not_testable` for a criterion that step 4 covers with a discriminating test is a note, not a hold: the covering
+    tests are read from `result.trace` as it stands here and stored on the outcome (`covered_by`), so a reused round
+    keeps what the round stored and never decides it again (`covered_by_step4` is called nowhere else)."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1263,6 +1267,7 @@ def _generate_step(
             wb, vc.ui_writer(), gaps, base_sha=base_sha, ui_diff=_ui_diff(wb, base_sha, result.head_sha, ui),
             snapshot=browser.snapshot or "",
             support=unit_test_plan(wb.git, wb.cfg, base_sha, result.head_sha, result.integrity),
+            covered=covered_by_step4(result.trace),
         )  # fmt: skip
         result.generated = [*result.generated, *out.outcomes]
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
@@ -1273,7 +1278,13 @@ def _generate_step(
         result.tests |= {i: "passed" for o in out.outcomes if o.accepted for i in o.tests}
         hold_all(unclosed_holds(gaps, out.outcomes))
         counts = {s: sum(o.status == s for o in out.outcomes) for s in {o.status for o in out.outcomes}}
-        return True, ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        if noted := sum(bool(o.covered_by) for o in out.outcomes):
+            note += f"; {noted} not_testable covered by step 4: notes, no hold (L4-VER-067)"
+        if out.suite_files or out.suite_skipped:
+            note += f"; e2e support files shown to the writer: {len(out.suite_files)}"
+            note += f" (+{len(out.suite_skipped)} not shown)" if out.suite_skipped else ""
+        return True, note
 
     _step(vc, run, "5", "ui test generation", body)
 

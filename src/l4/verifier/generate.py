@@ -10,15 +10,17 @@ unless it was accepted. One retry carries the reason. Generation is impossible, 
 fails at the head is kept in the outcome as evidence and never committed (the panel review of L4-VER-012 is deferred).
 Step 5 returns the accepted paths only: the single per-round commit is M1.3's `commit_verifier_tests` (line 34).
 `verify.generated{criterion, test, base, head, attempts, status, reason, model, tests, sha256}` is emitted HERE, once
-per criterion (the live protocol's shape, plus the evidence); line 34's ladder row must not emit it again.
+per criterion (the live protocol's shape, plus the evidence, and `covered_by` for a `not_testable` that step 4 covers,
+L4-VER-067); line 34's ladder row must not emit it again.
 `verifier.flaky_repeats` repeats a failed gate of step 3 whose only failures are pre-existing tests (L4-VER-076); a
 generated test is never repeated.
 M1: verifier 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic verifier.
 """
 
+import dataclasses
 import hashlib
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,6 +33,7 @@ from l4.llm.agent_judge import LLMBackend
 from l4.memory.curate import UI_GAP_TITLE
 from l4.security.protected import glob_match
 from l4.specs.base import Criterion
+from l4.verifier.conventions import e2e_support_files
 from l4.verifier.e2e_trace import e2e_coverage
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
 from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, runner_support, support_at_base
@@ -46,6 +49,8 @@ MAX_REASON_CHARS = 600
 @dataclass
 class UiGeneration:
     outcomes: list[GeneratedOutcome] = field(default_factory=list)
+    suite_files: list[str] = field(default_factory=list)  # the e2e support files the writer was shown (L4-VER-077)
+    suite_skipped: list[str] = field(default_factory=list)  # and the ones left out to keep the prompt bounded
 
     @property
     def paths(self) -> list[str]:
@@ -227,13 +232,17 @@ def generate_ui_test(
     snapshot: str,
     timeout_s: int = 600,
     support: SupportPlan = NO_SUPPORT,
+    suite: Sequence[tuple[str, str]] = (),
 ) -> GeneratedOutcome:
-    """One criterion. `base` is the merge-base checkout of `base_checkout`, set up and ready to be served."""
+    """One criterion. `base` is the merge-base checkout of `base_checkout`, set up and ready to be served. `suite`:
+    the e2e suite's support files at the merge base as data blocks (`conventions.e2e_support_files`), shown after the
+    page snapshot."""
     rel = test_path("e2e", criterion.id)
     blocks = [
         ("scenario", criterion.text),
         ("ui diff", ui_diff[:MAX_DIFF_CHARS]),
         ("page snapshot", snapshot[:MAX_SNAPSHOT_CHARS]),
+        *suite,
     ]
     retry_reason: str | None = None
     cost, model, sha, last = 0.0, None, "", _Verdict("writer_failed", "no reply")
@@ -308,19 +317,29 @@ def generate_ui_tests(
     ui_diff: str,
     snapshot: str,
     support: SupportPlan = NO_SUPPORT,
+    covered: Mapping[str, Sequence[str]] | None = None,
 ) -> UiGeneration:
     """Step 5 over the UI criteria without an e2e test. The merge-base checkout is made once and removed in `finally`
-    (also when a server never gets ready, which propagates as exit 1). No gaps: nothing is checked out or served."""
+    (also when a server never gets ready, which propagates as exit 1). No gaps: nothing is checked out or served.
+    `covered`: criterion -> the step-4 tests that cover it (`ui_step.covered_by_step4`); a `not_testable` outcome for
+    such a criterion carries them as `covered_by`, a note and not a hold (L4-VER-067)."""
     out = UiGeneration()
     if not gaps:
         return out
+    suite = e2e_support_files(wb.git, base_sha)  # once per step: the base is the same for every criterion
+    out.suite_files, out.suite_skipped = list(suite.shown), list(suite.skipped)
     with base_checkout(wb, base_sha) as base:
         for criterion in gaps:
-            done = generate_ui_test(wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot, support=support)
+            done = generate_ui_test(
+                wb, judge, criterion, base, ui_diff=ui_diff, snapshot=snapshot, support=support, suite=suite.blocks
+            )
+            if done.status == "not_testable" and covered and covered.get(criterion.id):
+                done = dataclasses.replace(done, covered_by=tuple(covered[criterion.id]))
+            noted = {"covered_by": list(done.covered_by)} if done.covered_by else {}
             wb.emit(
                 "verify.generated", criterion=criterion.id, test=done.path, base=done.base, head=done.head,
                 attempts=done.attempts, status=done.status, reason=done.reason, model=done.model,
-                tests=list(done.tests), sha256=done.sha256, support=done.support,
+                tests=list(done.tests), sha256=done.sha256, support=done.support, **noted,
             )  # fmt: skip
             out.outcomes.append(done)
     return out

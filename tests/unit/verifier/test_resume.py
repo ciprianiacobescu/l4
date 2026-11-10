@@ -9,6 +9,7 @@ from l4.verifier.types import (
     CriterionEvidence,
     Finding,
     GateLine,
+    GeneratedOutcome,
     IntegrityCheck,
     IntegrityReport,
     Severity,
@@ -99,6 +100,18 @@ def test_a_round_restores_from_its_verdict_json_with_steps_marked_reused():
     assert back.findings == result.findings and back.trace == result.trace
     assert back.integrity == result.integrity and back.judge_verdict == {"criteria": []}
     assert back.judge_calls == 2 and back.prompt_sha256 == "p" * 64
+
+
+def test_a_noted_outcome_restores_with_its_covered_by_and_an_older_record_with_none():  # SCN-VER-301
+    noted = GeneratedOutcome("C-a", "not_testable", reason="pure functions", covered_by=("t::a", "t::b"))
+    plain = GeneratedOutcome("C-b", "fails_at_head", "e2e/test_l4_c_b.py", 2, "the test fails at the head")
+    result = VerifyResult(UNIT, 1, Verdict.NEEDS_HUMAN, "b" * 40, "c" * 40, subject_sha="abc", generated=[noted, plain])
+    data = json.loads(json.dumps(verdict_json(result)))
+    assert restore_round(data, UNIT, 2).generated == [noted, plain]
+    for record in data["generated"]:
+        del record["covered_by"]  # written before this change
+    back = restore_round(data, UNIT, 2).generated
+    assert [g.covered_by for g in back] == [(), ()] and back[0].status == "not_testable"
 
 
 # --- the base merge commit (verifier 5.2 with M1.7: a merge that brings code is a new subject) -----------------------

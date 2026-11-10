@@ -1,8 +1,11 @@
 """What the project's tests already do about optional dependencies and how a test file starts (M1.9, P2/P3): read from
-the base commit only, so that nothing the unit changed shapes what its tests are judged against."""
+the base commit only, so that nothing the unit changed shapes what its tests are judged against. `e2e_support_files` is
+the same for the UI test writer's e2e suite (L4-VER-077)."""
+
+import os
 
 from l4.config.schema import L4Config
-from l4.verifier.conventions import base_test_header, test_conventions
+from l4.verifier.conventions import base_test_header, e2e_support_files, test_conventions
 
 CONFTEST = """\
 import importlib.util
@@ -100,3 +103,72 @@ def test_the_header_comes_from_a_base_file_the_unit_did_not_change(make_repo, ra
     big = commit(raw, repo, {"tests/test_c.py": long, "tests/test_a.py": "", "tests/unit/test_b.py": ""}, "long")
     _, cut = base_test_header(git_for(repo), big, changed=[], near="tests/test_x.py")
     assert len(cut.splitlines()) == 40
+
+
+LABEL = "(e2e support file at the merge base"
+E2E_CONFTEST = (
+    "import pytest\n\n\ndef login(page):\n    page.goto('/login')\n\n\n@pytest.fixture\ndef users():\n    return {}\n"
+)
+
+
+def test_the_writer_is_shown_the_conftest_and_the_helpers_of_the_suite_at_the_base(
+    make_repo, raw, git_for
+):  # SCN-VER-304
+    repo = make_repo()
+    base = commit(raw, repo, {
+        "e2e/conftest.py": E2E_CONFTEST, "e2e/helpers/a11y.py": "def no_violations(page):\n    pass\n",
+        "e2e/test_sign_in.py": "def test_x():\n    pass\n", "e2e/pages/x_test.py": "def test_y():\n    pass\n",
+    }, "base")  # fmt: skip
+    commit(
+        raw, repo, {"e2e/conftest.py": "# the unit's version\n", "e2e/helpers.py": "def mine():\n    pass\n"}, "head"
+    )
+    support = e2e_support_files(git_for(repo), base)
+    assert support.blocks == (
+        (f"e2e/conftest.py {LABEL})", E2E_CONFTEST),
+        (f"e2e/helpers/a11y.py {LABEL})", "def no_violations(page):\n    pass\n"),
+    )
+    assert support.shown == ("e2e/conftest.py", "e2e/helpers/a11y.py") and support.skipped == ()
+
+
+def test_the_support_files_shown_are_bounded_and_the_rest_are_named(make_repo, raw, git_for):  # SCN-VER-305
+    repo = make_repo()
+    files = {"e2e/conftest.py": "x" * 30_000, **{f"e2e/h{i}.py": "y" * 5_000 for i in range(1, 10)}}
+    support = e2e_support_files(git_for(repo), commit(raw, repo, files, "base"))
+    labels = [label for label, _ in support.blocks]
+    assert labels == [
+        f"e2e/conftest.py {LABEL}, first 8000 characters)",
+        f"e2e/h1.py {LABEL})",
+        f"e2e/h2.py {LABEL})",
+        "e2e support files not shown",
+    ]
+    assert len(support.blocks[0][1]) == 8_000 and len(support.blocks[1][1]) == 5_000
+    assert support.blocks[-1][1].splitlines() == [f"e2e/h{i}.py" for i in range(3, 10)]
+    assert support.shown == ("e2e/conftest.py", "e2e/h1.py", "e2e/h2.py")
+    assert support.skipped == tuple(f"e2e/h{i}.py" for i in range(3, 10))
+    small = {f"e2e/h{i}.py": "z" * 1_000 for i in range(1, 9)}
+    other = make_repo("other")
+    support = e2e_support_files(git_for(other), commit(raw, other, small, "small"))
+    assert len(support.shown) == 6 and len(support.skipped) == 2 and len(support.blocks) == 7
+    assert support.blocks[-1][0] == "e2e support files not shown"
+
+
+def test_what_is_not_a_support_file_of_the_suite_is_not_shown(make_repo, raw, git_for):  # SCN-VER-306
+    repo = make_repo()
+    git = git_for(repo)
+    assert e2e_support_files(git, raw(repo, "rev-parse", "HEAD").strip()).blocks == ()  # no e2e/ at all
+    (repo / "e2e").mkdir()
+    os.symlink("../README.md", repo / "e2e" / "link.py")
+    for rel in ("e2e/test_a.py", "e2e/b_test.py", "e2e/test_l4_c_de7f2d3f.py"):
+        (repo / rel).write_text("def test_x():\n    pass\n")
+    (repo / "e2e/__init__.py").write_text("\n  \n")
+    for rel in ("e2e/.venv/x.py", "e2e/__pycache__/y.py", "e2e/node_modules/z.py", "e2e/admin/conftest.py"):
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text("x = 1\n")
+    (repo / "e2e/data.txt").write_text("not python\n")
+    raw(repo, "add", "-A", "-f")
+    raw(repo, "commit", "-q", "-m", "base")
+    base = raw(repo, "rev-parse", "HEAD").strip()
+    assert "120000" in raw(repo, "ls-tree", "-r", base, "--", "e2e/link.py")  # the link is in the tree
+    commit(raw, repo, {"e2e/helpers.py": "def mine():\n    pass\n"}, "the unit adds a helper")
+    support = e2e_support_files(git, base)
+    assert support.blocks == () and support.shown == () and support.skipped == ()
