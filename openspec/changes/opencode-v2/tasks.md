@@ -403,6 +403,8 @@ Depends on: B6.
 
 ## 8. Group B8 (orchestrator): live validation in CI
 
+Replaced in part by `opencode-v2-current` (0.4.56): see its design D7.
+
 **Deferred (owner, 2026-10-24, design E8):** 0.4.28 ships B1–B7 with the adapter experimental; B8 and B9 run in a
 later release.
 
@@ -460,6 +462,8 @@ leave the free-judge rows open.
   validation fixtures`), with every row of design D13 marked recorded or still open.
 
 ## 9. Group B9: replace fallbacks only where B8 recorded the behaviour
+
+Replaced in part by `opencode-v2-current` (0.4.56): see its design D7.
 
 Depends on: B8.
 
