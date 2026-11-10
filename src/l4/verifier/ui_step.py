@@ -123,25 +123,48 @@ def ui_hold_text(criterion_id: str) -> str:
     return f"UI criterion {criterion_id} has no end-to-end test; see the generated UI tests table"
 
 
+def _covers(t: TracingTest) -> bool:
+    """A tracing test that covers a criterion with evidence a run showed (L4-VER-067): it passed, is adequate, is within
+    the per-test cap, and is neither `pass_to_pass` nor a red record that no run proved (it carries a `note`)."""
+    return t.status == "passed" and t.adequate and t.proof != PASS_TO_PASS and not t.note and t.over_cap == 0
+
+
 def covered_by_step4(trace: Sequence[CriterionEvidence]) -> dict[str, tuple[str, ...]]:
     """criterion -> the sorted ids of the tests that cover it with evidence step 4 has (L4-VER-067): the criterion is
     `covered` and not `held` (no audit test failing at head), and a tracing test passed, is adequate, is within the
-    per-test cap and has a proof that a run showed. `pass_to_pass` is not one (it says only that the criterion's text
-    is unchanged from the base specs, and no run showed that its test fails without this unit's change); nor is a
-    test with a `note` (a red record that no run proved: `not applicable: no project code`, or an accept after an
-    inconclusive check). A criterion with no such test is not in the map."""
+    per-test cap and has a proof that a run showed. `pass_to_pass` is not one (it is not discriminating, L4-VER-009:
+    it says only that the criterion's text is unchanged from the base specs); nor is a test with a `note` (a red
+    record that no run proved: `not applicable: no project code`, or an accept after an inconclusive check). A
+    criterion with no such test is not in the map."""
     out = {}
     for e in trace:
         if e.state != "covered" or e.held:
             continue
-        ids = sorted(
-            t.id
-            for t in e.tests
-            if t.status == "passed" and t.adequate and t.proof != PASS_TO_PASS and not t.note and t.over_cap == 0
-        )
-        if ids:
+        if ids := sorted(t.id for t in e.tests if _covers(t)):
             out[e.criterion] = tuple(ids)
     return out
+
+
+def lost_notes(trace: Sequence[CriterionEvidence], outcomes: Iterable[GeneratedOutcome]) -> list[str]:
+    """The criteria whose note step 5 took (`covered_by`) and whose basis step 9 has since removed while another test
+    would still pass them (L4-VER-067): none of the `covered_by` tests still covers the criterion in `trace` (the
+    trace after the judge's adequacy review), and the criterion has no failing tracing test and no `held` reason, and
+    still has a passing adequate test, which is not one of them (a `pass_to_pass` test, or a red record that no run
+    proved), so aggregation would pass it with no human asked. A criterion with no such test is `needs_human` through
+    aggregation on its own (SCN-VER-303) and gets no hold from here."""
+    evidence = {e.criterion: e for e in trace}
+    lost = []
+    for o in outcomes:
+        e = evidence.get(o.criterion)
+        if o.status != "not_testable" or not o.covered_by or e is None or e.state == "fail" or e.held:
+            continue
+        if any(t.status in ("failed", "error") for t in e.tests):
+            continue
+        if any(t.id in o.covered_by and _covers(t) for t in e.tests):
+            continue
+        if any(t.status == "passed" and t.adequate for t in e.tests):
+            lost.append(o.criterion)
+    return lost
 
 
 def unclosed_holds(gaps: Iterable[Criterion], outcomes: Iterable[GeneratedOutcome]) -> list[str]:

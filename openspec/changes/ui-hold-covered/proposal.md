@@ -32,21 +32,21 @@ suite. One generated file was also uncollectable.
 - The UI test writer is shown the e2e suite's support files as they are at the merge base: `e2e/conftest.py` and the
   other `.py` files under `e2e/` that are not test modules, at most 6 files, each cut at 8,000 characters and 20,000
   characters together, the rest named; its e2e rules say to use their fixtures and import their helpers
-  (`testwriter@6`). No configuration key is added (L4-VER-077).
+  (`testwriter@7`). No configuration key is added (L4-VER-077).
 - Not changed: which criteria are UI-facing (still every criterion of a unit that changed a UI path); which criteria
   are gaps and so asked of the writer; the waiver of L4-VER-067; the hold's text and binding; the gap finding's text;
   the judge's prompt.
 
 ## Impact
 
-- Code: `l4.verifier.ui_step` (`covered_by_step4`, `unclosed_holds`), `l4.verifier.types` (`GeneratedOutcome.covered_by`),
+- Code: `l4.verifier.ui_step` (`covered_by_step4`, `lost_notes`, `unclosed_holds`), `l4.verifier.types` (`GeneratedOutcome.covered_by`),
   `l4.verifier.generate` (`generate_ui_tests` takes `covered` and reads the support files; `generate_ui_test` takes
   them as blocks), `l4.verifier.ladder` (`_generate_step`), `l4.verifier.report` (the table row, `verdict.json`),
   `l4.verifier.evidence` (`_generated` restores `covered_by`), `l4.verifier.fixunit` (a noted gap is closed),
-  `l4.verifier.conventions` (`e2e_support_files`, new), `l4.verifier.testwriter` (an e2e rule, `TEMPLATE_VERSION` 6),
+  `l4.verifier.conventions` (`e2e_support_files`, new), `l4.verifier.testwriter` (an e2e rule, `TEMPLATE_VERSION` 7),
   `src/l4/templates.lock.json`.
 - Spec: L4-VER-067 amended; L4-VER-077 (new); the step-5 row of L4-VER-002 and the `verify.generated` entry of §12.1
-  amended; SCN-VER-298..306; change-table row 124.
+  amended; SCN-VER-298..307; change-table row 124.
 - Behaviour: a round in the shape of the consumer run raises 2 UI holds in place of 10. A criterion the writer wrongly
   calls `not_testable` is no longer asked about when step 4 covers it; it still needs the judge's pass with an adequate
-  test. Each writer prompt grows by at most 20,000 characters and a list of paths.
+  test, and the hold comes back when the judge rejects the covering test while another test would pass the criterion. Each writer prompt grows by at most 20,000 characters and a list of paths.

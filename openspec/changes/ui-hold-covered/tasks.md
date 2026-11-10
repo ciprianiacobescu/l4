@@ -121,7 +121,7 @@ you changed.
     head files, defaults unchanged) and a `not_testable` writer: `writer.prompts[0]` holds the base text of
     `e2e/conftest.py` after the page snapshot and not the head text; `UiGeneration.suite_files ==
     ["e2e/conftest.py"]`; a bench without the file gives a prompt with no `e2e support file` label.
-  - `tests/unit/verifier/test_testwriter.py`: `TEMPLATE == "testwriter@6"` (it pins 5 today, line 242); the e2e system
+  - `tests/unit/verifier/test_testwriter.py`: `TEMPLATE == "testwriter@7"` (done at 6, raised by 4.3); the e2e system
     text holds the new rule; the audit system text is unchanged. `tests/unit/verifier/test_testwriter_weak.py:141`
     pins `TEMPLATE_VERSION == 6`.
   - The ladder note: in the SCN-VER-298 flow of 1.4, step 5's note has no `e2e support files shown` part (the fixture
@@ -132,7 +132,7 @@ you changed.
   `suite=support.blocks` to each `generate_ui_test`, which appends them to its `blocks` after `page snapshot`, and
   sets `UiGeneration.suite_files`/`suite_skipped`; `_generate_step.body` appends `; e2e support files shown to the
   writer: <n>` and ` (+<m> not shown)` when `m`; `testwriter._KIND_RULES["e2e"]` gains the rule of design D7 word for
-  word, `TEMPLATE_VERSION = 6` with the comment `# 6: the e2e writer may use the e2e suite's support files shown
+  word, `TEMPLATE_VERSION = 6` (7 after 4.3) with the comment `# 6: the e2e writer may use the e2e suite's support files shown
   (L4-VER-077)`; then `uv run --frozen python -m l4.templatelock --write` and check that `src/l4/templates.lock.json`
   changed only in the two `testwriter/*` entries.
 
@@ -151,3 +151,21 @@ you changed.
   `test_testwriter.py`, `test_testwriter_weak.py`), `tests/unit/test_template_lock.py`, `tests/unit/docs`; `uv run
   --frozen python scripts/check_spec.py docs/SPEC.md`; `ruff check` and `ruff format --check` on the changed files;
   `openspec validate ui-hold-covered --strict`. Report the counts.
+
+## 4. Review findings
+
+- [x] 4.1 A note whose basis step 9 removes (L4-VER-067, SCN-VER-307; design D6). Tests first: `test_ui_step.py`
+  (`lost_notes`: a `zero_value` test the judge rejected beside a `pass_to_pass`, an unproved-red or a `no project code`
+  test gives the criterion; no hold when the basis stands, when the rejected test is alone (SCN-VER-303), when all are
+  inadequate, a test fails, a `held` reason is set, no note was taken, or another covering test is left) and
+  `test_ui_flow.py` (two flow variants, a second tracing test `pass_to_pass` or an unproved red record: exit 11 and the
+  hold in `verdict.json` where the code before this task passed the unit). Then `ui_step.lost_notes`, `_Run.recheck_notes`
+  and `_generate_step.recheck`, called by `verify_unit` after step 9.
+- [x] 4.2 `e2e/__init__.py` at the base: `conventions.e2e_support_files` adds the one-line block `e2e suite layout`
+  (`from e2e.conftest import <name>`) when it shows a file; the writer's rule no longer hard-codes `from conftest import`;
+  `testwriter@7` and `templates.lock.json` written again; the pinned-version tests and the SPEC text say 7.
+- [x] 4.3 `e2e_support_files` reads no file after one is left out, and the block lists the first 20 left-out paths and
+  `(+n more)`; tests for the merge-base listing, for a file that does not fit and the files after it, for the conftest
+  first, and for the reads.
+- [x] 4.4 The reason for leaving out `pass_to_pass` is "not shown discriminating per L4-VER-009" (design D1); `fixunit`
+  closes a gap on `status == not_testable and covered_by`, as `unclosed_holds` does.

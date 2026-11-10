@@ -152,6 +152,75 @@ def test_the_support_files_shown_are_bounded_and_the_rest_are_named(make_repo, r
     assert support.blocks[-1][0] == "e2e support files not shown"
 
 
+def test_the_tree_is_listed_at_the_merge_base_and_not_at_head(make_repo, raw, git_for):  # SCN-VER-304
+    repo = make_repo()
+    base = commit(raw, repo, {"e2e/conftest.py": E2E_CONFTEST, "e2e/legacy.py": "def old():\n    pass\n"}, "base")
+    raw(repo, "rm", "-q", "e2e/legacy.py")
+    commit(raw, repo, {"e2e/new.py": "def mine():\n    pass\n"}, "the unit deletes a helper and adds one")
+    support = e2e_support_files(git_for(repo), base)
+    assert support.shown == ("e2e/conftest.py", "e2e/legacy.py")  # the deleted one is shown, the added one is not
+
+
+def test_the_conftest_comes_first_whatever_the_names_beside_it(make_repo, raw, git_for):  # SCN-VER-304
+    repo = make_repo()
+    files = {"e2e/a.py": "def a():\n    pass\n", "e2e/conftest.py": E2E_CONFTEST, "e2e/b/c.py": "x = 1\n"}
+    support = e2e_support_files(git_for(repo), commit(raw, repo, files, "base"))
+    assert support.shown == ("e2e/conftest.py", "e2e/a.py", "e2e/b/c.py")
+
+
+def test_the_file_that_does_not_fit_and_every_file_after_it_are_left_out(make_repo, raw, git_for):  # SCN-VER-305
+    repo = make_repo()
+    files = {
+        "e2e/conftest.py": "x" * 8_000,  # whole
+        "e2e/h1.py": "y" * 15_000,  # cut at 8,000: 16,000 in all
+        "e2e/h2.py": "z" * 15_000,  # cut at 8,000: 24,000 would pass 20,000
+        "e2e/h3.py": "w" * 100,  # would fit (16,100), and is left out all the same
+    }
+    support = e2e_support_files(git_for(repo), commit(raw, repo, files, "base"))
+    assert support.shown == ("e2e/conftest.py", "e2e/h1.py")
+    assert support.skipped == ("e2e/h2.py", "e2e/h3.py")
+    assert support.blocks[-1] == ("e2e support files not shown", "e2e/h2.py\ne2e/h3.py")
+    assert len(support.blocks[0][1]) == 8_000 and "first" not in support.blocks[0][0]
+
+
+def test_nothing_after_a_file_that_is_left_out_is_read_and_the_list_of_them_is_bounded(
+    make_repo, raw, git_for, monkeypatch
+):  # SCN-VER-305
+    from l4.verifier import conventions
+
+    repo = make_repo()
+    files = {"e2e/conftest.py": "x" * 8_000, **{f"e2e/h{i:02}.py": "y" * 8_000 for i in range(1, 31)}}
+    base = commit(raw, repo, files, "base")
+    reads: list[str] = []
+    real = conventions._show
+    monkeypatch.setattr(conventions, "_show", lambda git, sha, path: reads.append(path) or real(git, sha, path))
+    support = e2e_support_files(git_for(repo), base)
+    assert support.shown == ("e2e/conftest.py", "e2e/h01.py")
+    assert reads == ["e2e/conftest.py", "e2e/h01.py", "e2e/h02.py"]  # h02 did not fit; h03 and the rest were not read
+    assert len(support.skipped) == 29  # every one of them is skipped by rule
+    label, text = support.blocks[-1]
+    assert label == "e2e support files not shown"
+    assert text.splitlines() == [*(f"e2e/h{i:02}.py" for i in range(2, 22)), "(+9 more)"]
+    reads.clear()
+    small = {"e2e/conftest.py": "x = 1\n", **{f"e2e/h{i:02}.py": "y = 1\n" for i in range(1, 11)}}
+    other = make_repo("other")
+    support = e2e_support_files(git_for(other), commit(raw, other, small, "small"))
+    assert len(support.shown) == 6 and len(reads) == 6 and len(support.skipped) == 5  # the sixth file stops the reads
+
+
+def test_a_suite_that_is_a_package_says_how_its_helpers_are_imported(make_repo, raw, git_for):
+    repo = make_repo()
+    files = {"e2e/__init__.py": "", "e2e/conftest.py": E2E_CONFTEST, "e2e/helpers/a11y.py": "def ok(page):\n    pass\n"}
+    support = e2e_support_files(git_for(repo), commit(raw, repo, files, "base"))
+    assert support.shown == ("e2e/conftest.py", "e2e/helpers/a11y.py")  # the empty __init__.py is not shown
+    label, text = support.blocks[-1]
+    assert label == "e2e suite layout" and "e2e/__init__.py" in text and "from e2e.conftest import" in text
+    assert "\n" not in text  # one line
+    plain = make_repo("plain")
+    support = e2e_support_files(git_for(plain), commit(raw, plain, {"e2e/conftest.py": E2E_CONFTEST}, "base"))
+    assert all(label != "e2e suite layout" for label, _ in support.blocks)
+
+
 def test_what_is_not_a_support_file_of_the_suite_is_not_shown(make_repo, raw, git_for):  # SCN-VER-306
     repo = make_repo()
     git = git_for(repo)

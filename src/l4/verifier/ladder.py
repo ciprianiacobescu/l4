@@ -231,8 +231,10 @@ from l4.verifier.ui_step import (
     covered_by_step4,
     edited_findings,
     gap_findings,
+    lost_notes,
     plan_generation,
     previously_generated,
+    ui_hold_text,
     ui_hold_views,
     ui_waivers,
     unclosed_holds,
@@ -508,6 +510,9 @@ class _Run:
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
     repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
+    recheck_notes: Callable[[], None] | None = (
+        None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
+    )
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -814,6 +819,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             _judge_step(vc, run, base_sha, events)
         finally:  # step 8's rows survive a judge that raises (their `judge` column stays empty)
             _calibrate(vc, run)
+        if run.recheck_notes is not None:  # a fresh round only: a reused one keeps the holds it stored
+            run.recheck_notes()
         findings.extend(_unsafe_findings(wb))
         _finalize(vc, run, criteria, events)
     else:  # a failed step 0-3 is a FAIL (a blocker came with it); no criterion was judged
@@ -1212,7 +1219,9 @@ def _generate_step(
     whose accept is in force is *waived* first (L4-VER-067): no writer call, no hold, `verify.generated{waived}`. A
     `not_testable` for a criterion that step 4 covers with a discriminating test is a note, not a hold: the covering
     tests are read from `result.trace` as it stands here and stored on the outcome (`covered_by`), so a reused round
-    keeps what the round stored and never decides it again (`covered_by_step4` is called nowhere else)."""
+    keeps what the round stored and never decides it again (`covered_by_step4` is called nowhere else). A note's
+    basis can go later, when step 9's adequacy review rejects the covering tests: `recheck` (run by `verify_unit`
+    after step 9, so in a fresh round only) then raises the criterion's UI hold if another test would still pass it."""
     wb, result, cfg = vc.wb, run.result, vc.wb.cfg
     browser = run.e2e
     changed: list[str] = []
@@ -1260,6 +1269,12 @@ def _generate_step(
         run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
         return
 
+    def recheck() -> None:
+        """After step 9: a note whose covering tests the judge rejected, while another test would still pass the
+        criterion, becomes the criterion's UI hold, stored with the round's holds (L4-VER-067, SCN-VER-307)."""
+        if lost := lost_notes(result.trace, result.generated):
+            hold_all([ui_hold_text(cid) for cid in lost])
+
     def body() -> tuple[bool, str]:
         assert vc.ui_writer is not None and browser is not None
         ui = ui_files(changed, cfg.verifier.playwright.ui_paths)
@@ -1270,6 +1285,7 @@ def _generate_step(
             covered=covered_by_step4(result.trace),
         )  # fmt: skip
         result.generated = [*result.generated, *out.outcomes]
+        run.recheck_notes = recheck
         vc.verifier_tests.extend(wb.worktree / path for path in out.paths)
         if out.cost_usd:
             result.cost_usd = (result.cost_usd or 0.0) + out.cost_usd

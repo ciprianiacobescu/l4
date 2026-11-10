@@ -1087,13 +1087,12 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   later UI changes do not touch the tracing tests. To ask again, change the criterion's text, or `reject` and fix.
   From 0.4.56 a UI criterion that a discriminating test of step 4 covers (a test whose red proof a run showed, or an
   audit, repaired, people's or chore's test; not a pass-to-pass test and not a red record that no run proved) and that
-  the writer calls `not_testable` raises no hold: its row of the generated UI tests table keeps `not_testable` and the
+  the writer calls `not_testable` raises no hold (the hold comes back after the judge when it rejects the covering test and a pass-to-pass test, or a red record that no run proved, would still pass the criterion): its row of the generated UI tests table keeps `not_testable` and the
   writer's reason and says `covered by step 4: <tests>; a note, not a hold`, `verify.generated` carries `covered_by`, and
   no fix unit is made for its gap. The note does not pass the criterion: the judge still has to pass it with an adequate
   test, and a covering test it calls inadequate leaves the criterion `needs_human`, asked through its own question. Every
   other status (`fails_at_head`, `uncollectable`, `writer_failed`, …) keeps the hold. From 0.4.56 the writer is also
-  shown the suite's `e2e/conftest.py` and the other helper modules under `e2e/` as they are at the merge base (at most
-  six files and 20,000 characters, the rest named; step 5's note says how many), so a generated test can use the
+  shown the suite's `e2e/conftest.py` and the other helper modules under `e2e/` as they are at the merge base (at most six files and 20,000 characters, the first 20 of the rest named; step 5's note says how many; when `e2e/` is a package the writer is told to import helpers as `from e2e.conftest import ...`), so a generated test can use the
   suite's own sign-in helper and fixtures.
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria

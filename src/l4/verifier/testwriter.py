@@ -30,7 +30,8 @@ SCHEMA_ID = "l4/generated-test@1"
 # 4: only names the shown sources define, no cascade of `hasattr`, nothing snapshotted that the spec excludes (M1.13)
 # 5: no `python -m` of a module with no `__main__` guard, every name imported (live wave D, W-D2)
 # 6: the e2e writer may use the e2e suite's support files shown (L4-VER-077)
-TEMPLATE_VERSION = 6
+# 7: the helpers are imported by the path the suite layout note gives (e2e/ may be a package)
+TEMPLATE_VERSION = 7
 TEMPLATE = f"testwriter@{TEMPLATE_VERSION}"
 TestKind = Literal["audit", "e2e"]
 E2E_DIR = "e2e"  # where the e2e writer's test goes, and where the suite's support files are read from (L4-VER-077)
@@ -90,7 +91,8 @@ Rules for this end-to-end test:
 - Take the base URL from `os.environ["L4_E2E_BASE_URL"]` and request only that origin.
 - Assert what a user sees or can do, not the markup details.
 - When e2e support files are shown, your test runs with them: use their fixtures by parameter name and import their \
-helpers from the module that defines them (`from conftest import login`), with the arguments they take. Use no name \
+helpers from the module that defines them, with the arguments they take, by the import path the e2e suite layout note \
+gives when there is one (`from <module> import <name>`, with the package path when e2e/ is a package). Use no name \
 they do not define.
 """,
 }

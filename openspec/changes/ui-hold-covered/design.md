@@ -72,14 +72,11 @@ covering tests, for each `CriterionEvidence e` with:
   and `t.over_cap == 0`. Those `t` are the covering tests.
 
 So a red proof (`zero_value`, `pre_satisfied`, `red_assertion`), a repair's proof, an accepted audit test, a people's
-or chore's test the verifier saw fail, and an earlier round's accepted generated test count. `pass_to_pass` does not:
-it says only that the criterion's text is unchanged from the base specs, and no run showed that its test fails without
-this unit's change. A red record that no run proved (`not applicable: no project code`, an override after an
+or chore's test the verifier saw fail, and an earlier round's accepted generated test count. `pass_to_pass` does not: L4-VER-009 accepts it only for a criterion whose text is unchanged from the base specs, and it is not a test shown discriminating per L4-VER-009 (failing at the synthetic baseline), so a note does not rest on it. A red record that no run proved (`not applicable: no project code`, an override after an
 inconclusive check, L4-VER-051) does not either. `adequate` and `over_cap` are always `True` and `0` when step 5 runs
 (the judge has not run); they are named so that the function means the same on any trace.
 
-*Alternative rejected:* `e.state == "covered"` alone, the number step 4's note reports. It counts `pass_to_pass` and
-unproven red records, which say nothing about this unit's change; such a criterion keeps its hold.
+*Alternative rejected:* `e.state == "covered"` alone, the number step 4's note reports. It counts `pass_to_pass` and unproven red records, which are not shown discriminating per L4-VER-009; such a criterion keeps its hold.
 
 ### D2. The note
 
@@ -143,7 +140,7 @@ A note does not pass the criterion. Aggregation still needs an adequate, passing
 (L4-VER-003, `aggregate.aggregate_criterion`); step 9 reviews the adequacy of every tracing test, and a covering test it
 calls inadequate leaves the criterion `needs_human` (`uncovered: the tests that trace it are inadequate or did not
 pass`), which raises the criterion's own verdict question. So a criterion that needs a browser and is covered only by a
-weak unit test is still asked about, once, through its criterion and not through a UI hold.
+weak unit test is still asked about, once, through its criterion and not through a UI hold. There is one case where the criterion would pass with no one asked: step 9 rejects every covering test of the note while a `pass_to_pass` test (or a red record that no run proved), which D1 refused as cover, still passes and is adequate, and `aggregate_criterion` passes the criterion on any adequate passing test. `ladder._generate_step` therefore hands `verify_unit` a check (`ui_step.lost_notes`) that runs right after step 9, in a fresh round: for each outcome with `covered_by`, when none of its tests still covers the criterion in `result.trace` (D1's rule, with step 9's adequacy and the cap applied), the criterion has no failing test and no `held` reason, and another passing adequate test remains, the criterion's UI hold (`ui_hold_text`, with its hold view) is added to `result.holds`. It is stored in `verdict.json`, so a reused round keeps it (D3: nothing is decided again from the restored trace). With no other usable test the criterion is `needs_human` through aggregation, as above, and gets no hold from the check (SCN-VER-307, SCN-VER-303).
 
 ### D7. The e2e suite's support files for the writer (L4-VER-077)
 
@@ -157,10 +154,8 @@ weak unit test is still asked about, once, through its criterion and not through
   not empty (whitespace only).
 - **Order and bounds.** `e2e/conftest.py` first, then the others by depth and path. Each is cut at
   `MAX_SUITE_FILE_CHARS = 8_000` characters, and files are taken in that order until `MAX_SUITE_FILES = 6` are taken
-  or the next (as cut) would bring the total past `MAX_SUITE_CHARS = 20_000`; that file and every file after it are
-  left out (as `audit.head_sources` stops at its total). The label is `<path> (e2e support file at the merge
-  base)`, with `, first 8000 characters` before the `)` for a cut file; when files are left out, one more block
-  labelled `e2e support files not shown` lists their paths, one per line.
+  or the next (as cut) would bring the total past `MAX_SUITE_CHARS = 20_000`; that file and every file after it are left out without being read (as `audit.head_sources` stops at its total). The label is `<path> (e2e support file at the merge
+  base)`, with `, first 8000 characters` before the `)` for a cut file; when files are left out, one more block labelled `e2e support files not shown` lists the first 20 paths, one per line, then `(+n more)`; and when `e2e/__init__.py` is at the base (the suite is a package, so `from conftest import …` fails, and an empty `__init__.py` is not shown), a last block `e2e suite layout` says so in one line and gives `from e2e.conftest import <name>` as the form (no block when nothing is shown).
 - **Why the base.** The generated test runs at the merge base, and at head with the e2e runner's support files the unit
   changed at their base versions (L4-VER-035): what the writer is shown is what its test runs with. A helper the unit
   added is not at the base and is not shown. The files are the project's, not the unit's tests (L4-VER-002a holds).
@@ -169,9 +164,8 @@ weak unit test is still asked about, once, through its criterion and not through
   `suite_files` (shown) and `suite_skipped`; step 5's note appends `; e2e support files shown to the writer: <n>`
   and `(+<m> not shown)` when files were left out.
 - **The rule.** `_KIND_RULES["e2e"]` gains: "When e2e support files are shown, your test runs with them: use their
-  fixtures by parameter name and import their helpers from the module that defines them (`from conftest import
-  login`), with the arguments they take. Use no name they do not define." `TEMPLATE_VERSION` becomes 6
-  (`testwriter@6`, shared with the audit kind, whose body does not change), and `templates.lock.json` is written again.
+  fixtures by parameter name and import their helpers from the module that defines them, with the arguments they take, by the import path the e2e suite layout note gives when there is one (`from <module> import <name>`, with the package path when e2e/ is a package). Use no name they do not define." `TEMPLATE_VERSION` becomes 6
+  (`testwriter@7`, shared with the audit kind, whose body does not change), and `templates.lock.json` is written again. Version 6 hard-coded `from conftest import login`, which fails when `e2e/` is a package; version 7 says to use the import path the layout note gives.
 - **Size.** Today's user text is at most about 60,000 characters (diff and snapshot); this adds at most 20,000 and a
   list. The audit writer's prompt is already of that size (60,000 of source, 8,000 of spec, a header and conventions).
   No budget logic is needed and no configuration key is added.
@@ -183,15 +177,14 @@ own `pyproject.toml` under `e2e/`, as in the consumer run, has its rootdir there
 
 ### D8. Where the code goes
 
-- `l4.verifier.ui_step`: `covered_by_step4` (D1); `unclosed_holds` skips an outcome with `covered_by`.
+- `l4.verifier.ui_step`: `covered_by_step4` (D1); `unclosed_holds` skips an outcome with `covered_by`; `lost_notes` (D6).
 - `l4.verifier.types`: `GeneratedOutcome.covered_by`.
 - `l4.verifier.generate`: `generate_ui_tests(covered=None)` sets `covered_by` (D2) and emits it; reads the support
   files (D7); `generate_ui_test(suite=())` appends the blocks; `UiGeneration.suite_files`, `suite_skipped`.
-- `l4.verifier.ladder._generate_step`: computes `covered` in `body()` and passes it; the step note (D2, D7).
+- `l4.verifier.ladder._generate_step`: computes `covered` in `body()` and passes it; the step note (D2, D7); `recheck` (D6), kept in `_Run.recheck_notes` and run by `verify_unit` after step 9.
 - `l4.verifier.report`: the Reason cell and `_generated_json`. `l4.verifier.evidence._generated`: the tuple and the
   default. `l4.verifier.fixunit`: the closed set.
-- `l4.verifier.conventions`: `e2e_support_files`, `E2eSupport`. `l4.verifier.testwriter`: the e2e rule and
-  `TEMPLATE_VERSION = 6`. `src/l4/templates.lock.json`.
+- `l4.verifier.conventions`: `e2e_support_files`, `E2eSupport`. `l4.verifier.testwriter`: the e2e rule and `TEMPLATE_VERSION = 7`. `src/l4/templates.lock.json`.
 
 ## Risks / Trade-offs
 

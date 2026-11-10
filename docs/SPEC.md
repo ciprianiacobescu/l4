@@ -5462,30 +5462,34 @@ each was a question for a person and a run]
 
 *A covered criterion that the writer cannot test is a note (0.4.56).* A UI criterion that step 4 covers with a
 discriminating test, and for which the writer returns `not_testable`, SHALL be a note and SHALL NOT be a hold. Step 4
-covers it so when its evidence in the round's trace (`VerifyResult.trace`) as it stands when step 5 starts (step 4's trace
-with step 4a's audit tests and holds) has the state `covered`, no `held` reason, and at least one tracing test that
-passed, is adequate, is within the per-test cap and has a proof that a run showed: any proof but `pass_to_pass`, and no
-label of a red record that no run proved (`not applicable: no project code`, or an accept after an inconclusive check,
-L4-VER-051). Step 5 SHALL take this answer from that trace, with no gate run and no ledger read, and SHALL store it on
-the criterion's outcome: `verify.generated{status: not_testable, covered_by: [<the covering test ids>]}` and
+covers it so when its evidence in the round's trace (`VerifyResult.trace`) as it stands when step 5 starts (step 4's
+trace with step 4a's audit tests and holds) has the state `covered`, no `held` reason, and at least one tracing test
+that passed, is adequate, is within the per-test cap and has a proof that a run showed: any proof but `pass_to_pass`,
+and no label of a red record that no run proved (`not applicable: no project code`, or an accept after an inconclusive
+check, L4-VER-051). Step 5 SHALL take this answer from that trace, with no gate run and no ledger read, and SHALL store
+it on the criterion's outcome: `verify.generated{status: not_testable, covered_by: [<the covering test ids>]}` and
 `covered_by` in `verdict.json`. The criterion's row of the generated UI tests table SHALL keep the status `not_testable`
 and the writer's reason and SHALL add `covered by step 4: <ids>; a note, not a hold (L4-VER-067)`; step 5's note SHALL
-count the notes; no hold SHALL be raised for it, its minor gap finding SHALL stay, and no fix unit SHALL be made for that
-finding (the gap is closed, as a waived gap is). A round whose steps are reused (`reused (round N)`) SHALL keep the stored
-outcomes and holds and SHALL NOT decide a note again from the stored trace, which carries step 9's adequacy; a stored
-outcome with no `covered_by` (written before this change) is restored with none. The hold SHALL stay when nothing
+count the notes; no hold SHALL be raised for it, its minor gap finding SHALL stay, and no fix unit SHALL be made for
+that finding (the gap is closed, as a waived gap is). A round whose steps are reused (`reused (round N)`) SHALL keep the
+stored outcomes and holds and SHALL NOT decide a note again from the stored trace, which carries step 9's adequacy; a
+stored outcome with no `covered_by` (written before this change) is restored with none. The hold SHALL stay when nothing
 discriminating traces the criterion (only `pass_to_pass` tests, only red records that no run proved, a failing tracing
 test, a failed audit test, or no tracing test), for every other outcome of the writer (`writer_failed`, `uncollectable`,
 `fails_at_head`, `non_discriminating`, `base_error`, `base_unservable`, `lint_failed`), covered or not, and when no
 writer is configured. A note SHALL NOT pass the criterion: it still needs an adequate passing test and the judge's pass
 (L4-VER-003), so a covering test that the judge calls inadequate leaves the criterion `needs_human`, asked through its
-own verdict question. Which criteria are UI-facing (L4-VER-014), which UI criteria are gaps, and the waiver above SHALL
-be unchanged. Residual risk (named, accepted): a criterion that a browser could check, which the writer wrongly calls
-`not_testable` and a unit test covers, is no longer asked about as a UI hold; the judge's adequacy review of that unit
-test is what stands before a PASS. [V, a consumer run: a unit that changed one web file had ten criteria, all UI-facing;
-the writer returned `not_testable` for the eight that step 4 covered with red-then-green tests (traceability 8/10, the
-writer's reasons "pure functions" and "no browser-observable behavior"), and the round raised ten UI holds, twelve verdict
-questions in all]
+own verdict question. When step 9 rejects every covering test of a note while another test that passes and is adequate
+(a `pass_to_pass` test, or a red record that no run proved) still traces the criterion, so that aggregation would pass
+it with no one asked, a fresh round SHALL raise the criterion's UI hold right after the judge step, with its hold view,
+into the round's holds (stored in `verdict.json`, so a reused round keeps it); with no such test the criterion is
+`needs_human` on its own and no hold is raised. Which criteria are UI-facing (L4-VER-014), which UI criteria are gaps,
+and the waiver above SHALL be unchanged. Residual risk (named, accepted): a criterion that a browser could check, which
+the writer wrongly calls `not_testable` and a unit test covers, is no longer asked about as a UI hold; the judge's
+adequacy review of that unit test is what stands before a PASS. [V, a consumer run: a unit that changed one web file had
+ten criteria, all UI-facing; the writer returned `not_testable` for the eight that step 4 covered with red-then-green
+tests (traceability 8/10, the writer's reasons "pure functions" and "no browser-observable behavior"), and the round
+raised ten UI holds, twelve verdict questions in all]
 
 **L4-VER-068 The judge is told which named tests red changed.** The judge's prompt SHALL have a data block `## Named tests changed
 in place`, beside the owner changes and in the user text only (`judge@13` and its system text do not change), that lists once
@@ -5925,24 +5929,26 @@ same base passed; the fix unit could only touch the frozen test, the guard put i
 fix about three hours later. `verifier.flaky_repeats` was read nowhere.]
 
 **L4-VER-077 The UI test writer is shown the e2e suite's support files.** When step 5 asks the writer for a test, its
-prompt SHALL hold, after the page snapshot, the e2e suite's support files as they are at the merge base: `e2e/conftest.py`
-and every other `.py` file under `e2e/` that is a regular file (no link, no submodule), whose name is not a test module's
-(`test_*.py`, `*_test.py`, so never the harness's `test_l4_c_<hex>.py`), that is not a `conftest.py` below `e2e/`, has no
-path part that starts with `.` or is `__pycache__` or `node_modules`, and is not empty. They SHALL be taken in that order
-(`e2e/conftest.py`, then the others by depth and path), each cut at 8,000 characters with its label saying so, until six
-are taken or the next would bring the total past 20,000 characters; that file and every file after it SHALL be left out
-and named in one more block, `e2e support files not shown`. They SHALL be read from the merge base only (`git ls-tree`,
-`git show <base>:<path>`), because the generated test runs at the base and, at head, with the e2e runner's support files
-the unit changed at their base versions (L4-VER-035): a helper the unit added is not shown, and no test of the unit is
-(L4-VER-002a). The writer's e2e rules SHALL say that its test runs with the files shown, to use their fixtures by
-parameter name and import their helpers from the module that defines them (`from conftest import login`), and to use no
-name they do not define; the template version SHALL be `testwriter@6`. Step 5's note SHALL say how many files were shown
-and how many were left out. A project with no such file SHALL get no block, and no configuration key SHALL be added.
-Limits (named): the repository root's `conftest.py` is not shown (whether pytest loads it for the suite depends on its
-rootdir); a helper under `e2e/` that the unit changed and that no test or support glob matches runs at head in the unit's
-version, so a name the unit removed from it fails the test at head and holds the criterion as before. [V, a consumer run:
-generated browser tests failed, or the writer declared the criterion not testable ("needs the suite's login() ...
-helpers"), for want of the sign-in helper, the test users and the accessibility assertion that the suite's
+prompt SHALL hold, after the page snapshot, the e2e suite's support files as they are at the merge base:
+`e2e/conftest.py` and every other `.py` file under `e2e/` that is a regular file (no link, no submodule), whose name is
+not a test module's (`test_*.py`, `*_test.py`, so never the harness's `test_l4_c_<hex>.py`), that is not a `conftest.py`
+below `e2e/`, has no path part that starts with `.` or is `__pycache__` or `node_modules`, and is not empty. They SHALL
+be taken in that order (`e2e/conftest.py`, then the others by depth and path), each cut at 8,000 characters with its
+label saying so, until six are taken or the next would bring the total past 20,000 characters; that file and every file
+after it SHALL be left out (not read) and named in one more block, `e2e support files not shown`, which lists the first
+20 and `(+n more)`. They SHALL be read from the merge base only (`git ls-tree`, `git show <base>:<path>`), because the
+generated test runs at the base and, at head, with the e2e runner's support files the unit changed at their base
+versions (L4-VER-035): a helper the unit added is not shown, and no test of the unit is (L4-VER-002a). The writer's e2e
+rules SHALL say that its test runs with the files shown, to use their fixtures by parameter name and import their
+helpers from the module that defines them (`from <module> import <name>`, with the package path when `e2e/__init__.py`
+is at the merge base, which one more block, `e2e suite layout`, then says: `from e2e.conftest import login`), and to use
+no name they do not define; the template version SHALL be `testwriter@7`. Step 5's note SHALL say how many files were
+shown and how many were left out. A project with no such file SHALL get no block, and no configuration key SHALL be
+added. Limits (named): the repository root's `conftest.py` is not shown (whether pytest loads it for the suite depends
+on its rootdir); a helper under `e2e/` that the unit changed and that no test or support glob matches runs at head in
+the unit's version, so a name the unit removed from it fails the test at head and holds the criterion as before. [V, a
+consumer run: generated browser tests failed, or the writer declared the criterion not testable ("needs the suite's
+login() ... helpers"), for want of the sign-in helper, the test users and the accessibility assertion that the suite's
 `e2e/conftest.py` defines; the writer had been shown only the criterion, the UI diff and the page snapshot]
 
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
@@ -8930,7 +8936,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 119 | `escalate-spent-profiles` | a move along `roles.implementer` never takes a spent profile, passes over one that used its share, and a later run continues it: a profile whose failed attempts of the phase in the task's window (L4-IMP-075, earlier runs included) reached `max_task_attempts` is refused by the move's selection as a constraint (`spent: <n> failed attempts of <phase> of task <k> (implementer.max_task_attempts <m>)`), so the walk goes on to the next profile with the usual checks; a move passes over a profile which has itself failed `escalate_after` attempts while a later profile can take the step (the selection walks in two passes: the first refuses such a profile as a constraint, `used its share: <n> failed attempts of <phase> of task <k> (implementer.escalate_after <m>)`, so it is not probed, not recorded as selected and not an implementer profile of the unit; the second, run only when the first takes nothing, refuses the spent ones alone, so a profile with attempts left takes the step when nothing after it can, and a move that lands there is asked again at once); before the first attempt, when the newest `implementer.escalated` of the phase in the window moved it from a profile after the run's selected profile, the first move is asked from that profile, and a refusal is recorded with `on` (the run's profile, where the step then starts); a halt on a profile with a later profile, after a refused move, has `; no later profile can take it (<reason>)` before `; last failure:`. `l4.implementer.loop` (`Seeded.escalated_from`, `EscalationRequest.spent` and `used`, `spent_constraint`, `used_constraint`, `_escalate_if_due`, `_escalate_while_due`, `_run_task`), `Orchestrator._escalation_profile`, `ProgressLog._escalation_skipped`. A consumer's red step moved from glm to claude-sonnet before a soft deadline; the next run started on deepseek, moved one profile on to glm, which had used its share, and halted on glm's third failure with claude-sonnet unrun. Limits: a cheaper profile that the step moved past gets no attempt of it until a retry, resume or restart starts a new window; a refused continuation costs one selection walk, and a move costs a second one when the first passed over a used profile and took nothing; a move at `max_task_attempts` is still not tried; the task's profile is not carried from red to green across runs; after a move every limit fallback of the task (`Orchestrator._task_veto`, applied by `switch_profile` and `_wait_in_run`) refuses the move's spent profiles, so the step never goes back to one, and the run's profile drops that veto (L4-IMP-094, L4-IMP-017, L4-IMP-018, L4-IMP-075, SCN-IMP-500..509; `openspec/changes/escalate-spent-profiles/`) | the unit tests (`test_escalate_spent_profiles` of the implementer and the orchestrator, `test_fixloop_escalate`, `test_progress`) |
 | 120 | `delegate-quote-tolerance` | a `checked` quote of the delegate that is in the cited file word for word resolves when the delegate named a wrong line or left out the bold of a markdown file: a `path:line` quote that does not start within three lines of the named line, and that the same file (whitespace folded) holds at exactly one offset, resolves at the line where it starts, and the answered `delegate.result` records `resolved: <path>:<line>` beside the delegate's `ref`; two or more offsets, or none, do not resolve. In a `.md` or `.markdown` file a `spec:` or `path:line` quote is also compared with `**` removed from both sides, when the quote so folded keeps 12 characters, and a quote is placed only when it is alone in each form (a sentence present once plain and once in bold is ambiguous); backticks, `__` and single `*` and `_` stay significant, and other files are never folded. Each new comparison runs after today's, so every entry that resolves today resolves at its cited line. `reply._resolves` returns `Resolved | None`, with `_folds`, `_flat_md`, `_in_window` and `_line_of`; the reason, the retry and `delegate@7` are unchanged. Two consecutive units of a consumer's plan had a reply discarded and asked again: one quoted `AGENTS.md` word for word as `AGENTS.md:1`, about 62 lines off ($2.44), the next quoted a `spec:design.md` line without the `**` around its code span ($0.99). Limits: in a markdown file `a ** b` and `a b` compare equal, while `__init__` and `init` stay distinct; a quote the file holds twice off the cited line still costs a retry (L4-DLG-005, SCN-DLG-16, SCN-DLG-116, SCN-DLG-134..143; `openspec/changes/delegate-quote-tolerance/`) | the unit tests (`test_reply_quote_tolerance`, `test_reply`, `test_pass`) |
 | 121 | `gate-flake-rerun` | step 3 runs a failed gate again when its only failures are a few pre-existing tests, and a test that passes in one run is a minor finding, not a blocker. `l4.verifier.gate_repeat` (new): `pre_existing` (not a red test of the unit; `file_of_id` over `git ls-tree` of head, preferring a changed path; the file not in `git diff base head`), `settle` (the first `TestGateOutcome` and a callable that runs the gate again as `<gate>-repeat-<n>`; at most `verifier.flaky_repeats` runs in all, stopping once every failure passed in a run, after an unusable repeat or after a failure of a test that is not pre-existing; `MAX_REPEAT_FAILURES` 5; `FLAKY_TITLE` "a pre-existing test is flaky in the {gate} gate"; the handed-on report takes each flaky test's passing case; `verify.gate_repeat`), `repeat_name`, `is_repeat`. `l4.verifier.gates.run_test_gate` and `run_e2e_gate` take `name`; `TestGateOutcome.ok` counts blocking findings and gains `repeats` and `repeat_note`; `GateLine.status` gains `flaky`; `ladder` step 3 settles each gate, the test gate's repeats without the coverage environment, the e2e gate after the settled test gate; `fixloop.failure_set` skips the rows of repeats. A consumer's unit failed its round on one pre-existing browser test it never touched, and a person had to commit a test fix after its fix unit could change nothing (L4-VER-076, L4-VER-002, L4-VER-003, SCN-VER-05, SCN-VER-44, SCN-VER-288..297; `openspec/changes/gate-flake-rerun/`). Limits: a flake that the unit's own change caused is minor too; a pre-existing test that fails every run costs two more gate runs by default; a test in a file the unit changed, a Go id and a run with more than five failures are not repeated; new tests are never repeated; step 1's repeat (L4-VER-038) is unchanged. Review additions: `tree_reset` puts the worktree back to what run 1 started from before each repeat (entries new since run 1's start, none inside a directory that was already untracked as a whole), a repeat that fails exactly as run 1 did (`same_failures`) or that the soft deadline leaves no time for (`budget`) ends the repeats, an `L4Exit` of a repeat is an unusable repeat, a JavaScript or TypeScript id is mapped among the files of its extension only, the judge's gate summary carries the repeat note, and `verifier.flaky_repeats` is 1 to 5 | the unit tests (`test_gate_repeat`, `test_gate_repeat_ladder`, `test_fixloop`) |
-| 124 | `ui-hold-covered` | a UI criterion that step 4 covers with a discriminating test and that the UI test writer calls `not_testable` is a note, not a hold, and the writer is shown the e2e suite's support files. `l4.verifier.ui_step.covered_by_step4(trace)` (new, pure): criterion → the passing, adequate tracing tests within the cap whose proof is not `pass_to_pass` and carries no unproven label, for a `covered` criterion with no `held` reason, read from `VerifyResult.trace` when step 5 starts (step 4's trace with step 4a's audit tests); `ladder._generate_step` hands it to `generate.generate_ui_tests(covered=…)`, which sets `GeneratedOutcome.covered_by` on a `not_testable` outcome only and emits `verify.generated{covered_by}`; `unclosed_holds` and `fixunit` treat it as closed; `report` adds `covered by step 4: <ids>; a note, not a hold (L4-VER-067)` to the row and stores `covered_by`; `evidence._generated` restores it, so a reused round keeps the stored answer and decides nothing again. `l4.verifier.conventions.e2e_support_files(git, base_sha)` (new): `e2e/conftest.py` and the other non-test `.py` files under `e2e/` at the merge base, at most six, 8,000 characters each, 20,000 together, the rest named; `generate_ui_test` puts them after the page snapshot; the e2e rules say to use their fixtures and helpers (`testwriter@6`, `templates.lock.json`). In a consumer run a unit that changed one web file raised ten UI holds, twelve verdict questions, for ten criteria of which step 4 covered eight and the writer called those eight `not_testable`; generated browser tests lacked the suite's sign-in helper, test users and accessibility assertion (L4-VER-067, L4-VER-077, L4-VER-002, SCN-VER-298..306; `openspec/changes/ui-hold-covered/`). Limits: which criteria are UI-facing is unchanged (every criterion of a unit that changed a UI path), so the writer is still asked for each gap in every fresh round; a criterion the writer wrongly calls `not_testable` and a unit test covers is kept from a PASS only by the judge's adequacy review of that test; the repository root's `conftest.py` and non-Python helpers are not shown | the unit tests (`test_ui_step`, `test_generate`, `test_report_m15`, `test_resume`, `test_fixunit`, `test_ui_flow`, `test_memory_flow`, `test_conventions`, `test_testwriter`) |
+| 124 | `ui-hold-covered` | a UI criterion that step 4 covers with a discriminating test and that the UI test writer calls `not_testable` is a note, not a hold, and the writer is shown the e2e suite's support files. `l4.verifier.ui_step.covered_by_step4(trace)` (new, pure): criterion → the passing, adequate tracing tests within the cap whose proof is not `pass_to_pass` and carries no unproven label, for a `covered` criterion with no `held` reason, read from `VerifyResult.trace` when step 5 starts (step 4's trace with step 4a's audit tests); `ladder._generate_step` hands it to `generate.generate_ui_tests(covered=…)`, which sets `GeneratedOutcome.covered_by` on a `not_testable` outcome only and emits `verify.generated{covered_by}`; `unclosed_holds` and `fixunit` treat it as closed; `report` adds `covered by step 4: <ids>; a note, not a hold (L4-VER-067)` to the row and stores `covered_by`; `evidence._generated` restores it, so a reused round keeps the stored answer and decides nothing again. `l4.verifier.conventions.e2e_support_files(git, base_sha)` (new): `e2e/conftest.py` and the other non-test `.py` files under `e2e/` at the merge base, at most six, 8,000 characters each, 20,000 together, the rest named; `generate_ui_test` puts them after the page snapshot; the e2e rules say to use their fixtures and helpers (`testwriter@7`, `templates.lock.json`). In a consumer run a unit that changed one web file raised ten UI holds, twelve verdict questions, for ten criteria of which step 4 covered eight and the writer called those eight `not_testable`; generated browser tests lacked the suite's sign-in helper, test users and accessibility assertion (L4-VER-067, L4-VER-077, L4-VER-002, SCN-VER-298..307; `openspec/changes/ui-hold-covered/`). Limits: which criteria are UI-facing is unchanged (every criterion of a unit that changed a UI path), so the writer is still asked for each gap in every fresh round; a criterion the writer wrongly calls `not_testable` and a unit test covers is kept from a PASS only by the judge's adequacy review of that test (and, when another test would still pass the criterion after the judge rejects the covering one, by the UI hold that comes back, SCN-VER-307); the repository root's `conftest.py` and non-Python helpers are not shown | the unit tests (`test_ui_step`, `test_generate`, `test_report_m15`, `test_resume`, `test_fixunit`, `test_ui_flow`, `test_memory_flow`, `test_conventions`, `test_testwriter`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -14742,7 +14748,7 @@ scenario is a spec defect (§26).
 - **When** step 5 asks the writer for a test
 - **Then** its prompt holds, after the page snapshot, `e2e/conftest.py` as it is at the base (not the unit's version) and
   then `e2e/helpers/a11y.py`, and not `e2e/test_sign_in.py`; its e2e rules say to use the shown fixtures and import the
-  shown helpers; its template is `testwriter@6`; step 5's note says two files were shown
+  shown helpers; its template is `testwriter@7`; step 5's note says two files were shown
 
 #### SCN-VER-305 (−) The support files shown are bounded and the rest are named · L4-VER-077
 - **Given** a base with an `e2e/conftest.py` of 30,000 characters and nine helper files under `e2e/` of 5,000 characters
@@ -14758,6 +14764,14 @@ scenario is a spec defect (§26).
 - **When** step 5 asks the writer for a test
 - **Then** the prompt holds no support-file block, and the rest of the prompt is as before this change apart from the e2e
   rules
+
+#### SCN-VER-307 (−) A note whose covering test the judge rejects comes back as a hold when another test would pass the criterion · L4-VER-067, L4-VER-003
+- **Given** a noted UI criterion traced by a `zero_value` test (the note's `covered_by`) and by a `pass_to_pass` test (or
+  by a red record that no run proved), and a judge that calls the `zero_value` test inadequate and the other adequate
+- **When** the round is aggregated
+- **Then** the criterion's UI hold is raised right after the judge step and stored in `verdict.json` (the criterion does
+  not pass on the other test alone), one hold question is asked, and a reused round keeps the hold; with the
+  `zero_value` test alone the criterion is `needs_human` through aggregation and no hold is raised (SCN-VER-303)
 
 ## MODIFIED Requirements
 

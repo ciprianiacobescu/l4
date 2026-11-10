@@ -3,6 +3,8 @@ finds both criteria untraced in the e2e report, step 5 has the verifier agent wr
 that fails at the merge base and passes at head, the tests are committed once, the unit passes, and the round's
 deterministic finding becomes a lesson in its own `chore(memory)` commit before the hand-off."""
 
+import dataclasses
+
 import pytest
 import yaml
 
@@ -195,6 +197,60 @@ def test_a_note_does_not_pass_the_criterion_the_judge_calls_inadequate(run_l4, v
     asked = run.events("question.raised")
     assert len(asked) == 1 and asked[0]["kind"] == "verdict" and asked[0].get("criterion", UNKNOWN) == UNKNOWN
     assert f"UI criterion {UNKNOWN} has no end-to-end test" not in text
+
+
+@pytest.mark.parametrize(
+    "other",
+    [("pass_to_pass", ""), ("zero_value", "not applicable: no project code")],
+    ids=["pass-to-pass", "unproved-red-record"],
+)
+def test_a_note_whose_covering_test_the_judge_rejects_comes_back_as_a_ui_hold(
+    run_l4, valid_spec, web_repo, monkeypatch, other
+):  # SCN-VER-307
+    import json
+
+    from l4.verifier import ladder
+    from l4.verifier.types import TracingTest
+
+    real = ladder.trace_criteria
+
+    def with_second_test(*args, **kwargs):  # UNKNOWN's second tracing test: a base test, or a red record no run proved
+        proof, note = other
+        extra = TracingTest("tests.test_base::test_old", "passed", proof, note=note)
+        return [
+            dataclasses.replace(e, tests=(*e.tests, extra)) if e.criterion == UNKNOWN else e
+            for e in real(*args, **kwargs)
+        ]
+
+    monkeypatch.setattr(ladder, "trace_criteria", with_second_test)
+    refuse = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
+    inadequate = Step(
+        structured=judge_reply(
+            [KNOWN, UNKNOWN],
+            test_adequacy=[
+                {
+                    "test": "tests.test_discount::test_unknown_code",
+                    "criterion": UNKNOWN,
+                    "adequate": False,
+                    "reason": "it does not open the page",
+                }
+            ],
+        )
+    )
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), refuse, inadequate], **web_repo
+    )
+    assert run.code == 11, run.outcome  # the criterion does not pass on the other test alone
+    made = {e["criterion"]: e for e in run.events("verify.generated")}
+    assert made[UNKNOWN]["covered_by"] == ["tests.test_discount::test_unknown_code"]  # the note was taken in step 5
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    assert f"UI criterion {UNKNOWN} has no end-to-end test; see" in text and "## Needs a human" in text
+    body = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    assert [h for h in body["holds"] if UNKNOWN in h] == [
+        f"UI criterion {UNKNOWN} has no end-to-end test; see the generated UI tests table"
+    ]
+    asked = run.events("question.raised")
+    assert len(asked) == 1 and asked[0]["criterion"] == UNKNOWN and "UI criterion" in asked[0]["title"]
 
 
 def test_an_e2e_test_that_fails_at_head_fails_step_3_and_no_judge_is_called(run_l4, valid_spec, web_repo):

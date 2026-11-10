@@ -18,8 +18,7 @@ restored with none. The hold SHALL stay when nothing discriminating traces the c
 only red records that no run proved, a failing tracing test, a failed audit test, or no tracing test), for every other
 outcome of the writer (`writer_failed`, `uncollectable`, `fails_at_head`, `non_discriminating`, `base_error`,
 `base_unservable`, `lint_failed`), covered or not, and when no writer is configured. A note SHALL NOT pass the criterion:
-it still needs an adequate passing test and the judge's pass (L4-VER-003), so a covering test that the judge calls
-inadequate leaves the criterion `needs_human`, asked through its own verdict question. Which criteria are UI-facing
+it still needs an adequate passing test and the judge's pass (L4-VER-003), so a covering test that the judge calls inadequate leaves the criterion `needs_human`, asked through its own verdict question. When step 9 rejects every covering test of a note while another test that passes and is adequate (a `pass_to_pass` test, or a red record that no run proved) still traces the criterion, so that aggregation would pass it with no one asked, a fresh round SHALL raise the criterion's UI hold right after the judge step, with its hold view, into the round's holds (stored in `verdict.json`, so a reused round keeps it); with no such test the criterion is `needs_human` on its own and no hold is raised. Which criteria are UI-facing
 (L4-VER-014), which UI criteria are gaps, and the waiver above SHALL be unchanged.
 
 #### Scenario: SCN-VER-298 (+) a UI criterion that step 4 covers and the writer cannot test is a note
@@ -59,6 +58,13 @@ inadequate leaves the criterion `needs_human`, asked through its own verdict que
 - **THEN** the criterion is `needs_human` (`uncovered: the tests that trace it are inadequate or did not pass`), one
   verdict question asks about the criterion, and no UI hold is raised for it
 
+#### Scenario: SCN-VER-307 (−) a note whose covering test the judge rejects comes back as a hold when another test would pass the criterion
+- **WHEN** a noted UI criterion is traced by a `zero_value` test (the note's `covered_by`) and by a `pass_to_pass` test
+  (or by a red record that no run proved), and the judge calls the `zero_value` test inadequate and the other adequate
+- **THEN** the criterion's UI hold is raised right after the judge step and stored in `verdict.json` (the criterion does
+  not pass on the other test alone), one hold question is asked, and a reused round keeps the hold; with the
+  `zero_value` test alone the criterion is `needs_human` through aggregation and no hold is raised (SCN-VER-303)
+
 ## ADDED Requirements
 
 ### Requirement: L4-VER-077 The UI test writer is shown the e2e suite's support files
@@ -68,11 +74,10 @@ no submodule), whose name is not a test module's (`test_*.py`, `*_test.py`, so n
 `test_l4_c_<hex>.py`), that is not a `conftest.py` below `e2e/`, has no path part that starts with `.` or is
 `__pycache__` or `node_modules`, and is not empty. They SHALL be taken in that order (`e2e/conftest.py`, then the others by
 depth and path), each cut at 8,000 characters with its label saying so, until six are taken or the next would bring the
-total past 20,000 characters; that file and every file after it SHALL be left out and named in one more block. They SHALL be read from the merge base only, because the
+total past 20,000 characters; that file and every file after it SHALL be left out (not read) and named in one more block, `e2e support files not shown`, which lists the first 20 and `(+n more)`. They SHALL be read from the merge base only, because the
 generated test runs at the base and, at head, with the e2e runner's support files the unit changed at their base
 versions (L4-VER-035): a helper the unit added is not shown. The writer's e2e rules SHALL say that its test runs with the
-files shown, to use their fixtures by parameter name and import their helpers from the module that defines them, and to
-use no name they do not define; the template version SHALL be `testwriter@6`. Step 5's note SHALL say how many files
+files shown, to use their fixtures by parameter name and import their helpers from the module that defines them (`from <module> import <name>`, with the package path when `e2e/__init__.py` is at the merge base, which one more block, `e2e suite layout`, then says: `from e2e.conftest import login`), and to use no name they do not define; the template version SHALL be `testwriter@7`. Step 5's note SHALL say how many files
 were shown and how many were left out. A project with no such file SHALL get no block, and no configuration key SHALL
 be added.
 
@@ -81,7 +86,7 @@ be added.
   test module `e2e/test_sign_in.py`, and the unit changed `e2e/conftest.py`
 - **THEN** the writer's prompt holds, after the page snapshot, `e2e/conftest.py` as it is at the base (not the unit's
   version) and then `e2e/helpers/a11y.py`, and not `e2e/test_sign_in.py`; its e2e rules say to use the shown fixtures
-  and import the shown helpers; the prompt's template is `testwriter@6`; step 5's note says two files were shown
+  and import the shown helpers; the prompt's template is `testwriter@7`; step 5's note says two files were shown
 
 #### Scenario: SCN-VER-305 (−) the support files shown are bounded and the rest are named
 - **WHEN** the base has an `e2e/conftest.py` of 30,000 characters and nine helper files under `e2e/` of 5,000

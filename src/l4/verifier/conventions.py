@@ -34,6 +34,7 @@ INI_FILES = ("pytest.ini", ".pytest.ini")
 MAX_SUITE_FILES = 6
 MAX_SUITE_FILE_CHARS = 8_000
 MAX_SUITE_CHARS = 20_000
+MAX_NOT_SHOWN = 20
 _REGULAR = ("100644", "100755")
 _TEST_MODULE = re.compile(r"^(?:test_.*|.*_test)\.py$")
 _SKIPPED_PART = re.compile(r"^(?:\..*|__pycache__|node_modules)$")
@@ -152,41 +153,50 @@ class E2eSupport:
     skipped: tuple[str, ...] = ()
 
 
-def _support_candidates(git: Git, base: str) -> list[str]:
-    """The regular `.py` files under `e2e/` at the base that support the suite: not a test module, not a `conftest.py`
-    below `e2e/`, no part that starts with `.` or is `__pycache__` or `node_modules`. `e2e/conftest.py` first, then
-    by depth and path."""
+def _support_candidates(git: Git, base: str) -> tuple[list[str], bool]:
+    """(the regular `.py` files under `e2e/` at the base that support the suite, whether `e2e/__init__.py` is one of
+    the base's files). A support file is not a test module, not a `conftest.py` below `e2e/`, and has no part that
+    starts with `.` or is `__pycache__` or `node_modules`. `e2e/conftest.py` first, then by depth and path."""
     listing = git.run("ls-tree", "-r", "-z", base, "--", E2E_DIR).stdout
     found = []
+    package = False
     for entry in listing.split("\0"):
         meta, _, path = entry.partition("\t")
         parts = PurePosixPath(path).parts
         if not path or meta.split(" ")[0] not in _REGULAR or not path.endswith(".py"):
             continue
+        package = package or path == f"{E2E_DIR}/__init__.py"
         name = parts[-1]
         if _TEST_MODULE.match(name) or any(_SKIPPED_PART.match(part) for part in parts):
             continue
         if name == "conftest.py" and path != f"{E2E_DIR}/conftest.py":
             continue
         found.append(path)
-    return sorted(found, key=lambda p: (p != f"{E2E_DIR}/conftest.py", p.count("/"), p))
+    return sorted(found, key=lambda p: (p != f"{E2E_DIR}/conftest.py", p.count("/"), p)), package
 
 
 def e2e_support_files(git: Git, base_sha: str) -> E2eSupport:
     """The e2e suite's support files at `base_sha` for the UI test writer (L4-VER-077): `e2e/conftest.py`, then the
     other helper modules, each cut at 8,000 characters and taken until six are taken or the next would bring the total
-    past 20,000; the rest are named in one more block. The base only: the generated test runs at the base and, at
-    head, with the support files the unit changed at their base versions, so a helper the unit added is not shown."""
+    past 20,000; that file and every file after it are left out without being read, and the block that names them
+    lists the first 20 (`(+n more)` for the rest). When `e2e/__init__.py` is at the base, a last block says the suite
+    is a package, so that a helper is imported by its module path (`from e2e.conftest import login`). The base only:
+    the generated test runs at the base and, at head, with the support files the unit changed at their base versions,
+    so a helper the unit added is not shown."""
     blocks: list[tuple[str, str]] = []
     shown: list[str] = []
     skipped: list[str] = []
     size = 0
-    for path in _support_candidates(git, base_sha):
+    candidates, package = _support_candidates(git, base_sha)
+    for path in candidates:
+        if skipped or len(shown) >= MAX_SUITE_FILES:
+            skipped.append(path)  # by rule: nothing after a file that is left out is read
+            continue
         text = _show(git, base_sha, path)
         if text is None or not text.strip():
             continue
         cut = text[:MAX_SUITE_FILE_CHARS]
-        if skipped or len(shown) >= MAX_SUITE_FILES or size + len(cut) > MAX_SUITE_CHARS:
+        if size + len(cut) > MAX_SUITE_CHARS:
             skipped.append(path)
             continue
         note = f", first {MAX_SUITE_FILE_CHARS} characters" if len(cut) < len(text) else ""
@@ -194,5 +204,12 @@ def e2e_support_files(git: Git, base_sha: str) -> E2eSupport:
         shown.append(path)
         size += len(cut)
     if skipped:
-        blocks.append(("e2e support files not shown", "\n".join(skipped)))
+        more = f"\n(+{len(skipped) - MAX_NOT_SHOWN} more)" if len(skipped) > MAX_NOT_SHOWN else ""
+        blocks.append(("e2e support files not shown", "\n".join(skipped[:MAX_NOT_SHOWN]) + more))
+    if blocks and package:
+        layout = (
+            "e2e/ is a package (e2e/__init__.py exists): import a helper by its module path, "
+            "as `from e2e.conftest import <name>`"
+        )
+        blocks.append(("e2e suite layout", layout))
     return E2eSupport(tuple(blocks), tuple(shown), tuple(skipped))

@@ -135,6 +135,8 @@ def test_a_ui_gap_noted_as_covered_by_step_4_spawns_no_fix_unit():  # SCN-VER-30
     assert plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups == []
     r.generated = [GeneratedOutcome("C-00000001", "not_testable", reason="pure")]
     assert [g.criteria for g in plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups] == [("C-00000001",)]
+    r.generated = [GeneratedOutcome("C-00000001", "fails_at_head", "e2e/t.py", 1, covered_by=("t::a",))]  # by hand
+    assert [g.criteria for g in plan_fix_unit(FAMILY, r, [], ordinal=1, fix_minor=True).groups] == [("C-00000001",)]
 
 
 def test_a_minor_spec_gap_without_a_source_for_its_scenario_is_listed_not_converted():

@@ -15,6 +15,7 @@ from l4.verifier.types import CriterionEvidence, GeneratedOutcome, TracingTest
 from l4.verifier.ui_step import (
     covered_by_step4,
     gap_findings,
+    lost_notes,
     plan_generation,
     previously_generated,
     ui_hold_binding,
@@ -213,6 +214,53 @@ def test_the_covering_tests_are_the_proved_ones_sorted_and_not_the_pass_to_pass_
 )
 def test_nothing_discriminating_means_no_cover(trace):  # SCN-VER-299
     assert covered_by_step4(trace) == {}
+
+
+NOTED = GeneratedOutcome(CID, "not_testable", reason="pure", covered_by=("t.a::one",))
+A_WEAK = TracingTest("t.a::one", "passed", "zero_value", adequate=False)  # the judge called it inadequate (step 9)
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        TracingTest("t.base::old", "passed", "pass_to_pass"),
+        TracingTest("t.a::red", "passed", "zero_value", note="not applicable: no project code"),
+        TracingTest("t.a::red", "passed", "red_assertion", note="accepted by Q-001: the check was inconclusive"),
+    ],
+    ids=["pass-to-pass", "no-project-code", "inconclusive"],
+)
+def test_a_note_whose_only_covering_test_the_judge_rejects_comes_back_as_a_hold_when_another_test_passes(
+    other,
+):  # SCN-VER-307
+    assert lost_notes(evidence(A_WEAK, other), [NOTED]) == [CID]
+
+
+@pytest.mark.parametrize(
+    "trace, outcome",
+    [
+        (
+            evidence(TracingTest("t.a::one", "passed", "zero_value"), TracingTest("t.b::x", "passed", "pass_to_pass")),
+            NOTED,
+        ),
+        (evidence(A_WEAK), NOTED),  # alone: the criterion is needs_human through aggregation (SCN-VER-303)
+        (evidence(A_WEAK, TracingTest("t.b::x", "passed", "pass_to_pass", adequate=False)), NOTED),
+        (evidence(A_WEAK, TracingTest("t.b::x", "failed", "pass_to_pass"), state="fail"), NOTED),
+        (evidence(A_WEAK, TracingTest("t.b::x", "passed", "pass_to_pass"), held="the audit test fails"), NOTED),
+        (
+            evidence(A_WEAK, TracingTest("t.b::x", "passed", "pass_to_pass")),
+            GeneratedOutcome(CID, "not_testable", reason="pure"),  # no note was taken
+        ),
+        (
+            evidence(
+                A_WEAK, TracingTest("t.a::two", "passed", "zero_value"), TracingTest("t.b::x", "passed", "pass_to_pass")
+            ),
+            GeneratedOutcome(CID, "not_testable", reason="pure", covered_by=("t.a::one", "t.a::two")),
+        ),  # one of the covering tests still stands
+    ],
+    ids=["still-covered", "alone", "all-inadequate", "failing", "held", "no-note", "one-left"],
+)
+def test_a_note_whose_basis_stands_or_that_needs_no_hold_raises_none(trace, outcome):  # SCN-VER-303, SCN-VER-307
+    assert lost_notes(trace, [outcome]) == []
 
 
 def test_the_gap_finding_of_a_waived_criterion_says_who_waived_it():
