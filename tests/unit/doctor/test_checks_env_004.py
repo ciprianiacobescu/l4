@@ -3,6 +3,7 @@ import pytest
 from l4.config.schema import L4Config
 from l4.doctor import checks_env as env
 from l4.doctor.registry import Check, Registry, exit_code, run_checks
+from l4.provision.catalog import OPENCODE2_VERSION
 
 PROFILES = {
     "impl": {"adapter": "claude-code", "min_version": "2.1.0"},
@@ -202,7 +203,7 @@ def v2_config() -> L4Config:
 
 V2_PROFILE_REASON = (
     "opencode2 1.18.34 is OpenCode v1; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install "
-    "@opencode/cli@2.0.32 (l4 doctor --fix installs it user-locally) or remove options.cli_major"
+    f"@opencode/cli@{OPENCODE2_VERSION} (l4 doctor --fix installs it user-locally) or remove options.cli_major"
 )
 
 
@@ -212,7 +213,7 @@ def test_env_004_runs_opencode2_for_a_v2_profile_and_gates_it_by_the_v2_key(make
     assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
     assert V2_PROFILE_REASON in result.message and "`oc2`" in result.message
 
-    ctx, _ = make_ctx(tools={"opencode2": "opencode v2.0.32"}, cfg=v2_config())
+    ctx, _ = make_ctx(tools={"opencode2": f"opencode v{OPENCODE2_VERSION}"}, cfg=v2_config())
     assert outcome(ctx)[0].status == "pass"
 
     ctx, _ = make_ctx(tools={"opencode": "1.18.34"}, cfg=v2_config())  # a v1 binary named opencode is not opencode2
@@ -251,8 +252,8 @@ def test_env_004_checks_each_profiles_own_cli_when_both_majors_are_in_use(make_c
             "roles": {"implementer": ["oc1"], "judges": ["oc2"]},
         }
     )
-    ctx, _ = make_ctx(tools={"opencode": "1.18.34", "opencode2": "opencode v2.0.32"}, cfg=both)
+    ctx, _ = make_ctx(tools={"opencode": "1.18.34", "opencode2": f"opencode v{OPENCODE2_VERSION}"}, cfg=both)
     assert outcome(ctx)[0].status == "pass"
-    ctx, _ = make_ctx(tools={"opencode": "opencode v2.0.32", "opencode2": "opencode v2.0.32"}, cfg=both)
+    ctx, _ = make_ctx(tools={"opencode": "opencode v2.0.32", "opencode2": f"opencode v{OPENCODE2_VERSION}"}, cfg=both)
     result, _ = outcome(ctx)
     assert result.status == "fail" and "`oc1`" in result.message and "`oc2`" not in result.message

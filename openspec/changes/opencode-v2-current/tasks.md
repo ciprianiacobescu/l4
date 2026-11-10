@@ -17,7 +17,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 1. Fixtures (design D8)
 
-- [ ] 1.1 The orchestrator passes the raw directories of the live check as `OC2_MAC` (the macOS runs) and `OC2_BOX`
+- [x] 1.1 The orchestrator passes the raw directories of the live check as `OC2_MAC` (the macOS runs) and `OC2_BOX`
   (the container runs). Write a throwaway scrub script outside the repository. It applies the rules of design D8, in
   this order:
   1. every path that starts with the absolute path of `$OC2_MAC` (also its twin with or without the `/private` prefix)
@@ -48,7 +48,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
   Also write `live-version.stdout.txt` with the one line `opencode v2.2.6`, the output of `opencode2 --version` on both
   machines.
-- [ ] 1.2 Write `tests/fixtures/recorded/opencode/2.2.6/README.md` in the manner of the 2.0.32 README. Its header says
+- [x] 1.2 Write `tests/fixtures/recorded/opencode/2.2.6/README.md` in the manner of the 2.0.32 README. Its header says
   each file was recorded on 2026-11-10 with `@opencode/cli` 2.2.6, by L4 0.4.55's `OpenCodeV2Adapter.run` with the real
   binary. "box" means a Linux arm64 container with L4's bubblewrap sandbox and an agent spec built like
   `Workbench.agent_spec`. "mac" means macOS arm64 with no sandbox, an isolated HOME and isolated XDG directories. The
@@ -59,7 +59,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   the CLI denies and the private data home of this change), what it shows (design D8), and the D9 row it records. Add
   one line saying that the probe's hello was checked live (paid and free, mac and box) but its raw stream was not kept,
   so the hello has no fixture.
-- [ ] 1.3 Run, over `tests/fixtures/recorded/opencode/2.2.6/`:
+- [x] 1.3 Run, over `tests/fixtures/recorded/opencode/2.2.6/`:
   - `grep -rnE '/private/|/Users/|/home/[a-z]|/var/folders/'`, and a grep for the absolute paths of `$OC2_MAC` and
     `$OC2_BOX`;
   - `grep -rni "$OC2_LOGIN"`;
@@ -74,7 +74,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 2. The pin 2.2.6 (L4-OCV-019, L4-OCV-002; SCN-OCV-02, SCN-OCV-04, SCN-OCV-43; design D1)
 
-- [ ] 2.1 Tests first:
+- [x] 2.1 Tests first:
   - `tests/unit/provision/test_catalog.py`: `OPENCODE2_VERSION == "2.2.6"`. `catalog_pins()["agent:opencode2"] ==
     "2.2.6"`. The manual command for the `opencode2` tool names `@opencode/cli@2.2.6`.
   - `tests/unit/provision/test_install.py` and `test_plan.py`: the planned install runs `npm install --prefix
@@ -88,13 +88,13 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   - `tests/unit/availability/test_probes_opencode_v2.py` (SCN-OCV-02): the binary reason holds
     `install @opencode/cli@2.2.6`.
   - `tests/unit/docs/test_pin_clis_docs.py`: the PRQ-20 row holds `2.2.6`.
-- [ ] 2.2 Code:
+- [x] 2.2 Code:
   - `src/l4/provision/catalog.py`: `OPENCODE2_VERSION = "2.2.6"`. The comment above it names
     `tests/fixtures/recorded/opencode/2.2.6`.
   - `scripts/runner/prereqs.sh`: the default and the comments that name `opencode v2.0.32` as the pinned form.
   - `docs/runner/README.md`: the PRQ-20 row names `2.2.6` and loses "experimental and not yet checked against a live run".
   - `src/l4/agents/opencode_v2.py`: the module docstring names `2.2.6`.
-- [ ] 2.3 Then `git grep -n "2\.0\.32" -- src scripts tests/unit docs/runner`. Change each place where 2.0.32 stands for
+- [x] 2.3 Then `git grep -n "2\.0\.32" -- src scripts tests/unit docs/runner`. Change each place where 2.0.32 stands for
   the pin, or for the version `l4 doctor --fix` installs. Prefer `OPENCODE2_VERSION` in tests. Leave each place where it
   stands for a 2.0.32 recording or for an arbitrary v2 version that the v1 gate refuses (`opencode v2.0.32` as the v2
   found as `opencode`). Run `tests/unit/provision tests/unit/runner tests/unit/doctor tests/unit/config tests/unit/test_recorded_versions.py tests/unit/test_recorded_versions_major.py tests/unit/test_versions_major.py tests/unit/availability tests/unit/docs/test_pin_clis_docs.py tests/unit/eval/test_env.py tests/unit/yolo/test_yolo_preflight_script.py`

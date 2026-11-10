@@ -1,5 +1,6 @@
 """The OpenCode v2 probe (L4-OCV-001 probe part, -010, -011 hello, -012; SCN-OCV-02, -06 for the probes, -21, -22, -23,
-amendment E1). Every answer is a recorded 2.0.32 fixture or a synthetic one that says so; no binary is started."""
+amendment E1). Every answer is a recorded 2.0.32 or 2.2.6 fixture or a synthetic one that says so; no binary is
+started."""
 
 import json
 import os
@@ -16,8 +17,9 @@ from l4.provision.catalog import effective_pins
 from .conftest import RECORDED, FakeRun
 
 OC2 = RECORDED / "opencode" / "2.0.32"
+OC2_LIVE = RECORDED / "opencode" / "2.2.6"
 FREE_MODEL, GO_MODEL = "opencode/big-pickle", "opencode-go/deepseek-v4.1-flash"
-V2_VERSION = {("--version",): CmdResult(0, (OC2 / "version.stdout.txt").read_text(), "")}
+V2_VERSION = {("--version",): CmdResult(0, (OC2_LIVE / "live-version.stdout.txt").read_text(), "")}
 SWITCHES = {
     "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE",
@@ -72,14 +74,14 @@ def test_a_v1_binary_at_opencode2_fails_binary_with_the_v2_reason_and_no_hello_r
     out, run = probe(FREE, "hello", rules, make_ctx)
     assert not out.ok and out.step == "binary"
     assert out.reason is not None and out.reason.startswith("opencode2 1.18.34 is OpenCode v1; this profile runs v2")
-    assert "options.cli_major: 2" in out.reason and "@opencode/cli@2.0.32" in out.reason
+    assert "options.cli_major: 2" in out.reason and "install @opencode/cli@2.2.6" in out.reason
     assert [c[0][1:] for c in run.calls] == [["--version"]] and run.calls[0][0][0].endswith("/opencode2")
 
 
 def test_the_recorded_v2_version_passes_binary_with_major_two_and_the_opencode2_pin(make_ctx):
     out, run = probe(FREE, "binary", {}, make_ctx)
-    assert out.ok and out.detail["version"] == "2.0.32" and out.detail["major"] == 2
-    assert out.detail["pin"] == "2.0.32" and out.detail["pin_source"] == "catalog"
+    assert out.ok and out.detail["version"] == "2.2.6" and out.detail["major"] == 2
+    assert out.detail["pin"] == "2.2.6" and out.detail["pin_source"] == "catalog"
     assert run.calls[0][0][0].endswith("/opencode2")
 
 

@@ -44,7 +44,7 @@ def test_major_problem_is_none_for_the_supported_major_an_ungated_adapter_and_no
 
 REASON_V2_PROFILE = (
     "opencode2 1.18.34 is OpenCode v1; this profile runs v2 (options.cli_major: 2, @opencode/cli 2.x): install "
-    "@opencode/cli@2.0.32 (l4 doctor --fix installs it user-locally) or remove options.cli_major"
+    f"@opencode/cli@{catalog.OPENCODE2_VERSION} (l4 doctor --fix installs it user-locally) or remove options.cli_major"
 )
 
 
@@ -55,22 +55,30 @@ def test_the_v1_reason_ends_with_the_way_to_opt_in_to_v2():  # amendment E2, SCN
 
 
 def test_a_v2_profile_with_a_v1_binary_gets_the_v2_reason():  # SCN-OCV-02
-    assert catalog.major_problem("opencode2", "opencode2", "1.18.34", "2.0.32") == REASON_V2_PROFILE
-    assert catalog.major_problem("opencode2", "opencode2", "opencode v1.18.34", "2.0.32") == REASON_V2_PROFILE
+    assert catalog.major_problem("opencode2", "opencode2", "1.18.34", catalog.OPENCODE2_VERSION) == REASON_V2_PROFILE
+    assert (
+        catalog.major_problem("opencode2", "opencode2", "opencode v1.18.34", catalog.OPENCODE2_VERSION)
+        == REASON_V2_PROFILE
+    )
 
 
 def test_a_v2_profile_with_a_v2_binary_of_another_patch_is_not_a_major_problem():
-    assert catalog.major_problem("opencode2", "opencode2", "opencode v2.0.32", "2.0.32") is None
-    assert catalog.major_problem("opencode2", "opencode2", "opencode v2.1.4", "2.0.32") is None
-    assert catalog.major_problem("opencode2", "opencode2", "no version here", "2.0.32") is None
+    assert (
+        catalog.major_problem(
+            "opencode2", "opencode2", f"opencode v{catalog.OPENCODE2_VERSION}", catalog.OPENCODE2_VERSION
+        )
+        is None
+    )
+    assert catalog.major_problem("opencode2", "opencode2", "opencode v2.1.4", catalog.OPENCODE2_VERSION) is None
+    assert catalog.major_problem("opencode2", "opencode2", "no version here", catalog.OPENCODE2_VERSION) is None
 
 
 def test_the_v2_key_has_its_own_words():
     words = catalog.MAJOR_WORDS["opencode2"]
     assert words.product == "OpenCode"
     assert words.need.format(supported=2) == "@opencode/cli 2.x"
-    assert catalog.major_plan_reason("opencode2", "1.18.34", 1, "2.0.32") == (
-        "found 1.18.34 (OpenCode v1), need @opencode/cli 2.x (pinned 2.0.32)"
+    assert catalog.major_plan_reason("opencode2", "1.18.34", 1, catalog.OPENCODE2_VERSION) == (
+        f"found 1.18.34 (OpenCode v1), need @opencode/cli 2.x (pinned {catalog.OPENCODE2_VERSION})"
     )
     assert catalog.major_no_version_text("opencode2", "opencode2") == (
         "opencode2 reports no version, so its OpenCode major cannot be checked"

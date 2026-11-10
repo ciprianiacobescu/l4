@@ -13,6 +13,9 @@ CFG = {
 }
 
 
+PACKAGED = recordedversions.load
+
+
 @pytest.fixture(autouse=True)
 def recorded(monkeypatch):
     monkeypatch.setattr(recordedversions, "load", lambda: {"opencode": ["1.18.33"]})
@@ -119,7 +122,7 @@ def test_a_v2_profile_reads_opencode2_and_a_wrong_major_is_an_error(make_ctx):  
     result, code = outcome(ctx)
     assert (result.status, result.severity) == ("fail", "error") and int(code) == 3
     assert "opencode2 1.18.34 is OpenCode v1; this profile runs v2" in result.message
-    assert "install @opencode/cli@2.0.32" in result.message and "unrecorded version" not in result.message
+    assert "install @opencode/cli@2.2.6" in result.message and "unrecorded version" not in result.message
 
 
 def test_a_v2_patch_drift_warns_with_the_recorded_v2_versions_only(make_ctx, monkeypatch):
@@ -148,3 +151,15 @@ def test_each_profile_is_compared_with_the_recorded_versions_of_its_own_major(ma
     )
     assert "profile `oc2`" in second and "runs 2.0.33" in second and second.endswith("2.0.32")
     assert "1.18" not in second
+
+
+def test_scn_ocv_43_the_pinned_v2_is_recorded_and_the_next_patch_names_both_recordings(make_ctx, monkeypatch):
+    monkeypatch.setattr(recordedversions, "load", PACKAGED)  # the table the package ships
+    ctx, _ = make_ctx(tools={"opencode2": "opencode v2.2.6"}, cfg=L4Config.model_validate(V2_CFG))
+    result, code = outcome(ctx)
+    assert result.status == "pass" and int(code) == 0
+    ctx, _ = make_ctx(tools={"opencode2": "opencode v2.2.7"}, cfg=L4Config.model_validate(V2_CFG))
+    result, code = outcome(ctx)
+    assert (result.status, result.severity) == ("fail", "warn") and int(code) == 0
+    assert "unrecorded version" in result.message and "2.0.32, 2.2.6" in result.message
+    assert "1.18" not in result.message
