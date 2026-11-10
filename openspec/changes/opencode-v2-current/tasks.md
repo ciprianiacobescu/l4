@@ -191,7 +191,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   - SCN-OCV-40: with `hide_own_homes=True` and `adapter="opencode"`, the argv has `--tmpfs <home>/.local/share/opencode`
     and `--tmpfs <home>/.config/opencode`, no `--bind` of either, and `--bind` of `<home>/.cache/opencode`.
   - SCN-OCV-42: with the configured paths of the scenario, `auth.json` is `--ro-bind /dev/null <path>` and not bound,
-    and the other two are bound.
+    `/opt/oc-login` is under a tmpfs and not bound, and the cache home is bound.
   - SCN-OCV-41: `tests/unit/implementer/test_workbench.py` (or a new `test_workbench_own_homes.py` beside it). For the
     three profiles of the scenario, `wb.agent_spec().hide_own_homes` is False, and the bwrap argv equals, as a list, the
     argv of `dataclasses.replace(spec, hide_own_homes=False)`. For a `cli_major: 2` api-key profile it is True. The same
@@ -199,9 +199,10 @@ Every group is one implementer step, run in order in one worktree. Each step fol
   - `tests/unit/sandbox/test_probe_parity.py` passes unchanged.
 - [x] 6.2 Code:
   - `src/l4/sandbox/base.py`: `SandboxSpec.hide_own_homes: bool = field(default=False, kw_only=True)`;
-    `OWN_HOMES = {"opencode": ("~/.local/share/opencode", "~/.config/opencode")}`; `own_login_binds(spec)`; and
-    `hidden_credential_paths` adds the dropped paths. A path is dropped when it is, contains or lies inside an
-    `OWN_HOMES` entry expanded against `spec.home`.
+    `OWN_KEPT_HOMES = {"opencode": ("~/.cache/opencode",)}`; `own_login_binds(spec)`; and
+    `hidden_credential_paths` adds the dropped paths. A path is kept only when it is at or below an
+    `OWN_KEPT_HOMES` entry expanded against `spec.home` (review fix; the first version dropped only paths related to the
+    data and config homes).
   - `src/l4/sandbox/bwrap.py`: the bind loop binds `own_login_binds(spec)`, and the `NO_LOGIN_BIND` rule stays.
   - `src/l4/implementer/workbench.py` `agent_spec` and `src/l4/yolo/readiness.py` `_Calls.__init__`:
     `hide_own_homes=no_stored_login(<selected profile>)`.

@@ -254,7 +254,36 @@ def test_scn_ocv_23_the_same_leaked_text_still_fails_the_v1_hello_as_unexpected_
 def test_the_recorded_free_tier_403_fails_the_hello_as_auth_not_a_limit(make_ctx):
     out, _ = probe(FREE, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
     assert not out.ok and out.failure_class == "auth" and out.limit is None
-    assert out.reason == "opencode2 authentication failed (login expired or rejected)"
+    assert out.reason.startswith("opencode2 authentication failed (login expired or rejected)")
+
+
+HINT = "a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY"
+
+
+def test_an_auth_failed_hello_of_a_free_model_without_the_key_says_a_stored_login_is_not_used(make_ctx):
+    """A profile classed as needing no stored login only because its model is `opencode/` (L4-OCV-017): a login stored
+    by `opencode2 auth login` is not read, so the failure names the way out."""
+    out, _ = probe(FREE, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
+    assert not out.ok and out.failure_class == "auth"
+    assert out.reason.endswith(HINT) and out.reason.count("opencode2 authentication failed") == 1
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        pytest.param(v2(FREE_MODEL, auth="api_key"), id="free-with-the-key"),
+        pytest.param(v2(GO_MODEL, auth="api_key"), id="paid-with-the-key"),
+        pytest.param(v2(GO_MODEL), id="stored-login"),
+    ],
+)
+def test_the_hint_is_for_the_free_model_without_the_key_only(make_ctx, profile):
+    out, _ = probe(profile, "hello", {("run",): out_of("error-403-free-tier-network.jsonl", 1)}, make_ctx)
+    assert out.failure_class == "auth" and out.reason == "opencode2 authentication failed (login expired or rejected)"
+
+
+def test_the_hint_is_for_an_auth_class_failure_only(make_ctx):
+    out, _ = probe(FREE, "hello", {("run",): CmdResult(1, "", "")}, make_ctx)
+    assert not out.ok and out.failure_class != "auth" and "stored opencode2 login" not in (out.reason or "")
 
 
 def test_the_hello_argv_carries_standalone_the_title_and_the_prompt_and_no_v1_flags(make_ctx):
@@ -438,3 +467,15 @@ def test_scn_ocv_38_a_profile_with_a_stored_login_keeps_the_real_data_home_in_th
         OpenCodeV2Adapter().probe(candidate, "hello", ctx)
         for argv, _, env, _ in run.calls:
             assert not {"XDG_DATA_HOME", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(env), argv
+
+
+@pytest.mark.parametrize("profile", [FREE, GO, OPENROUTER], ids=["free", "paid", "stored-login"])
+def test_no_auth_or_hello_argv_carries_a_flag_that_skips_the_permission_rules(make_ctx, profile):
+    """The free model's `ask` refusals rely on it (L4-OCV-015)."""
+    rules = {("run",): out_of("hello-ok-step-finish.jsonl"), ("auth", "list"): out_of("auth-list-env-key.json")}
+    argvs = []
+    for step in ("auth", "hello"):
+        _, run = probe(profile, step, rules, make_ctx)
+        argvs += [call[0] for call in run.calls if call[0][1] != "--version"]
+    assert any(a[1] == "run" for a in argvs)
+    assert not {"--auto", "--yolo", "--dangerously-skip-permissions"} & {flag for a in argvs for flag in a}, argvs

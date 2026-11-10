@@ -44,7 +44,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.contract import attach_file_result, attach_judge_reply
-from l4.agents.credentials import credential_loader, no_stored_login
+from l4.agents.credentials import OPENCODE_API_KEY, credential_loader, no_stored_login, profile_credential_variable
 from l4.agents.opencode import (
     _AUTH_FAILED,
     CONFIG_DIR,
@@ -640,6 +640,11 @@ def _auth_result_v2(output: str, provider: str) -> ProbeResult:
     return ProbeResult("auth", True, {"logged_in": True, "provider": provider})
 
 
+_STORED_LOGIN_UNUSED = (
+    "a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY"
+)
+
+
 def _hello_v2(
     profile: Profile, exe: str, model: str, ctx: ProbeCtx, options: OpencodeOptions | None = None
 ) -> ProbeResult:
@@ -685,6 +690,8 @@ def _hello_v2_once(
             failure = "opencode2 reported a rate limit" if limit.kind == "rate_limit" else "opencode2 is out of credits"
         elif status in (401, 403) or error.get("type") == "provider.auth" or _AUTH_FAILED.search(message):
             failure, kind = "opencode2 authentication failed (login expired or rejected)", "auth"
+            if no_stored_login(profile) and profile_credential_variable(profile) != OPENCODE_API_KEY:
+                failure += f"; {_STORED_LOGIN_UNUSED}"  # a free model without the key: the way out (L4-OCV-017)
         else:
             failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
             kind = error_class(status, message)

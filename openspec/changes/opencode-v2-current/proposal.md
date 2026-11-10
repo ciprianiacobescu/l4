@@ -49,8 +49,9 @@ adapter supported, with the facts no run has recorded kept on their named fallba
   and tool directories are passed explicitly, so the agent's shell still finds what the sandbox binds. A profile with a
   stored login keeps today's data home, because v2 keeps that login in `opencode.db` there.
 - **Such a profile's sandbox does not bind the real OpenCode data and config homes** (L4-OCV-018). The process uses its
-  private ones, so `~/.local/share/opencode` and `~/.config/opencode` are hidden instead of bound read-write, and
-  `~/.cache/opencode` stays bound. v1 profiles and stored-login v2 profiles bind exactly as before.
+  private ones, so `~/.local/share/opencode`, `~/.config/opencode` and every other own login path outside the cache home
+  are hidden instead of bound read-write, and `~/.cache/opencode` stays bound (shared read-write, v1 and v2 alike; a
+  per-unit cache is a follow-up). v1 profiles and stored-login v2 profiles bind exactly as before.
 - **Supported, not experimental** (L4-OCV-019, amends L4-OCV-001 and L4-OCV-013). `experimental = True` goes, so
   `agent.experimental` is no longer recorded. The v1 gate reason ends `or set options.cli_major: 2 to run OpenCode 2`
   (L4-OCG-002). The SPEC row, the CHANGELOG, the runbook section and the plan stop calling the adapter experimental.

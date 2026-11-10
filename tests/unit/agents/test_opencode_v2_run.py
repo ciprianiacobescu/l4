@@ -106,6 +106,30 @@ def judge_request(tmp_path: Path, **kw) -> RunRequest:
     return request(tmp_path, role="judge", permission_policy=PermissionPolicy("judge"), **kw)
 
 
+# --- no argv the adapter builds skips the permission rules (L4-OCV-015) ---
+
+PERMISSION_BYPASSES = {"--auto", "--yolo", "--dangerously-skip-permissions"}
+
+
+@pytest.mark.parametrize("model", [FREE, PAID])
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+def test_no_run_or_export_argv_carries_a_flag_that_skips_the_permission_rules(tmp_path, model, role):
+    """The free model's `ask` refusals rely on it: a flag that auto-answers or skips every permission prompt would turn
+    each refusal of the allow-list into an allow."""
+    proc = text_run()
+    make = judge_request if role == "judge" else request
+    kw = {"result_schema": JUDGE_SCHEMA} if role == "judge" else {}
+    OpenCodeV2Adapter(proc).run(make(tmp_path, profile=profile(model), **kw))
+    assert [c["kind"] for c in proc.calls] == ["run", "export"]
+    for call in proc.calls:
+        assert not PERMISSION_BYPASSES & set(call["argv"]), call["argv"]
+
+
+def test_the_one_argv_builder_adds_no_such_flag_to_any_subcommand():
+    for subcommand in ("run", "auth list", "session export"):
+        assert not PERMISSION_BYPASSES & set(opencode_v2.v2_argv("/x/opencode2", subcommand, "--format", "json"))
+
+
 # --- the run, then the export (L4-OCV-007 run part) ---
 
 

@@ -11,7 +11,8 @@ For an implementer step without `options.tools`, the v2 `permissions` array SHAL
 "resource": "*", "effect": <refuse>}`, where refuse is `ask` for an `opencode/` model and `deny` otherwise (L4-OCV-005).
 The rules of L4-OCV-005 SHALL follow in their order. So every action that no later rule names starts refused: OpenCode's
 own tools (`worktree_create`, `worktree_list`, `session_move`, `session_rename`, `models`, the MCP resource tools,
-`execute`, `experimental_image_generate`) and any tool a later version adds. The `options.tools` array, whose first rule
+`execute`, `experimental_image_generate`) and any tool a later version adds. L4 never passes `--auto`, `--yolo` or `--dangerously-skip-permissions` to any `opencode2` call (the free model's `ask`
+refusals rely on it). The `options.tools` array, whose first rule
 is already `*:* deny`, and the judge arrays SHALL NOT change. Two tools stay offered, as a stated residual:
 - `worktree_remove`, which OpenCode gates with `edit` [V], and which the agent sandbox's read-only git common directory
   makes fail [I];
@@ -51,7 +52,9 @@ is already `*:* deny`, and the judge arrays SHALL NOT change. Two tools stay off
 Wherever a v2 configuration allows `shell`, it SHALL deny `shell` for `opencode*`, `opencode2*` and `*bin/opencode*`,
 right after the git denies. That is an implementer without `options.tools`, or one whose `options.tools` names `bash`.
 - A path pattern SHALL NOT refuse a command only because a path in it holds `/opencode`.
-- The denies are a guard. The agent sandbox is the boundary (L4-SEC-005).
+- The denies are a guard. Quoting (`"opencode2" api`), a leading assignment (`FOO=1 opencode2`), the prefixes `command`,
+  `exec`, `timeout` and `nohup`, a backslash, `sh -c`, `env` and `npx` get past them [I]. The agent sandbox is the
+  boundary (L4-SEC-005).
 - v1's configuration SHALL stay byte-identical (L4-OCV-005).
 
 #### Scenario: SCN-OCV-33 (+) The shell may not start the OpenCode CLI
@@ -85,7 +88,11 @@ model is an `opencode/` model. Such a profile SHALL get these private directorie
 - the hello: an empty 0700 `data` directory in its own scratch directory.
 
 Its auth step SHALL start no process. The run and the export SHALL also get `UV_PYTHON_INSTALL_DIR` and `UV_TOOL_DIR`,
-set to the directories the agent sandbox binds for them. A profile with a stored login SHALL keep the real data home.
+set to the directories the agent sandbox binds for them. A tool in the agent's tree that keeps its data under
+`XDG_DATA_HOME` and is not `uv` (a version manager bound through `sandbox.tool_paths`, or any tool with `sandbox: none`)
+sees the empty data home: a stated residual. A profile with a stored login SHALL keep the real data home. When a profile
+is classed as needing no stored login only because its model is an `opencode/` model, and its hello fails with an
+auth-class error, the reason SHALL end `; a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY`.
 
 #### Scenario: SCN-OCV-37 (+) An api-key or free profile runs and exports with a private data home
 - **GIVEN** a `cli_major: 2` implementer with `auth: api_key` on `opencode-go/deepseek-v4.1-flash`, another on
@@ -109,9 +116,10 @@ set to the directories the agent sandbox binds for them. A profile with a stored
 - **AND** the first's auth step passes with `auth_method: env`, the second's is skipped, and neither starts a process
 
 ### Requirement: L4-OCV-018 Such a profile's sandbox does not bind the real OpenCode data and config homes
-The agent sandbox of a profile of L4-OCV-017 SHALL NOT bind any of its own credential paths that is, contains or lies
-inside `~/.local/share/opencode` or `~/.config/opencode`. It SHALL hide them like another adapter's login (L4-SEC-005).
-Its other credential paths SHALL stay bound read-write. Every other profile SHALL bind exactly what it bound before.
+The agent sandbox of a profile of L4-OCV-017 SHALL bind none of its own credential paths except a path at or below
+`~/.cache/opencode`. Every other one (the data home, the config home, a path that contains or lies inside either, and
+any other configured path) SHALL be hidden like another adapter's login (L4-SEC-005). Residual: the cache home (`~/.cache/opencode`) holds OpenCode's models cache, plugin store and downloaded binaries; it stays shared read-write for v1 and v2 alike; a per-unit cache is a follow-up.
+Every other profile SHALL bind exactly what it bound before.
 
 #### Scenario: SCN-OCV-40 (+) Such a profile's sandbox hides the real data and config homes
 - **GIVEN** an agent spec for the api-key profile of SCN-OCV-37, with `~/.local/share/opencode`, `~/.config/opencode`
@@ -128,12 +136,12 @@ Its other credential paths SHALL stay bound read-write. Every other profile SHAL
   all three opencode login paths
 - **AND** `tests/unit/sandbox/test_probe_parity.py` passes unchanged
 
-#### Scenario: SCN-OCV-42 (−) A configured login path inside a hidden home is hidden too
+#### Scenario: SCN-OCV-42 (−) Every configured login path but the cache home is hidden
 - **GIVEN** `sandbox.credential_paths.opencode` set to `~/.local/share/opencode/auth.json`, `~/.cache/opencode` and
   `/opt/oc-login`, and the api-key profile of SCN-OCV-37
 - **WHEN** the bwrap argv is built
-- **THEN** `auth.json` is covered by `/dev/null` and not bound
-- **AND** `~/.cache/opencode` and `/opt/oc-login` are bound
+- **THEN** `auth.json` is covered by `/dev/null` and not bound, and `/opt/oc-login` is covered by a tmpfs and not bound
+- **AND** `~/.cache/opencode` is bound, and it is the only one of the three that is
 
 ### Requirement: L4-OCV-019 OpenCode v2 is supported on its live-checked pin
 `OPENCODE2_VERSION` SHALL be `2.2.6`. The v2 adapter SHALL NOT be marked experimental, and SHALL NOT be announced with

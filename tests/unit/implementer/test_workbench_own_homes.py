@@ -46,10 +46,15 @@ def test_scn_ocv_41_v1_profiles_and_stored_login_v2_profiles_bind_as_before(make
     spec = wb.agent_spec()
     assert spec.hide_own_homes is False
     argv = argv_of(wb, spec)
-    assert argv == argv_of(wb, replace(spec, hide_own_homes=False))
-    for rel in OPENCODE_LOGINS:  # all three opencode login paths stay `--bind`
-        path = str(wb.home / rel)
-        assert any(argv[i : i + 3] == ["--bind", path, path] for i in range(len(argv) - 2)), rel
+    logins = [str(wb.home / rel) for rel in OPENCODE_LOGINS]
+    # the 0.4.55 expression, written out and not rebuilt from the spec: the three login paths of the adapter are bound
+    # read-write (a `--bind` pair each, in the configured order), and none of them is covered by a tmpfs
+    assert [p for p in spec.credential_paths["opencode"]] == [wb.home / rel for rel in OPENCODE_LOGINS]
+    bound = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind" and argv[i + 1] in logins]
+    assert bound == [(path, path) for path in logins]
+    assert not set(logins) & {argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"}
+    assert not any(argv[i : i + 3] == ["--ro-bind", "/dev/null", path] for i in range(len(argv) - 2) for path in logins)
+    assert argv == argv_of(wb, replace(spec, hide_own_homes=False))  # and the flag at its default changes nothing
 
 
 @pytest.mark.parametrize(

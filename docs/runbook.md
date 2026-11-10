@@ -2520,7 +2520,7 @@ roles:
 
 OpenCode 2 (`@opencode/cli`, binary `opencode2`) was checked live on `@opencode/cli` 2.2.6 through L4's own probe and
 run, with a paid `opencode-go/` key and a free `opencode/` model, in a Linux container with L4's sandbox and on macOS.
-No full L4 unit has run on OpenCode 2 yet, so watch the `verification.md` of the first unit you run on it. The rows that
+A full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. Still watch the `verification.md` of the first unit you run on it in your repository. The rows that
 the check did not record sit on named fallbacks (the table at the end). It is in no default role chain and no `l4 init`
 output names it.
 
@@ -2545,7 +2545,8 @@ profiles:
   to a stored login only.** A profile with `auth: api_key` and `OPENCODE_API_KEY`, or one on an `opencode/` model,
   gets a private data home per step and never opens the runner user's `opencode.db`. One edge case: a paid `opencode/`
   model that is reached through a login stored by `opencode2 auth login`, under `auth: subscription`, also gets the
-  private home, and its hello fails as `auth`. Use `auth: api_key` with `OPENCODE_API_KEY` for it.
+  private home, and its hello fails as `auth` with the reason ending `a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY`. Use `auth: api_key` with
+  `OPENCODE_API_KEY` for it.
 - **What `l4 doctor --fix` installs.** When a `cli_major: 2` profile is in a role chain, `@opencode/cli@2.2.6` into
   `~/.local/share/l4/npm-opencode2` and one link, `~/.local/bin/opencode2`. It links nothing else from that package,
   because the package also ships a bin named `opencode`. `opencode` stays `opencode-ai@1.18.34`. A regular file at
@@ -2563,13 +2564,19 @@ profiles:
   `skill`, which OpenCode offers in every mode. The sandbox covers both (its git directory is read-only, and no skill
   is found under L4's isolation).
 - **The agent's shell may not run the OpenCode CLI.** `opencode*`, `opencode2*` and `*bin/opencode*` are denied next to
-  the git denies. This is a guard: `sh -c`, `env`, `npx` or a copy of the binary get past it. The sandbox is the
+  the git denies. This is a guard, not a boundary: `sh -c`, `env`, `npx`, a variable, a copy of the binary, quoting
+  (`"opencode2" api`), a leading assignment (`FOO=1 opencode2`), the prefixes `command`, `exec`, `timeout` and `nohup`, and
+  a backslash (`\opencode2`) all get past it. The patterns are a guard, and the sandbox is the
   boundary, and the service that a stray `opencode2 api` would start dies with the step.
 - **A profile that needs no stored login has a private data home.** The run and its export use
   `<step dir>/opencode2-data`, the hello uses a directory of its own, and the sandbox binds neither
-  `~/.local/share/opencode` nor `~/.config/opencode` (`~/.cache/opencode` stays bound). `uv` still finds its managed
+  `~/.local/share/opencode` nor `~/.config/opencode`, and no other OpenCode login path outside the cache home. What is
+  private is the data home (with the session database) and the config home. What is not: the cache home
+  (`~/.cache/opencode`) holds OpenCode's models cache, plugin store and downloaded binaries; it stays shared read-write
+  for v1 and v2 alike; a per-unit cache is a follow-up. `uv` still finds its managed
   Pythons and tools, because L4 sets `UV_PYTHON_INSTALL_DIR` and `UV_TOOL_DIR` for the step. A tool other than `uv`
-  that keeps its data under `XDG_DATA_HOME` sees an empty data home in such a step.
+  that keeps its data under `XDG_DATA_HOME` sees an empty data home in such a step: a version manager (mise, fnm, pipx)
+  bound through `sandbox.tool_paths` is one, and with `sandbox: none` every such tool in the agent's tree is.
 - **A v2 profile does not serve the delegate.** Its read-only mode is not recorded on v2.
 
 **Refused at load.** Each message names the option and never repeats your value.
@@ -2626,8 +2633,8 @@ a unit test pin by name, and a later run replaces it only where it records the r
 
 These limits make operation more difficult. Know them before you start.
 
-- No full L4 unit has run on OpenCode 2 yet: the adapter was checked live through its probe and run only
-  ([10.9](#109-opencode-v2)). Watch the `verification.md` of the first unit on a `cli_major: 2` profile.
+- One full L4 unit has run on OpenCode 2, in a container ([10.9](#109-opencode-v2)), and the adapter was checked live
+  through its probe and run. Watch the `verification.md` of the first unit on a `cli_major: 2` profile in your repository.
 - Only the run that stopped a unit has the cause in its log. Later CI runs do not mention it. Read the `REASON` column
   of `l4 status`, or `l4 status --unit <unit>`.
 - A unit that stopped before harness 0.3.0 has no recorded `detail`. Its `REASON` shows the old text, its

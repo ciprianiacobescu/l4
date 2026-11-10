@@ -62,8 +62,8 @@ class SandboxSpec:
     # the delegate reads the repository and writes nothing (L4-DLG-004): the worktree is bound read-only, the private
     # directory (the result file) stays writable
     worktree_read_only: bool = field(default=False, kw_only=True)
-    # the profile needs no login stored in its adapter's own data and config homes (`OWN_HOMES`, L4-OCV-018): they are
-    # hidden like another adapter's login instead of bound
+    # the profile needs no login stored in its adapter's own homes: every own login path but the cache home
+    # (`OWN_KEPT_HOMES`, L4-OCV-018) is hidden like another adapter's login instead of bound
     hide_own_homes: bool = field(default=False, kw_only=True)
     record_dir: Path | None = None  # writable, apart from TMPDIR: holds the gate's outcome record (a random file name)
 
@@ -203,26 +203,23 @@ def readonly_with_scratch(
 NO_LOGIN_BIND = frozenset({"copilot-cli"})
 
 
-# The data and config homes of an adapter whose process keeps a private copy of both when the profile needs no stored
-# login (`hide_own_homes`): OpenCode 2 keeps `opencode.db` with every session of every step in the first, and the
-# second is where a planted plugin waits for its next process. Its cache home stays bound (L4-OCV-018).
-OWN_HOMES: Mapping[str, tuple[str, ...]] = {"opencode": ("~/.local/share/opencode", "~/.config/opencode")}
-
-
-def _related(path: Path, home: Path) -> bool:
-    """Whether `path` is, contains or lies inside `home`."""
-    return path == home or home in path.parents or path in home.parents
+# The only own login paths of an adapter that stay bound when the profile needs no stored login (`hide_own_homes`): at
+# or below OpenCode's cache home, which holds its models cache, plugin store and downloaded binaries and which its
+# process still uses through `XDG_CACHE_HOME`. It stays shared read-write, for v1 and v2 alike: a residual, a per-unit
+# cache is a follow-up (L4-OCV-018). Every other own login path is hidden, the data home (`opencode.db` with every
+# session of every step) and the config home (where a planted plugin waits for its next process) among them.
+OWN_KEPT_HOMES: Mapping[str, tuple[str, ...]] = {"opencode": ("~/.cache/opencode",)}
 
 
 def own_login_binds(spec: SandboxSpec) -> tuple[Path, ...]:
     """The spec's own credential paths, configured or built in, that the agent sandbox binds read-write. With
-    `hide_own_homes`, each path that is, contains or lies inside one of the adapter's `OWN_HOMES` (expanded against
-    `spec.home`) is dropped, which fails closed for an odd configured path."""
+    `hide_own_homes` and an adapter that has `OWN_KEPT_HOMES`, only a path at or below one of them (expanded against
+    `spec.home`) is kept: every other one is dropped, which fails closed for an odd configured path."""
     own = spec.credential_paths.get(spec.adapter or "", ())
-    if not spec.hide_own_homes:
+    if not spec.hide_own_homes or spec.adapter not in OWN_KEPT_HOMES:
         return own
-    homes = expand_credential_paths({"own": list(OWN_HOMES.get(spec.adapter or "", ()))}, spec.home)["own"]
-    return tuple(path for path in own if not any(_related(path, home) for home in homes))
+    kept = expand_credential_paths({"own": list(OWN_KEPT_HOMES[spec.adapter])}, spec.home)["own"]
+    return tuple(path for path in own if any(path == home or home in path.parents for home in kept))
 
 
 def hidden_credential_paths(spec: SandboxSpec) -> list[Path]:

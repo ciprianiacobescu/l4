@@ -72,6 +72,9 @@ today's order (last match wins):
 - The tail rules (`external_directory`, `webfetch`, `websearch`, `question`, `skill`, `subagent`) repeat what `*`
   already says. They stay, so the array reads as it did and does not depend on how a later version matches `*`.
 - The `options.tools` path keeps its `*:* deny`, including on a free model. That is unchanged, and out of scope.
+- L4 never passes `--auto`, `--yolo` or `--dangerously-skip-permissions` to any `opencode2` call (run, export, auth list,
+  hello). The free model's `ask` refusals rely on it: a flag that auto-answers every prompt would turn each refusal into
+  an allow. A unit test pins it for every argv the adapter builds.
 - Evidence (F1 of the check) [V box]: the implementer was ok on the paid and the free model, and the free judge was ok.
   The paid implementer's tool list was `edit, glob, grep, read, shell, skill, write, opencode_worktree_remove`.
   `execute`, `models`, `session_*`, `worktree_create`, `worktree_list` and `experimental_image_generate` were gone.
@@ -109,7 +112,7 @@ on 2.0.32: `git add hello.txt && git commit -m add-hello` was refused by `git co
   a denial, and the rest of the step went on to an `ok` result [V box, `live-cli-denied`]. The path form was not
   exercised live [I].
 - It is a guard, not a boundary. `sh -c '…'`, `env opencode2`, `npx`, a variable or a copy of the binary elsewhere are not
-  refused [I]. The sandbox is the boundary: the service dies with the step, and with D4 it sees only the step's own data
+  refused, nor is quoting (`"opencode2" api`), a leading assignment (`FOO=1 opencode2`), the prefixes `command`, `exec`, `timeout` and `nohup`, and a backslash (`\opencode2`) [I: the patterns match the text of each command part, and none of these starts with a denied word]. The patterns are a guard and the sandbox is the boundary. The sandbox is the boundary: the service dies with the step, and with D4 it sees only the step's own data
   home.
 - **v1 does not get these denies.** First, v1 runs in-process and starts no shared daemon (plan row 8), so no ordinary
   subcommand leaves a process behind. `opencode serve` has to be asked for, and inside the sandbox it dies with the
@@ -130,8 +133,8 @@ several projects accumulates them all. E6 (v2 migrates the runner user's `openco
   `opencode-go/`) or whose model is an `opencode/` model. L4 already treats an `opencode/` model as needing no login:
   its auth step is skipped with `login: not needed`.
 - Edge: a paid `opencode/` model reached through a login stored by `opencode2 auth login` under `auth: subscription`
-  would get the private home, and its hello would fail as `auth`. The runbook says to use `auth: api_key` with
-  `OPENCODE_API_KEY` for it.
+  would get the private home, and its hello would fail as `auth`. The reason then ends `; a stored opencode2 login is not used for opencode/ models; set auth: api_key and OPENCODE_API_KEY`, and
+  the runbook says the same.
 - **Run and export.** `XDG_DATA_HOME = <step dir>/opencode2-data`. It is made empty and 0700 by `_fresh_dir` before the
   run (a planted entry is unlinked, never followed) and is not touched before the export, because the session lives in
   that database and the export must read it. Both calls get the same value.
@@ -148,8 +151,9 @@ several projects accumulates them all. E6 (v2 migrates the runner user's `openco
   home>/uv/tools`), and uv finds them through `XDG_DATA_HOME` [D]. With the redirect, uv in the agent's shell would look
   in the private directory. So the run and the export of such a profile get `UV_PYTHON_INSTALL_DIR` and `UV_TOOL_DIR`
   set to exactly the directories the sandbox binds, from one helper that `home.py` and the adapter share.
-  - Residual [I]: another tool that keeps its data under `XDG_DATA_HOME`, such as a version manager, finds an empty data
-    home in such a step. The runbook names it.
+  - Residual [I]: another tool that keeps its data under `XDG_DATA_HOME`, such as a version manager (mise, fnm, pipx)
+    bound through `sandbox.tool_paths`, or any such tool with `sandbox: none`, finds an empty data home in such a step.
+    The SPEC (L4-OCV-017) and the runbook name it next to the `uv` note.
 - **A profile with a stored login keeps today's data home.** That covers a subscription or OAuth login on `opencode-go/`,
   `openrouter/` and the others: v2 keeps that login in `opencode.db` there.
 - **Evidence** (F3 of the check) [V box]: the implementer (paid and free), the judge and the export were ok with the
@@ -160,17 +164,17 @@ several projects accumulates them all. E6 (v2 migrates the runner user's `openco
   export, a hello or an auth step. They still apply to a v2 profile with a stored login.
 
 **D5. Such a profile's sandbox does not bind the real data and config homes** (L4-OCV-018; one clause of L4-SEC-005).
-Decision: yes, for the profiles of D4 only, and for the data and config homes only.
+Decision: yes, for the profiles of D4 only; the data home, the config home and any other own login path are hidden, and only the cache home stays bound.
 - The process uses its private data home (D4) and its private config home (`XDG_CONFIG_HOME`, since 0.4.28,
   L4-OCV-004). Binding the real ones read-write gives the agent's shell nothing it needs. It does give the shell the
   sessions of other runs (G3), a v1 login's `auth.json` in the same directory, and a writable config home where a
   planted plugin or `opencode.json` waits for the next OpenCode process that reads it (E9).
 - `~/.cache/opencode` stays bound. `XDG_CACHE_HOME` is not redirected and the process uses it: it created
-  `opencode/bin` there [V mac]. Hiding it was not tried.
-- **Mechanism.** `SandboxSpec.hide_own_homes: bool` is keyword-only and defaults to False. `l4.sandbox.base.OWN_HOMES`
-  is `{"opencode": ("~/.local/share/opencode", "~/.config/opencode")}`. `own_login_binds(spec)` returns the spec's own
-  credential paths, configured or built in. When `hide_own_homes` is set, it drops each path that is, contains or lies
-  inside one of the adapter's `OWN_HOMES` (expanded against `spec.home`), which fails closed for an odd configured path.
+  `opencode/bin` there [V mac]. Hiding it was not tried. **Residual, stated:** the cache home (`~/.cache/opencode`) holds OpenCode's models cache, plugin store and downloaded binaries; it stays shared read-write for v1 and v2 alike; a per-unit cache is a follow-up. The cache home holds OpenCode's models cache, plugin store and downloaded binaries, so a step can write into what the next step loads from it; v1 has the same exposure today.
+- **Mechanism.** `SandboxSpec.hide_own_homes: bool` is keyword-only and defaults to False. `l4.sandbox.base.OWN_KEPT_HOMES`
+  is `{"opencode": ("~/.cache/opencode",)}`. `own_login_binds(spec)` returns the spec's own
+  credential paths, configured or built in. When `hide_own_homes` is set, it keeps only a path at or below one of the adapter's `OWN_KEPT_HOMES` (the cache home,
+  expanded against `spec.home`) and drops every other one, which fails closed for an odd configured path.
   `hidden_credential_paths(spec)` adds the dropped paths, so they are covered by a tmpfs or `/dev/null` like any other
   hidden login. `BwrapSandbox.build_argv` binds `own_login_binds(spec)`.
 - **Where the flag is set.** `Workbench.agent_spec` and the readiness review's spec (`yolo/readiness.py`, the other
@@ -219,10 +223,9 @@ no runner that serves a consumer, so E6 held.
 - B9.1 is satisfied without code: every recording matched its fallback (D9). The pin tests are re-pointed at the live
   fixtures and the [U] becomes [V].
 - B9.2: done by D6 with rows still open, by the owner's decision. The open rows are listed as known fallbacks.
-- **Not covered, and not claimed:** row 68's "a unit on the owner's dummy repository runs end to end with a v2
+- **Not covered by the check itself:** row 68's "a unit on the owner's dummy repository runs end to end with a v2
   implementer and a v2 free judge". The check drove `OpenCodeV2Adapter.probe` and `run` directly, which is the
-  adapter's whole contract with the harness. Everything above it (orchestrator, ladder, verifier) is adapter-agnostic
-  and covered with the other adapters, but no full L4 unit has run on v2.
+  adapter's whole contract with the harness. Afterwards a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. That is one small fixture change, not a consumer repository.
 
 The U5 census on 2.2.6 counts 24 runs: 12 on mac and 12 in the box, from 1 to 23 steps. Twenty-two ended with a final
 `step_finish` of reason `stop`. One ended on an `error` event with no step (a free model with no route). One lost its
@@ -290,9 +293,10 @@ A new [V] shape (`live-error-no-route`): an `error` event `{type: "provider.no-r
   finds its data through `XDG_DATA_HOME` and is not uv sees an empty data home [I]. Every step also starts a fresh
   `opencode.db`. Its creation cost was not measured on its own [U]. Sessions with the private home took 1.3 to 7.9 s,
   in the same range as those without it (1.3 to 54.9 s) [V box, export `info.time`].
+- **The cache home stays shared read-write** (D5): the cache home (`~/.cache/opencode`) holds OpenCode's models cache, plugin store and downloaded binaries; it stays shared read-write for v1 and v2 alike; a per-unit cache is a follow-up.
 - **`worktree_remove` and `skill` stay offered** (D2). Both are covered by the sandbox and the isolation, and stated in
   the SPEC and the runbook.
-- **No full L4 unit has run on v2** (D7). The first consumer unit on a v2 profile is the first end-to-end evidence. The
+- **One full L4 unit has run on v2, in a container** (D7): a full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on this change (one run, about 120 s), with the real data home's database untouched. The first consumer unit on a v2 profile is the first evidence on a real repository. The
   runbook says to watch its first `verification.md`.
 - **v2 moves fast** (2.0.32 to 2.2.6 in three weeks). The pin is exact, and a move is a re-check of D1's surface list
   plus a recording.

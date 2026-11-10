@@ -62,3 +62,45 @@ def test_the_runbook_pins_2_2_6_and_keeps_the_stored_login_rule_for_a_stored_log
     assert "This rule applies\n  to a stored login only." in section
     assert "`worktree_remove`" in section and "`skill`" in section and "`*bin/opencode*`" in section
     assert "`provider.no-route`" in section or "(provider.no-route)" in section
+
+
+CACHE_RESIDUAL = "stays shared read-write for v1 and v2 alike"
+BYPASSES = ('`"opencode2" api`', "`FOO=1 opencode2`", "`command`", "`exec`", "`timeout`", "`nohup`", "backslash")
+
+
+def test_the_cache_home_is_named_as_a_residual_where_the_private_homes_are_claimed() -> None:
+    spec = read("docs", "SPEC.md")
+    parts = {
+        "L4-OCV-018": spec.split("**L4-OCV-018 ", 1)[1].split("**L4-OCV-019 ", 1)[0],
+        "L4-SEC-005": spec.split("**L4-SEC-005 ", 1)[1].split("**L4-SEC-006 ", 1)[0],
+        "runbook 10.9": sections()["runbook 10.9"].replace("\n ", " ").replace("\n", " "),
+        "design": read("openspec", "changes", "opencode-v2-current", "design.md").replace("\n  ", " "),
+    }
+    for name, text in parts.items():
+        flat = " ".join(text.split())
+        assert "a per-unit cache is a follow-up" in flat and CACHE_RESIDUAL in flat, name
+    assert "no longer shares its data with other runs" not in read("CHANGELOG.md")
+
+
+def test_the_stale_no_full_unit_sentence_is_gone_and_the_run_is_stated() -> None:
+    for parts in (("CHANGELOG.md",), ("docs", "SPEC.md"), ("docs", "runbook.md"),
+                  ("openspec", "changes", "opencode-v2-current", "design.md")):  # fmt: skip
+        text = " ".join(read(*parts).split())
+        assert "no full l4 unit has run" not in text.lower(), parts
+        assert "no full L4 unit on v2" not in text, parts
+    for text in (sections()["runbook 10.9"], read("CHANGELOG.md")):
+        flat = " ".join(text.split())
+        assert "`opencode/glm-5.3-flash-free`" in flat and "from intake to PASS and in_review" in flat
+
+
+def test_the_cli_deny_docs_list_the_known_bypasses_and_call_the_sandbox_the_boundary() -> None:
+    spec = read("docs", "SPEC.md")
+    texts = {
+        "L4-OCV-016": spec.split("**L4-OCV-016 ", 1)[1].split("**L4-OCV-017 ", 1)[0],
+        "runbook 10.9": sections()["runbook 10.9"],
+        "design": read("openspec", "changes", "opencode-v2-current", "design.md"),
+    }
+    for name, text in texts.items():
+        flat = " ".join(text.split())
+        assert all(word in flat for word in BYPASSES), name
+        assert "a guard" in flat and "boundary" in flat, name
