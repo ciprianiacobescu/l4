@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Fixed
+- A clause of a scenario that a red or green step leaves unasserted, or a value it would choose that the spec does not settle, is now asked before the task goes on instead of staying in the notes. In a consumer run a red step wrote in its notes that it did not assert a field because the spec text was ambiguous there; the green step chose a value, the judge passed the unit, and the next unit met another capability's spec that sets the field to null, which cost a verdict question and a spec fix. Now the result object has the optional list `unasserted` (at most 3 entries of the criterion id, the clause quoted and why). A step that lists a clause is not kept, whatever its status: each clause becomes a question of kind `ambiguous` that holds the task, so the unit waits for the answer (a person's, or the delegate's where the unit is in its scope) and cannot reach verification, and the step runs again with the answer in its prompt. A task asks about a criterion once: a later step that lists it again goes on, and the judge gets those clauses in a list of its own, to check against the code, apart from the implementer's notes. The words of the notes are not read. Templates `red@14` and `green@7`; the judge's system text is unchanged (L4-IMP-095, L4-IMP-005, L4-IMP-020).
+
 ## 0.4.55 (2026-11-08)
 
 ### Fixed
