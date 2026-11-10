@@ -11,7 +11,7 @@ from l4.versions import major_of, parse_version
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "cli_major" / "opencode"
 REASON_V2 = (
     "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
+    "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2"
 )
 
 
@@ -50,7 +50,7 @@ REASON_V2_PROFILE = (
 
 def test_the_v1_reason_ends_with_the_way_to_opt_in_to_v2():  # amendment E2, SCN-OCG-02
     reason = catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34")
-    assert reason is not None and reason.endswith("or set options.cli_major: 2 to run OpenCode 2 (experimental)")
+    assert reason is not None and reason.endswith("or set options.cli_major: 2 to run OpenCode 2")
     assert "support comes in a later" not in reason
 
 

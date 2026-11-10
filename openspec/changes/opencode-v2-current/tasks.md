@@ -212,7 +212,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 7. Supported, not experimental (L4-OCV-019, L4-OCV-001, L4-OCG-002; SCN-OCV-26; design D6)
 
-- [ ] 7.1 Tests first:
+- [x] 7.1 Tests first:
   - `tests/unit/agents/test_factory_opencode_major.py`: the SCN-OCV-26 test becomes "a v2 profile selected twice
     records no `agent.experimental`". The v1 test beside it stays.
   - `tests/unit/agents/test_opencode_v2_command.py`: `test_the_adapter_is_the_experimental_opencode` becomes
@@ -221,13 +221,13 @@ Every group is one implementer step, run in order in one worktree. Each step fol
     `tests/unit/provision/test_catalog.py`, `tests/unit/availability/test_probes_opencode.py`,
     `tests/unit/doctor/test_checks_env_004.py`): the reason ends `or set options.cli_major: 2 to run OpenCode 2`.
     Use `git grep -n "OpenCode 2 (experimental)" -- tests src` to find every place.
-- [ ] 7.2 Code: remove `experimental` from `OpenCodeV2Adapter` and the word from its docstring.
+- [x] 7.2 Code: remove `experimental` from `OpenCodeV2Adapter` and the word from its docstring.
   `catalog.MAJOR_WORDS["opencode"]` loses ` (experimental)`. Run the 7.1 files, `tests/unit/agents tests/unit/doctor
   tests/unit/yolo/test_yolo_preflight_script.py` and the ruff checks. Commit.
 
 ## 8. The live fixtures in the parser tests (L4-OCV-006 to -009, -013, -016, -019; SCN-OCV-32, -35, -36, -44 to -47; design D9)
 
-- [ ] 8.1 Tests, new `tests/unit/agents/test_opencode_v2_live.py`, from `tests/fixtures/recorded/opencode/2.2.6/`. A
+- [x] 8.1 Tests, new `tests/unit/agents/test_opencode_v2_live.py`, from `tests/fixtures/recorded/opencode/2.2.6/`. A
   judge parse uses the judge schema of `tests/unit/agents/test_opencode_v2_parse.py`. An implementer parse uses
   `FILE_RESULT_SCHEMA` and a result text `{"status": "done", "summary": "…"}`. The exact values below were obtained by
   running the 0.4.55 parser on the raw files:
@@ -250,7 +250,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
     `opencode2 reported an error (provider.no-route), retryable`, with `transient` True and `limit` None.
   - A census test: in all eight streams, a final `step_finish` with reason `stop` is missing only in
     `live-cli-disturbed` and `live-error-no-route`.
-- [ ] 8.2 Re-point the fallback pin tests named in design D9 (U2, U5, U7, U11): each docstring names its `live-` fixture
+- [x] 8.2 Re-point the fallback pin tests named in design D9 (U2, U5, U7, U11): each docstring names its `live-` fixture
   and says the row is [V] on 2.2.6. Rows U1, U3, U4, U6 and U10 keep their pin tests unchanged. Run
   `tests/unit/agents/test_opencode_v2_live.py tests/unit/agents/test_opencode_v2_parse.py` and the ruff checks. Commit.
 

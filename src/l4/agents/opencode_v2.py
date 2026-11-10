@@ -1,13 +1,15 @@
-"""OpenCode v2 adapter (`@opencode/cli` 2.2.6, binary `opencode2`; experimental, L4-OCV-001 to -014, design
-`openspec/changes/opencode-v2`), selected by `options.cli_major: 2`. This module is the command layer:
+"""OpenCode v2 adapter (`@opencode/cli` 2.2.6, binary `opencode2`; L4-OCV-001 to -019, design
+`openspec/changes/opencode-v2` and `opencode-v2-current`), selected by `options.cli_major: 2`. This module is the
+command layer:
 
     opencode2 run --standalone --format json -m <provider/model> --title "l4 <role> <stem>"   # stdin: prompt, EOF
 
 Every v2 call is standalone (without it a per-user daemon serves a later client the first client's environment
 [V, row 8]) and has an empty `XDG_STATE_HOME` of its own, so a missed flag still cannot find a shared `service.json`.
-`XDG_DATA_HOME` is never redirected: the credentials and `opencode.db` live there. v2 has no `--pure` and no `--dir`;
-the cwd is the worktree (implement) or the empty judge directory (judge). The configuration is the native v2 shape,
-not v1's, which v2 only normalises in memory (design D5). The parser is below (B5); the run and the probe are B6.
+`XDG_DATA_HOME` is redirected only for a profile that needs no stored login (L4-OCV-017): otherwise the credentials
+and `opencode.db` live there. v2 has no `--pure` and no `--dir`; the cwd is the worktree (implement) or the empty judge
+directory (judge). The configuration is the native v2 shape, not v1's, which v2 only normalises in memory (design D5).
+The parser is below (B5); the run and the probe are B6.
 
 The run is followed by `opencode2 session export --standalone <session id>` (stdin closed, 60 s, the same wrap), whose
 `info.outcome` and token counts `parse` reads (design D7, D8). Every v2 call sees EOF on stdin: OpenCode 2 waits without
@@ -164,9 +166,9 @@ def _permissions(
         return [_rule("*", "deny")]
     rules: list[dict[str, str]] = []
     if options is not None and options.tools:
-        # Fallback `tools_by_permission` (U2): whether a v2 deny drops the tool's schema from the request is not
-        # recorded, so the intent of `options.tools` is a deny-all and the listed tools' allows. v2's own normalisation
-        # of the v1 form would allow `shell` again after them [V, recorded], which is why the array is native.
+        # Fallback `tools_by_permission` (U2, a v2 deny drops the tool from the request [V, 2.2.6]): the intent of
+        # `options.tools` is a deny-all and the listed tools' allows. v2's own normalisation of the v1 form would allow
+        # `shell` again after them [V, recorded], which is why the array is native.
         if "list" in options.tools:
             raise AdapterError("options.tools: list has no OpenCode v2 permission action (glob and read cover it)")
         actions = list(dict.fromkeys(TOOL_ACTIONS[tool] for tool in options.tools))
@@ -301,9 +303,9 @@ def _number(value: object) -> int | float:
 def usage_from_export(export: Mapping[str, Any] | None) -> Usage | None:
     """Usage from `session export` (L4-OCV-008): per assistant message `tokens.input`, `tokens.output` and
     `tokens.cache.read` are summed, the cost is `info.cost` else the messages' sum, and the context peak is the
-    largest `input + cache.read + cache.write` of one message. Fallback `sum_messages` (U11): whether a multi-step run
-    exports one message per step is not recorded; the recorded single message equals `info.tokens`, which this sum
-    also gives. None when the export holds no assistant message (the stream's `step_finish` sums stand in)."""
+    largest `input + cache.read + cache.write` of one message. Fallback `sum_messages` (U11): a multi-step export holds
+    one message per finished step, and their sum equals `info.tokens` [V, 2.2.6]. None when the export holds no
+    assistant message (the stream's `step_finish` sums stand in)."""
     if not isinstance(export, Mapping):
         return None
     messages = [m for m in export.get("messages") or () if isinstance(m, Mapping) and m.get("type") == "assistant"]
@@ -371,7 +373,6 @@ def _classify_v2(result: RunResult, event: dict[str, Any], model: str | None, no
 class OpenCodeV2Adapter:
     name = "opencode"  # both majors are the `opencode` adapter; the factory tells them apart by `cli_major`
     model_unverified: ClassVar[bool] = True  # SPEC 8.1: run mode does not report the served model
-    experimental: ClassVar[bool] = True  # announced once per profile until B9 removes it (L4-OCV-013)
 
     def __init__(self, runner: ProcRunner | None = None) -> None:
         self._proc = runner or ProcRunner()
@@ -515,7 +516,7 @@ class OpenCodeV2Adapter:
         elif exit_code != 0:  # 3
             result.detail = _unsupported_version(stderr_tail) or f"opencode2 exited with code {exit_code}"
         elif stream.step_starts >= step_bound:
-            # 4: fallback `not_ok_named` (U7): a bounded run's export outcome is not recorded, so a run that reached
+            # 4: fallback `not_ok_named` (U7): a bounded run's export says `succeeded` [V, 2.2.6], so a run that reached
             # `agents.build.steps` is never ok, whatever the export says
             if stream.denials:
                 result.status = "permission_blocked"
@@ -526,13 +527,13 @@ class OpenCodeV2Adapter:
         elif has_outcome:  # 5
             if outcome == "succeeded":
                 self._attach_result(result, judge, result_text, schema)
-            else:  # fallback `not_ok_named` (U7): only `succeeded` has been seen; any other outcome is named, not ok
+            else:  # fallback `not_ok_named` (U7): `succeeded` and `failed` have been seen; any other is named, not ok
                 shown = outcome if isinstance(outcome, str) else json.dumps(outcome, default=str)[:80]
                 result.detail = f"opencode2 session outcome {shown}"
                 result.length_stop = stream.last_reason == "length"  # the reply hit the output limit (L4-VER-071)
         elif stream.last_reason == "stop":  # 6
-            # fallback `export_decides` (U5): how often the final `step_finish` is missing on long runs is not recorded
-            # (3 of 16 recorded runs emit it), so it counts only when the export cannot decide: the v1 rule
+            # fallback `export_decides` (U5): the final `step_finish` is often missing on 2.0.32 (3 of 16 runs emit it)
+            # and was once in 23 runs on 2.2.6 [V], so it counts only when the export cannot decide: the v1 rule
             self._attach_result(result, judge, result_text, schema)
         elif stream.denials:
             result.status = "permission_blocked"

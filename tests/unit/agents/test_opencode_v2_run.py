@@ -168,7 +168,8 @@ def test_an_unusable_export_names_why(tmp_path, export, outcome, why):
 
 
 def test_an_unusable_export_with_a_final_stop_falls_back_to_the_v1_rule_export_decides(tmp_path):
-    """export_decides (U5): the export cannot decide, so the last step_finish `stop` does, as in v1."""
+    """export_decides (U5, [V] on 2.2.6, `live-cli-disturbed` in test_opencode_v2_live.py): the export cannot decide,
+    so the last step_finish `stop` does, as in v1."""
     proc = V2Proc(recorded("hello-ok-step-finish.jsonl"), "", export_outcome=ProcOutcome(1))
     assert OpenCodeV2Adapter(proc).run(request(tmp_path)).status == "ok"
 

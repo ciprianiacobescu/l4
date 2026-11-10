@@ -158,8 +158,7 @@ MAJOR_WORDS: dict[str, MajorWords] = {
         "OpenCode v{major}",
         "opencode-ai {supported}.x",
         "{binary} {version} is OpenCode v{major}; this profile runs v{supported} (opencode-ai {supported}.x): install "
-        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 "
-        "(experimental)",
+        "opencode-ai@{pin} (l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2",
     ),
     "opencode2": MajorWords(
         "OpenCode",

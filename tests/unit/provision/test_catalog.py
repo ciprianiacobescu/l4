@@ -170,7 +170,7 @@ def test_kiro_major_problem_names_the_cause_and_the_pin():  # SCN-OCG-11
 def test_the_opencode_texts_are_unchanged():  # L4-OCG-002
     assert catalog.major_problem("opencode", "opencode", "opencode v2.0.32", "1.18.34") == (
         "opencode 2.0.32 is OpenCode v2; this profile runs v1 (opencode-ai 1.x): install opencode-ai@1.18.34 "
-        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2 (experimental)"
+        "(l4 doctor --fix installs it user-locally) or set options.cli_major: 2 to run OpenCode 2"
     )
     words = catalog.MAJOR_WORDS["opencode"]
     assert words.product == "OpenCode"

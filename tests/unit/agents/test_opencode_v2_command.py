@@ -157,9 +157,9 @@ def test_a_profile_without_a_model_cannot_build_a_command(tmp_path):
         OpenCodeV2Adapter().build_command(req, exe=EXE, workdir=req.cwd)
 
 
-def test_the_adapter_is_the_experimental_opencode():
+def test_the_adapter_is_the_supported_opencode():  # L4-OCV-019
     adapter = OpenCodeV2Adapter()
-    assert adapter.name == "opencode" and adapter.experimental is True
+    assert adapter.name == "opencode" and getattr(OpenCodeV2Adapter, "experimental", False) is False
 
 
 # -- SCN-OCV-09: the native rules equal the recorded normalisation ---------------------------------
@@ -273,8 +273,9 @@ def test_the_recorded_normalisation_of_options_tools_allows_shell_again():
 
 
 def test_tools_by_permission_only_the_listed_tools_are_allowed():
-    """Fallback `tools_by_permission` (U2): `options.tools` is a deny-all and the listed tools' allows, because
-    whether a v2 deny drops the tool's schema from the request is not recorded."""
+    """Fallback `tools_by_permission` (U2, [V] on 2.2.6, `live-tools-permission` in test_opencode_v2_live.py):
+    `options.tools` is a deny-all and the listed tools' allows. A v2 deny drops the tool from the request: the
+    recorded run had no `shell` tool."""
     rules = config_of(IMPLEMENT, tools=["read", "edit"])["permissions"]
     assert rules[:3] == [rule("*", "deny"), rule("read", "allow"), rule("edit", "allow")]
     assert not [r for r in rules if r["action"] == "shell"]  # no shell rule at all: no allow, no git deny
