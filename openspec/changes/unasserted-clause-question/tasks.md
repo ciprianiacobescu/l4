@@ -1,6 +1,6 @@
 ## 1. The field and its schema (D1)
 
-- [ ] 1.1 Write the tests first. `tests/unit/implementer/test_result.py`: a result with `unasserted: [{criterion:
+- [x] 1.1 Write the tests first. `tests/unit/implementer/test_result.py`: a result with `unasserted: [{criterion:
   "C-1a2b3c4d", clause: "its action is recorded", why: "the spec does not say"}]` parses into
   `result.unasserted[0].criterion == "C-1a2b3c4d"`; a minimal result has `unasserted == []`; `"unasserted": None` reads
   as absent; schema violations name the path for four items (`unasserted`), a missing `why` (`unasserted[0]`), a
@@ -12,7 +12,7 @@
   ["criterion", "clause", "why"]}, "description": ...}`; do NOT edit the recorded files under
   `tests/fixtures/recorded/codex/0.160.0/` (they are what that version was given and replied); the round-trip test
   stays as it is.
-- [ ] 1.2 Then add the property of design D1 (after `questions`, with its `description`) to
+- [x] 1.2 Then add the property of design D1 (after `questions`, with its `description`) to
   `src/l4/implementer/implementer-result.schema.json` and to `tests/fixtures/schemas/implementer-result.schema.json`
   (they must stay equal: `test_the_packaged_schema_is_the_canonical_copy`), and `Unasserted(_Open)` with
   `ImplementerResult.unasserted: list[Unasserted] = Field(default_factory=list)` to `src/l4/implementer/result.py`.
@@ -21,7 +21,7 @@
 
 ## 2. The normalization rule (D1)
 
-- [ ] 2.1 Write the tests first in `tests/unit/implementer/test_normalize.py` (SCN-IMP-514): an `unasserted` that is a
+- [x] 2.1 Write the tests first in `tests/unit/implementer/test_normalize.py` (SCN-IMP-514): an `unasserted` that is a
   string is dropped (`{field: "unasserted", fix: "dropped"}`); items without `why`, with `criterion: "C-XYZ"`, with a
   non-string `clause`, or that are not objects are dropped with one `count`; four well-formed items keep three
   (`{field: "unasserted", fix: "cut", count: 1}`); a clause of 400 and a why of 350 characters keep their start and end
@@ -33,7 +33,7 @@
 
 ## 3. New and settled entries, and the question of each (D2, D3)
 
-- [ ] 3.1 Write the tests first (`tests/unit/implementer/test_unasserted_clauses.py`, new), with `make_bench` and the
+- [x] 3.1 Write the tests first (`tests/unit/implementer/test_unasserted_clauses.py`, new), with `make_bench` and the
   `result(...)` helper of `tests/unit/implementer/conftest.py`: `clauses.split_clauses(wb, task, entries)` gives `new`
   for an entry with no earlier question; `settled` with the question id when a `question.raised{task: "1.1", clause:
   {criterion, phase: "red"}}` is in the ledger and `questions.md` has that question `answered` (also `accepted`,
@@ -43,7 +43,7 @@
   of C-1a2b3c4d unasserted: its action is recorded`, the context of design D3 (the quote, `Its reason: …`, `The step was
   not kept.`), `criteria` with the criterion when it is the unit's, and the sentence `C-99999999 is not one of this
   unit's criteria.` and no criterion when it is not.
-- [ ] 3.2 Then add `src/l4/implementer/clauses.py` (new): `Split(new: tuple[Unasserted, ...], settled:
+- [x] 3.2 Then add `src/l4/implementer/clauses.py` (new): `Split(new: tuple[Unasserted, ...], settled:
   tuple[tuple[Unasserted, str], ...])`, `split_clauses(wb, task, entries) -> Split` (reads `_answer_events(wb)` and
   `QuestionsFile.load(wb.ref.path / QUESTIONS_FILENAME)`; the key is task, `fix_unit` and criterion, never the clause's
   text), `ClauseAsk(question: ResultQuestion, criterion: str, known: Criterion | None)` and `clause_question(...) ->
@@ -52,7 +52,7 @@
 
 ## 4. A step with a new entry is a blocked step (D3, D4)
 
-- [ ] 4.1 Write the tests first, in `tests/unit/implementer/test_unasserted_clauses.py`, through `run_task` with
+- [x] 4.1 Write the tests first, in `tests/unit/implementer/test_unasserted_clauses.py`, through `run_task` with
   `make_bench` (as `test_blocked_result_writes_question_and_stops` in `tests/unit/implementer/test_loop.py` does):
   SCN-IMP-510 (a red step that writes a failing test and reports `done` with one entry: `outcome.status == "blocked"`,
   no `test(` commit, only the questions commit, `[ ] 1.1` still in `tasks.md`, no `task.attempt_failed`, the question's
@@ -69,7 +69,7 @@
   step of a fix unit's chore with a new entry: the question is in the fix unit's `questions.md` and its
   `question.raised` has `fix_unit`); a three-entry step raises three questions in order; a step with one settled and
   one new entry is blocked and asks only the new one.
-- [ ] 4.2 Then change `src/l4/implementer/tdd.py`: `StepOutcome`, `RedOutcome` and `GreenOutcome` gain `clauses:
+- [x] 4.2 Then change `src/l4/implementer/tdd.py`: `StepOutcome`, `RedOutcome` and `GreenOutcome` gain `clauses:
   tuple[ClauseAsk, ...] = ()`; in `agent_step`, after `parse_result`, `split = split_clauses(wb, task,
   result.unasserted)`, and `if result.status == "blocked" or split.new:` return `StepOutcome("blocked", result,
   dropped_questions=..., clauses=tuple(clause_question(task, role, e, criteria) for e in split.new))`; `_red_exit` and
@@ -81,7 +81,7 @@
   `_suggest_edits` is unchanged (a clause question is not technical). Run the new file, `tests/unit/implementer/test_loop.py`,
   `tests/unit/implementer/test_tdd_red.py`, `tests/unit/implementer/test_tdd_green.py`,
   `tests/unit/implementer/test_single_phase.py` and `tests/unit/implementer/test_question_asker.py`.
-- [ ] 4.3 Write the orchestrator test first (`tests/unit/orchestrator/test_unasserted_clause.py`, new, with `run_l4`
+- [x] 4.3 Write the orchestrator test first (`tests/unit/orchestrator/test_unasserted_clause.py`, new, with `run_l4`
   as `tests/unit/orchestrator/test_reentry.py` uses it): SCN-IMP-513 (a unit of one task whose red lists a new entry: the
   run exits 11 in `awaiting_human`; a second run with the question still open runs no agent step and records no
   `verify.*` event; after `l4 questions answer` the next run resumes the task). Today a blocked task parks the unit at
@@ -90,14 +90,14 @@
 
 ## 5. Settled entries are recorded, and the judge checks them (D5)
 
-- [ ] 5.1 Write the tests first, in `tests/unit/implementer/test_unasserted_clauses.py`: the `task.red_ok` of a red
+- [x] 5.1 Write the tests first, in `tests/unit/implementer/test_unasserted_clauses.py`: the `task.red_ok` of a red
   commit and of an already-satisfied commit, the `task.done` of green and the `task.done{tdd: "exempt"}` of a single step
   carry `unasserted` with the settled entries (texts redacted: a clause holding a value the redactor knows is written
   redacted); no `unasserted` key when there are none; the already-satisfied `task.done` and an accepted repair's
   `task.done` carry none. Then write them in `run_red` (both `task.red_ok` emits), `run_green` (its `task.done`) and
   `run_single` (its `task.done` at the end), each from `split_clauses(wb, task, result.unasserted).settled` (an entry no
   longer settled is written without `question`).
-- [ ] 5.2 Write the tests first in `tests/unit/verifier/test_judge_clauses.py` (new), beside
+- [x] 5.2 Write the tests first in `tests/unit/verifier/test_judge_clauses.py` (new), beside
   `tests/unit/verifier/test_judge_answers.py` (SCN-IMP-516): `build_judge_prompt(clauses=[ClauseRef(...)])` has the
   section heading of design D5, its instruction (`A passing test does not show a clause listed here`), the line
   `C-1a2b3c4d  task 1.1 (red): "its action is recorded" | why: the spec does not say | answer: Q-001` inside `<l4:data
@@ -116,7 +116,7 @@
 
 ## 6. The templates (D6)
 
-- [ ] 6.1 Write the tests first (SCN-IMP-518), in `tests/unit/implementer/test_prompt.py`: the rendered red prompt holds
+- [x] 6.1 Write the tests first (SCN-IMP-518), in `tests/unit/implementer/test_prompt.py`: the rendered red prompt holds
   `list it in \`unasserted\``, `for any reason` and `is not kept`; the green prompt holds `do not choose it: list it in
   \`unasserted\`` and `is not kept`; then move the version assertions: `contract@13+red@14` (test_prompt.py,
   test_prompt_context.py, test_prompt_output.py with `+output@1`), `contract@13+green@7` (test_prompt.py,
@@ -131,13 +131,13 @@
 
 ## 7. Docs and checks
 
-- [ ] 7.1 `docs/runbook.md` §7.1 (`awaiting_human`): one paragraph on a question titled `Task <k> (<phase>) left a clause
+- [x] 7.1 `docs/runbook.md` §7.1 (`awaiting_human`): one paragraph on a question titled `Task <k> (<phase>) left a clause
   of <criterion> unasserted: …` (the step listed the clause in `unasserted` and was not kept; answer with what the clause
   means, or that it stays unasserted; the next step reads the answer; the task asks about a criterion once). SPEC.md and
   CHANGELOG.md were written with this spec: check every name and text they quote against the code (the title, the
   context sentences, the section heading, the line format, `clause: {criterion, phase}`, the fix names) and fix any
   drift in both.
-- [ ] 7.2 Run `python3 scripts/check_spec.py docs/SPEC.md`, `uv run --frozen pytest tests/unit/docs -q`, `uv run
+- [x] 7.2 Run `python3 scripts/check_spec.py docs/SPEC.md`, `uv run --frozen pytest tests/unit/docs -q`, `uv run
   --frozen pytest tests/unit/implementer -q`, `uv run --frozen pytest tests/unit/verifier -q -k "judge or prompt"`,
   `tests/unit/agents/test_codex.py`, `tests/unit/test_template_lock.py`, the new orchestrator test, `uv run --frozen ruff
   check src tests`, `uv run --frozen ruff format --check src tests` and `openspec validate unasserted-clause-question
