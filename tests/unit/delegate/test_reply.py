@@ -345,24 +345,27 @@ def test_a_test_entry_is_exempt_from_the_quote_rule_but_must_name_an_existing_te
 # -- review 3, minor 4: `checked` is bounded, and an escalation records only the refs ------------------------------
 
 
-def test_too_many_checked_entries_discard_the_reply(tmp_path):
+def test_too_many_checked_entries_refuse_an_answer_and_cut_an_escalation(tmp_path):
     entries = [cite(f"src/pkg/store.py:{n}") for n in range(1, 22)]
-    for decision in ("answer", "escalate"):
-        got = check(
-            tmp_path, reply(decision=decision, checked=entries, **({"text": ""} if decision == "escalate" else {}))
-        )
-        assert isinstance(got, Discarded) and "21 checked entries" in got.reason, decision
+    got = check(tmp_path, reply(checked=entries))
+    assert isinstance(got, Discarded) and "21 checked entries" in got.reason and got.retryable
+    got = check(tmp_path, reply(decision="escalate", checked=entries, text=""))  # L4-DLG-029: kept, cut to 20 refs
+    assert isinstance(got, Kept) and got.escalates and got.cut == ("checked",)
+    assert [e["ref"] for e in got.checked] == [e["ref"] for e in entries[:20]]
     assert isinstance(check(tmp_path, reply(decision="escalate", text="", checked=entries[:20])), Kept)
 
 
 @pytest.mark.parametrize(("key", "limit"), [("ref", 300), ("quote", 600), ("claim", 600)])
-def test_a_long_checked_field_discards_the_reply(tmp_path, key, limit):
+def test_a_long_checked_field_refuses_an_answer_and_an_escalation_keeps_or_drops_it(tmp_path, key, limit):
     entry = {**cite(), key: "x" * (limit + 1)}
-    for decision in ("answer", "escalate"):
-        got = check(
-            tmp_path, reply(decision=decision, checked=[entry], **({"text": ""} if decision == "escalate" else {}))
-        )
-        assert isinstance(got, Discarded) and f"checked {key}" in got.reason, decision
+    got = check(tmp_path, reply(checked=[entry]))
+    assert isinstance(got, Discarded) and f"checked {key}" in got.reason and got.retryable
+    got = check(tmp_path, reply(decision="escalate", text="", checked=[entry, cite()]))
+    assert isinstance(got, Kept) and got.escalates  # L4-DLG-029: a ref is dropped, a quote or a claim is not recorded
+    if key == "ref":
+        assert got.cut == ("checked",) and [e["ref"] for e in got.checked] == ["spec:design.md#D3"]
+    else:
+        assert got.cut == () and len(got.checked) == 2
     ok = {**cite(), "claim": "x" * 600}
     assert isinstance(check(tmp_path, reply(checked=[ok])), Kept)
 
@@ -528,11 +531,11 @@ def test_a_discard_records_its_entries_and_whether_it_may_be_asked_again(tmp_pat
     for body in ({"nonsense": 1}, {**reply(), "extra": 1}, {**reply(), "checked": [{"ref": "a"}]}):
         got = check(tmp_path, body)
         assert isinstance(got, Discarded) and got.retryable is False and got.checked == ()
-    # a reply that breaks the entry limits records nothing
+    # a reply that breaks the entry limits records nothing; its length refusal is asked again (L4-DLG-029)
     many = check(tmp_path, reply(checked=[cite()] * 21))
-    assert isinstance(many, Discarded) and many.retryable is False and many.checked == ()
+    assert isinstance(many, Discarded) and many.retryable is True and many.checked == ()
     long = check(tmp_path, reply(checked=[cite(quote="x" * 601)]))
-    assert isinstance(long, Discarded) and long.retryable is False and long.checked == ()
+    assert isinstance(long, Discarded) and long.retryable is True and long.checked == ()
 
 
 REPO_L4 = {

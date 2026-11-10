@@ -1,11 +1,17 @@
-"""The checks of the delegate's reply (delegate-answers 6.2; L4-DLG-005, L4-DLG-014; design D7, D15).
+"""The checks of the delegate's reply (delegate-answers 6.2; L4-DLG-005, L4-DLG-014, L4-DLG-029; design D7, D15).
 
 `check_reply` keeps a reply only when every rule holds, and says which rule broke first otherwise: there is no repair
 round, and a discarded reply is an escalation (the pass records `delegate.result{status: discarded}`). Pure: the unit
 head is a `HeadTree` (the listing of regular files and a reader), the latest test report is a set of ids, and the
 questions file is the one the answer would be written to, so that the composed answer is judged by the very checks of
 `l4 questions` (`check_text`, `check_question`). A `checked` quote is compared with the file it cites as
-delegate-quote-tolerance describes (L4-DLG-005): `_resolves`."""
+delegate-quote-tolerance describes (L4-DLG-005): `_resolves`.
+
+The length rules are one class (delegate-length-retry, L4-DLG-029), checked together once the decision fits the kind
+(`_length_problems`): an `escalate` over them is kept cut to the limits (`_cut_escalation`: the question goes to a
+person either way), any other decision is refused and may be asked again. The result schemas carry no `maxLength` or
+`maxItems`: `check_reply` validates against them first, so a schema limit would turn an overrun into a break that is
+not retryable and cannot be cut (and, in a batch, would fail every result), with the delegate's reply lost."""
 
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -35,6 +41,7 @@ from l4.verifier.verdicts import ends_with_scenario
 MAX_REASON_CHARS = 1000
 MAX_CHECKED = 20  # entries; the longest of each field is the next constant (review 3, minor 4)
 MAX_CHECKED_CHARS = {"ref": 300, "quote": 600, "claim": 600}
+CUT_MARK = " … [cut at {limit} of {n} characters]"  # ends an escalation's reason that was cut at `MAX_REASON_CHARS`
 LINE_WINDOW = 3  # a quote may be this many lines from the line a `path:line` reference names
 MARKDOWN_SUFFIXES = (".md", ".markdown")  # the files in which a quote is also compared without the `**` bold marker
 MIN_QUOTE_CHARS = (
@@ -86,7 +93,9 @@ class Kept:
     """A reply the harness may act on. `decision` `escalate` writes nothing: the question goes to a person. Otherwise
     `form` and `text` are what `build_edit` takes (`accept`/None for the clarifier's suggestion, `answer`/the composed
     text for the rest), `effective` is the answer as the file will read it, and `unfreezes` the frozen paths an accepted
-    suggestion opens (only with `delegate.unfreeze: true`)."""
+    suggestion opens (only with `delegate.unfreeze: true`). An `escalate` over a length limit is kept cut
+    (L4-DLG-029): `reason` is redacted and ends with `CUT_MARK`, `checked` has no entry over the limits, and `cut` names
+    what was cut (`reason`, `checked`); it is empty when nothing was."""
 
     decision: str
     reason: str
@@ -95,6 +104,7 @@ class Kept:
     text: str | None = None
     effective: str = ""
     unfreezes: tuple[PathEffect, ...] = ()
+    cut: tuple[str, ...] = ()
 
     @property
     def escalates(self) -> bool:
@@ -110,9 +120,10 @@ class Discarded:
     reason: str
     status: Literal["discarded", "escalated"] = "discarded"
     decision: str | None = None  # what the reply would have decided, when it was a well-formed result (never its text)
-    # delegate-citations (L4-DLG-005): `retryable` is set only for a `checked` entry that does not resolve (the pass
-    # asks the question once more); `checked` is the entries' `ref` and `quote`, redacted, of a reply that was a valid
-    # document within the entry limits (never an entry's `claim`, never the answer's text)
+    # delegate-citations (L4-DLG-005): `retryable` is set only for a `checked` entry that does not resolve, a quote
+    # that is too short, or a length rule that the reply breaks (L4-DLG-029): the pass asks the question once more
+    # while the question has an attempt left; `checked` is the entries' `ref` and `quote`, redacted, of a reply that was
+    # a valid document within the entry limits (never an entry's `claim`, never the answer's text)
     retryable: bool = False
     checked: tuple[dict[str, str], ...] = ()
 
@@ -305,6 +316,62 @@ def _recorded(checked: Sequence[Mapping[str, str]], redactor: Redactor) -> tuple
     return tuple({k: redactor.redact_text(e.get(k, "")) for k in ("ref", "quote")} for e in checked)
 
 
+def _longest(checked: Sequence[Mapping[str, str]], key: str) -> int:
+    return max((len(e.get(key, "")) for e in checked), default=0)
+
+
+def _length_problems(reason: str, checked: Sequence[Mapping[str, str]]) -> list[str]:
+    """The length rules the reply breaks, one clause each, in this order (L4-DLG-029): the reason, the number of
+    entries, then the `ref`, `quote` and `claim` limits, naming the longest value of the field. The clauses are what
+    `prompt._length_instructions` reads back, word for word."""
+    problems = []
+    if len(reason) > MAX_REASON_CHARS:
+        problems.append(f"the reason has {len(reason)} characters: the limit is {MAX_REASON_CHARS}")
+    if len(checked) > MAX_CHECKED:
+        problems.append(f"the reply has {len(checked)} checked entries: the limit is {MAX_CHECKED}")
+    for key, limit in MAX_CHECKED_CHARS.items():
+        if (longest := _longest(checked, key)) > limit:
+            problems.append(f"a checked {key} has {longest} characters: the limit is {limit}")
+    return problems
+
+
+_PLACEHOLDER = re.compile(r"\[REDACTED:[^\]]*\]")
+
+
+def clean_reason(text: str, redactor: Redactor) -> str:
+    """A delegate's reason as it may be recorded, in the one order every record uses (L4-DLG-029): redacted as it was
+    written (a configured value with a line break matches only so), its whitespace folded, redacted again."""
+    return redactor.redact_text(" ".join(redactor.redact_text(text).split()))
+
+
+def _cut_point(text: str, limit: int) -> int:
+    """Where to cut `text` at `limit` characters: never inside a `[REDACTED:...]` placeholder, so before it."""
+    for found in _PLACEHOLDER.finditer(text):
+        if found.start() < limit < found.end():
+            return found.start()
+    return limit
+
+
+def _cut_escalation(reason: str, checked: Sequence[Mapping[str, str]], redactor: Redactor) -> Kept:
+    """An `escalate` kept at the limits (L4-DLG-029; the person decides the question whatever the delegate writes next).
+    The reason is redacted, folded and redacted again first (`clean_reason`: a cut never leaves a prefix of a secret,
+    and a secret with a line break is seen), and measured after that: over `MAX_REASON_CHARS` it is cut there, never
+    inside a placeholder, and ends with `CUT_MARK`; within it, it is returned as it is, redacted. An entry whose `ref`
+    is over the limit is dropped, then those after the 20th; the kept ones record their redacted `ref` only, so the
+    length of a quote or a claim does not matter. Within every limit this is the escalation as it always was."""
+    cut: list[str] = []
+    reason = clean_reason(reason, redactor)
+    if len(reason) > MAX_REASON_CHARS:
+        mark = CUT_MARK.format(limit=MAX_REASON_CHARS, n=len(reason))
+        reason = reason[: _cut_point(reason, MAX_REASON_CHARS)] + mark
+        cut.append("reason")
+    kept = [e for e in checked if len(e.get("ref", "")) <= MAX_CHECKED_CHARS["ref"]]
+    if len(kept) < len(checked) or len(kept) > MAX_CHECKED:
+        cut.append("checked")
+    refs = tuple({"ref": redactor.redact_text(e.get("ref", ""))} for e in kept[:MAX_CHECKED])
+    return Kept("escalate", reason, refs, cut=tuple(cut))
+
+
 def check_reply(reply: Mapping[str, Any], *args: Any, **kwargs: Any) -> Kept | Discarded:
     """The reply as `_check_reply` judges it; a `Discarded` carries the decision a well-formed reply made."""
     got = _check_reply(reply, *args, **kwargs)
@@ -359,19 +426,13 @@ def _check_reply(
 
     if reply["question"] != question.id:
         return refuse(f"the reply answers {reply['question']}, not {question.id}")
-    if len(reason) > MAX_REASON_CHARS:
-        return refuse(f"the reason has {len(reason)} characters: the limit is {MAX_REASON_CHARS}")
     kind = question.kind
     if kind is None or decision not in FIT[kind]:
         return refuse(f"the decision {decision} does not fit a {kind.value if kind else 'unknown'} question")
-    if len(checked) > MAX_CHECKED:
-        return refuse(f"the reply has {len(checked)} checked entries: the limit is {MAX_CHECKED}")
-    for entry in checked:
-        for key, limit in MAX_CHECKED_CHARS.items():
-            if len(entry.get(key, "")) > limit:
-                return refuse(f"a checked {key} has {len(entry[key])} characters: the limit is {limit}")
-    if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted
-        return Kept(decision, reason, tuple({"ref": redactor.redact_text(e.get("ref", ""))} for e in checked))
+    if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted; cut at the limits
+        return _cut_escalation(reason, checked, redactor)
+    if problems := _length_problems(reason, checked):  # L4-DLG-029: asked again, naming every limit it breaks
+        return refuse("; ".join(problems), retryable=True)
     verdict, harness = kind is QuestionKind.VERDICT, kind is QuestionKind.HARNESS
     suggestion = accept_text(question)  # the written block, else option 1 of an open technical question
     plain_accept = decision == "accept" and not (verdict or harness)

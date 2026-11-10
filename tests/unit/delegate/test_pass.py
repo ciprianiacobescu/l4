@@ -633,3 +633,182 @@ def test_a_stale_verdict_question_is_not_a_target_of_the_pass(tmp_path):  # L4-V
     raised = LedgerEvent(moment, "r", "openspec:x", 1, "question.raised", {"id": "Q-001", "kind": "verdict"})
     assert targets([raised]) == [["Q-001"]]  # raised by this attempt: the delegate's
     assert targets([]) == []  # no event names it: stale, never a target
+
+
+# -- a reply over a length limit (delegate-length-retry; L4-DLG-029; SCN-DLG-144 to SCN-DLG-149) -----------------------
+
+LIMIT_LINE = "the reason has 1028 characters: the limit is 1000"
+
+
+def long_reason(n: int = 1028) -> str:
+    return "".join(str(i % 10) for i in range(n))
+
+
+def spying_prompts(monkeypatch) -> list[str]:
+    told: list[str] = []
+    real = pass_module.build_prompt
+
+    def spy(question, material, **kwargs):
+        told.append(material.previous)
+        return real(question, material, **kwargs)
+
+    monkeypatch.setattr(pass_module, "build_prompt", spy)
+    return told
+
+
+def line_of(run) -> str:
+    """The `Escalated by:` line of Q-001 as pushed, after its `<who>: `."""
+    (line,) = [x for x in run.pushed(QUESTIONS).splitlines() if x.startswith("- **Escalated by:** ")]
+    return line.removeprefix("- **Escalated by:** the delegate (delegate-model-1 via fake): ")
+
+
+def test_a_reason_over_the_limit_is_asked_again_and_the_retry_is_told(
+    delegate_run, fake_clock, monkeypatch
+):  # SCN-DLG-144
+    told = spying_prompts(monkeypatch)
+    first = delegate_run([blocked("technical"), reply(reason=long_reason())])
+    (deferral,) = results(first)
+    assert (deferral["status"], deferral["called"], deferral["discarded"]) == ("deferred", True, LIMIT_LINE)
+    assert "Escalated by" not in first.pushed(QUESTIONS) and status_of(first) == "open"
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply()])
+    assert told == ["", LIMIT_LINE]  # the second ask's prompt says which limit the first reply broke
+    assert [e["status"] for e in results(second)] == ["deferred", "answered"] and status_of(second) == "answered"
+
+
+def test_an_escalation_over_the_limit_is_cut_at_once_not_asked_again(delegate_run):  # SCN-DLG-146
+    reason = long_reason()
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    assert len(run.events("delegate.asked")) == 1 and len(run.adapter.requests) == 2  # the step, one call
+    (result,) = results(run)
+    cut = reason[:1000] + " … [cut at 1000 of 1028 characters]"
+    assert (result["status"], result["decision"], result["cut"], result["reason"]) == (
+        "escalated", "escalate", ["reason"], cut,
+    )  # fmt: skip
+    assert line_of(run) == cut and "the reply was discarded" not in run.pushed(QUESTIONS)
+    assert status_of(run) == "open" and run.events("question.answered") == []
+
+
+def test_an_escalation_after_a_reference_deferral_is_cut_the_same_way(delegate_run, fake_clock):  # SCN-DLG-146
+    bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
+    first = delegate_run([blocked("technical"), reply(**bad)])
+    assert [e["status"] for e in results(first)] == ["deferred"]
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply(decision="escalate", text="", checked=[], reason=long_reason())])
+    assert [e["status"] for e in results(second)] == ["deferred", "escalated"]
+    assert results(second)[-1]["cut"] == ["reason"] and line_of(second).endswith("… [cut at 1000 of 1028 characters]")
+
+
+def test_an_escalation_within_the_limit_is_written_whole_without_a_cut(delegate_run):  # SCN-DLG-146
+    reason = long_reason(900)
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    (result,) = results(run)
+    assert result["reason"] == reason and "cut" not in result and line_of(run) == reason  # not cut at 300
+
+
+def test_another_decision_over_a_limit_is_discarded_at_the_last_attempt(delegate_run, fake_clock):  # SCN-DLG-147
+    first = delegate_run([blocked("technical"), reply(reason=long_reason())])
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply(reason=long_reason())])
+    assert [e["status"] for e in results(second)] == ["deferred", "discarded"]
+    last = results(second)[-1]
+    assert (last["decision"], last["reason"]) == ("answer", f"the reply was discarded: {LIMIT_LINE}")
+    assert "cut" not in last and status_of(second) == "open" and first.events("question.answered") == []
+    assert line_of(second) == f"the reply was discarded: {LIMIT_LINE}"
+
+
+def test_too_many_entries_are_discarded_at_the_last_attempt(delegate_run):  # SCN-DLG-147
+    many = [{"ref": f"spec:proposal.md#{n}", "quote": QUOTE, "claim": "c"} for n in range(21)]
+    run = delegate_run([blocked("technical"), reply(checked=many)], delegate={"max_attempts_per_question": 1})
+    (result,) = results(run)
+    assert result["status"] == "discarded" and result["decision"] == "answer" and "checked" not in result
+    assert line_of(run) == "the reply was discarded: the reply has 21 checked entries: the limit is 20"
+
+
+def test_an_escalation_over_the_entry_limits_drops_those_entries(delegate_run):  # SCN-DLG-148
+    entries = [{"ref": f"spec:proposal.md#{n}", "quote": QUOTE, "claim": "c"} for n in range(1, 24)]
+    entries[1] = {**entries[1], "ref": "x" * 340}
+    entries[4] = {**entries[4], "quote": "q" * 900, "claim": "c" * 900}
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=entries, reason="no doc")])
+    (result,) = results(run)
+    kept = [{"ref": e["ref"]} for i, e in enumerate(entries) if i != 1][:20]
+    assert (result["status"], result["cut"], result["checked"]) == ("escalated", ["checked"], kept)
+    assert {"ref": "spec:proposal.md#5"} in result["checked"] and line_of(run) == "no doc"
+
+
+def test_a_length_retry_takes_the_question_attempt_and_adds_none(delegate_run, fake_clock):  # SCN-DLG-149
+    bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
+    first = delegate_run([blocked("technical"), reply(**bad)])
+    fake_clock.advance(timedelta(minutes=10))
+    second = delegate_run([reply(reason=long_reason())])
+    assert [e["status"] for e in results(second)] == ["deferred", "discarded"]
+    assert len(second.events("delegate.asked")) == 2 and len(second.adapter.requests) == 1
+    assert first.events("question.answered") == [] and line_of(second) == f"the reply was discarded: {LIMIT_LINE}"
+
+
+def test_a_length_retry_after_a_timeout_is_not_asked_again(delegate_run, fake_clock):  # SCN-DLG-149
+    delegate_run([blocked("technical"), Step(status="timeout")])
+    fake_clock.advance(timedelta(minutes=10))
+    run = delegate_run([reply(reason=long_reason())])
+    assert [e["status"] for e in results(run)] == ["deferred", "discarded"]
+    assert len(run.events("delegate.asked")) == 2
+
+
+def test_a_larger_attempt_budget_defers_both_discards_and_asks_a_third_time(delegate_run, fake_clock):  # SCN-DLG-149
+    bad = {"checked": [{"ref": "spec:proposal.md", "quote": "text that is not there", "claim": "c"}]}
+    budget = {"max_attempts_per_question": 3}
+    delegate_run([blocked("technical"), reply(**bad)], delegate=budget)
+    fake_clock.advance(timedelta(minutes=10))
+    delegate_run([reply(reason=long_reason())], delegate=budget)
+    fake_clock.advance(timedelta(minutes=10))
+    run = delegate_run([reply()], delegate=budget)
+    assert [e["status"] for e in results(run)] == ["deferred", "deferred", "answered"]
+    assert len(run.events("delegate.asked")) == 3 and status_of(run) == "answered"
+
+
+# -- the 300 of a harness escalation stays, and a reason is redacted on the whole path (review of the change) ---------
+
+GHTOKEN = "ghp_" + "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"
+MULTI_LINE = "line-one-secret\nline-two-secret"  # a configured value (an environment variable) with a line break
+
+
+def test_a_harness_escalation_reason_is_still_cut_to_300(delegate_run, monkeypatch):  # SCN-DLG-146, L4-DLG-008
+    def refuse(*args, **kwargs):
+        raise Refusal("x" * 400, "set its Status").exit()
+
+    monkeypatch.setattr(pass_module, "build_edit", refuse)
+    run = delegate_run([blocked("technical"), reply()])
+    (result,) = results(run)
+    assert result["status"] == "escalated" and "cut" not in result
+    assert result["reason"].startswith("the answer could not be written: ") and len(result["reason"]) == 300
+    assert line_of(run) == result["reason"]  # the line holds 300 characters of a text that is the harness's
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        long_reason(950) + " " + GHTOKEN + " " + long_reason(50),  # cut at 1000
+        long_reason(500) + " " + GHTOKEN,  # kept whole
+        GHTOKEN + " " + long_reason(900),  # kept whole, the token first
+    ],
+)
+def test_a_token_in_a_long_escalate_reason_reaches_no_record(delegate_run, reason):  # SCN-DLG-152
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    (result,) = results(run)
+    assert "[REDACTED:github-token]" in result["reason"] and result["reason"] == line_of(run)
+    for text in (run.pushed(QUESTIONS), result["reason"], str(run.ledger())):
+        for size in range(6, len(GHTOKEN) + 1):
+            assert GHTOKEN[:size] not in text, (size, len(reason))
+
+
+def test_a_multi_line_configured_secret_in_a_long_escalate_reason_reaches_no_record(
+    delegate_run, tdd_repo
+):  # SCN-DLG-152
+    tdd_repo.environ["OPENAI_API_KEY"] = MULTI_LINE
+    reason = long_reason(850) + " " + MULTI_LINE + " " + long_reason(40)
+    run = delegate_run([blocked("technical"), reply(decision="escalate", text="", checked=[], reason=reason)])
+    (result,) = results(run)
+    assert result["status"] == "escalated" and "cut" not in result
+    assert "[REDACTED:OPENAI_API_KEY]" in result["reason"] and result["reason"] == line_of(run)
+    for text in (run.pushed(QUESTIONS), str(run.ledger())):
+        assert "line-one" not in text and "line-two" not in text and "secret" not in text.replace("secretary", "")

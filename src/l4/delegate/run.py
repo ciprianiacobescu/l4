@@ -70,7 +70,7 @@ from l4.delegate.prompt import (
     report_test_ids,
     verdict_material,
 )
-from l4.delegate.reply import Discarded, HeadTree, Kept, check_reply
+from l4.delegate.reply import Discarded, HeadTree, Kept, check_reply, clean_reason
 from l4.delegate.scope import PlansView, in_scope, plan_cost, plans_view
 from l4.delegate.settings import DelegateSettings, delegate_settings
 from l4.exitcodes import ExitCode, L4Exit
@@ -114,7 +114,8 @@ RETRY_AFTER_S = 300  # a timeout or an adapter error: the question is taken agai
 MAX_TURNS = 40  # `--max-turns` of the Claude Code read-only run
 BATCH_TURNS = 20  # ... and the turns each question after the first adds to a batch's run (L4-DLG-028)
 MAX_BATCH_TURNS = 140
-ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long
+ESCALATED_CHARS = 300  # the `Escalated by:` line: the reason, redacted, at most this long (a delegate's own escalate
+# reason is the exception: it is kept whole, L4-DLG-029)
 MAX_VERIFICATION_BYTES = 400_000
 # the adapters whose agent may load an instruction file from the directory of a file it reads (L4-DLG-016, D4)
 MASKED_TREE_ADAPTERS = ("opencode", "copilot-cli")
@@ -699,7 +700,7 @@ class _Pass:
             why = f"the reply was discarded: {kept.reason}" if kept.status == "discarded" else kept.reason
             if kept.retryable and attempts_used(events, key) + 1 < self.cfg.max_attempts_per_question:
                 # a reference that did not resolve: asked again once, with the reason in the next prompt (L4-DLG-005)
-                shown = self.s.app.redactor.redact_text(" ".join(kept.reason.split()))
+                shown = clean_reason(kept.reason, self.s.app.redactor)
                 self._defer(
                     target, key, shared, f"the reply was discarded: {shown}; it is asked again",
                     self._now() + timedelta(seconds=RETRY_AFTER_S), who, reply, discarded=shown,
@@ -714,6 +715,7 @@ class _Pass:
             self._escalate(
                 target, question, key, shared, kept.reason or "the delegate could not check the claim", who=who,
                 called=True, cost=reply.cost, status="escalated", decision="escalate", checked=kept.checked,
+                whole=True, cut=kept.cut,
             )  # fmt: skip
         else:
             self._answer(target, question, key, shared, kept, who, reply)
@@ -1046,16 +1048,23 @@ class _Pass:
     def _escalate(
         self, target: _Target, question: Question, key: str, shared: dict[str, Any], reason: str, *, who: Any,
         called: bool = False, cost: float | None = None, status: str = "escalated", decision: str | None = None,
-        checked: Sequence[Any] = (),
+        checked: Sequence[Any] = (), whole: bool = False, cut: Sequence[str] = (),
     ) -> None:  # fmt: skip
-        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger."""
+        """The question stays open: `delegate.result` and the line `Escalated by:`, committed with the ledger. The
+        reason is redacted, folded and redacted again (`clean_reason`), then cut to `ESCALATED_CHARS`, except when
+        `whole`: it is a delegate's own `escalate`, which `check_reply` already redacted, folded and bounded at 1000
+        characters and the mark (L4-DLG-029); `cut` is what `check_reply` cut from it."""
         s = self.s
-        shown = s.app.redactor.redact_text(" ".join(reason.split()))[:ESCALATED_CHARS]
+        shown = clean_reason(reason, s.app.redactor)
+        if not whole:
+            shown = shown[:ESCALATED_CHARS]
         more: dict[str, Any] = {}
         if decision:
             more["decision"] = decision
         if checked:
             more["checked"] = [dict(c) for c in checked]
+        if cut:
+            more["cut"] = list(cut)
         self._result(target, key, shared, status, reason=shown, who=who, called=called, cost=cost, **more)
         path = target.path / QUESTIONS_FILENAME
         file = self._file(target)

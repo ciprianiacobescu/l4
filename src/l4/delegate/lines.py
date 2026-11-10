@@ -84,7 +84,7 @@ def status_json(events: Sequence[LedgerEvent]) -> list[dict[str, Any]]:
             "kind", "decision", "profile", "model", "cli", "cost_usd", "credits", "counted_usd", "reason", "retry_after"
         ):  # fmt: skip
             if e.data.get(key) is not None:
-                row[key] = e.data[key]
+                row[key] = _flat(e.data[key]) if key == "reason" else e.data[key]  # a summary: 300 (L4-DLG-029)
         row["text"] = line(e)
         rows.append(row)
     return rows
