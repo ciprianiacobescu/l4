@@ -42,7 +42,7 @@ from l4.agents.base import (
     wrap_command,
 )
 from l4.agents.contract import attach_file_result, attach_judge_reply
-from l4.agents.credentials import credential_loader
+from l4.agents.credentials import credential_loader, no_stored_login
 from l4.agents.opencode import (
     _AUTH_FAILED,
     CONFIG_DIR,
@@ -72,9 +72,11 @@ from l4.availability.steps import step_run, timeout_reason
 from l4.config.schema import OpencodeOptions, Profile
 from l4.provision.catalog import OPENCODE2_BINARY
 from l4.safepath import resolve_tool
+from l4.sandbox.home import uv_dirs
 
 JUDGE_STEPS = 3  # one answering step, one tolerated rejected attempt, v2's forced tool-less summary (D6)
 IMPLEMENT_STEPS = 200  # about 10x the largest recorded tool-call count: only a model that never ends reaches it
+DATA_DIR = "opencode2-data"  # the private `XDG_DATA_HOME` of a profile that needs no stored login (L4-OCV-017)
 STATE_DIR = "opencode2-state"  # the empty `XDG_STATE_HOME` of the run, in the step's private directory
 EXPORT_STATE_DIR = "opencode2-export-state"  # the export's own (SCN-OCV-06: each call has a state directory of its own)
 EXPORT_CONFIG_DIR = "opencode2-export-config"  # the export's own config home: the run's is writable by the agent
@@ -106,13 +108,25 @@ def v2_argv(exe: str, subcommand: str, *args: str) -> list[str]:
     )
 
 
-def isolation_env_v2(config_dir: Path, state_dir: Path, content: str) -> dict[str, str]:
-    """The isolation of one v2 call: an empty `XDG_CONFIG_HOME`, the call's own `XDG_STATE_HOME` (never shared, never
-    `XDG_DATA_HOME`), the five disable switches and `OPENCODE_CONFIG_CONTENT`."""
-    return {
+def isolation_env_v2(
+    config_dir: Path,
+    state_dir: Path,
+    content: str,
+    *,
+    data_dir: Path | None = None,
+    extra: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """The isolation of one v2 call: an empty `XDG_CONFIG_HOME`, the call's own `XDG_STATE_HOME` (never shared), the
+    five disable switches and `OPENCODE_CONFIG_CONTENT`. `XDG_DATA_HOME` is set only for a profile that needs no stored
+    login (`data_dir`, L4-OCV-017): otherwise the credentials and `opencode.db` live there and it is never redirected.
+    `extra` carries the variables that keep the agent's own tools working with that redirect."""
+    env = {
         "XDG_CONFIG_HOME": str(config_dir), "XDG_STATE_HOME": str(state_dir), **{name: "1" for name in SWITCHES},
         "OPENCODE_CONFIG_CONTENT": content,
     }  # fmt: skip
+    if data_dir is not None:
+        env["XDG_DATA_HOME"] = str(data_dir)
+    return {**env, **(extra or {})}
 
 
 def _refuse_read_only(policy: PermissionPolicy) -> None:
@@ -396,9 +410,17 @@ class OpenCodeV2Adapter:
         bound = step_bound(req.permission_policy, options)
         content = config_content_v2(req.permission_policy, step_dir, model, options)
         config_dir = _fresh_dir(step_dir / CONFIG_DIR)  # empty: no user config can leak in
+        data_dir: Path | None = None
+        uv_env: dict[str, str] | None = None
+        if no_stored_login(req.profile):  # L4-OCV-017: a data home of this step alone, for the run and its export
+            data_dir = _fresh_dir(step_dir / DATA_DIR)  # empty and 0700 now, and not touched before the export reads it
+            uv_env = uv_dirs(req.host_env, Path(req.host_env["HOME"]) if req.host_env.get("HOME") else Path.home())
 
         def environment(state_name: str, config: Path) -> dict[str, str]:  # each call: its own empty state (SCN-OCV-06)
-            return {**req.env, **isolation_env_v2(config, _fresh_dir(step_dir / state_name), content)}
+            isolation = isolation_env_v2(
+                config, _fresh_dir(step_dir / state_name), content, data_dir=data_dir, extra=uv_env
+            )  # L4-OCV-017: both calls get the same data home, and uv's directories where the sandbox binds them
+            return {**req.env, **isolation}
 
         argv = self.build_command(req, exe=exe, workdir=workdir)
         with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
@@ -550,7 +572,7 @@ def probe_opencode_v2(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> Probe
     if step == "auth":
         if (decided := credential_auth(profile, ctx)) is not None:  # OPENCODE_API_KEY decides (L4-PRV-028)
             return decided
-        if model.startswith(FREE_PREFIX):
+        if model.startswith(FREE_PREFIX):  # with the key, these two start no process (L4-OCV-017): no `opencode.db`
             return ProbeResult(step, True, {"provider": "opencode", "login": "not needed"}, skipped=True)
         provider = model.split("/", 1)[0]
         with tempfile.TemporaryDirectory(dir=ctx.cwd, prefix="l4-opencode2-auth-") as scratch:
@@ -639,8 +661,14 @@ def _hello_v2_once(
         work.mkdir()
         config_dir.mkdir(mode=0o700)
         state.mkdir(mode=0o700)
+        data: Path | None = None
+        if no_stored_login(profile):  # L4-OCV-017: an empty data home of the hello's own, removed with its scratch
+            data = Path(scratch) / "data"
+            data.mkdir(mode=0o700)
         content = config_content_v2(PermissionPolicy("judge"), work, model, options)
-        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env_v2(config_dir, state, content)})
+        env = probe_env(
+            ctx, {**credential_env(profile, ctx)[1], **isolation_env_v2(config_dir, state, content, data_dir=data)}
+        )
         argv = v2_argv(exe, "run", "--format", "json", "-m", model, "--title", "l4 hello", ctx.hello_prompt)
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan_v2((done.stdout or "").splitlines())

@@ -58,6 +58,18 @@ def profile_credential_variable(profile: "Profile") -> str | None:
     return credential_variable(profile.adapter, profile.auth)
 
 
+def no_stored_login(profile: "Profile") -> bool:
+    """Whether a profile needs no login stored in OpenCode's own data home (L4-OCV-017, design D4): an opencode profile
+    with `options.cli_major: 2` whose credential variable is `OPENCODE_API_KEY`, or whose model is an `opencode/` model
+    (its auth step is skipped, `login: not needed`). v1 and every other adapter keep their stored login."""
+    options = profile.opencode_options()
+    if profile.adapter != "opencode" or options is None or options.cli_major != 2:
+        return False
+    return profile_credential_variable(profile) == OPENCODE_API_KEY or (profile.model or "").startswith(
+        OPENCODE_OWN_PREFIXES[0]
+    )
+
+
 def hosted_login_problem(adapter: str | None, auth: str | None) -> str | None:
     """Why a profile cannot log in on a GitHub-hosted runner, or None when it can. A hosted runner is a fresh machine
     with no stored login, so the credential must arrive as a CI secret, in `credential_variable`'s variable: codex on a

@@ -145,7 +145,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
 
 ## 5. The private data home (L4-OCV-017, L4-OCV-003; SCN-OCV-06, SCN-OCV-37 to SCN-OCV-39; design D4)
 
-- [ ] 5.1 Tests first:
+- [x] 5.1 Tests first:
   - New `tests/unit/agents/test_credentials_no_stored_login.py`: `no_stored_login` is True for `cli_major: 2` with
     `auth: api_key` on `opencode-go/x` and on `opencode/x`, and for `cli_major: 2` on `opencode/x` with no `auth`. It is
     False for `cli_major: 2` on `opencode-go/x` with no `auth` or `auth: subscription`, for `openrouter/x`, for every
@@ -165,7 +165,7 @@ Every group is one implementer step, run in order in one worktree. Each step fol
     `XDG_DATA_HOME`. With one, it sets it and the two uv variables.
   - `tests/unit/sandbox/test_bwrap_home.py` (or the file that tests `spec_paths`): the uv directories `spec_paths`
     binds equal what the shared helper returns for the same host environment.
-- [ ] 5.2 Code:
+- [x] 5.2 Code:
   - `src/l4/agents/credentials.py`: `no_stored_login(profile)` (design D4). It must not import `l4.agents.opencode`;
     `"opencode/"` is `OPENCODE_OWN_PREFIXES[0]`.
   - `src/l4/sandbox/home.py`: one helper, `uv_dirs(host_env, home) -> dict[str, str]`, which returns

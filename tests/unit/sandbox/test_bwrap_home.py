@@ -336,3 +336,29 @@ def test_a_derived_path_at_a_secret_location_is_skipped(tmp_path, rel, where):  
     assert entry not in derived.paths
     if entry != home / ".config" or rel.startswith(".config/"):
         assert any(p == entry for p, _ in derived.skipped)
+
+
+def test_uv_dirs_are_the_directories_the_agent_sandbox_binds(tmp_path):  # L4-OCV-017
+    """One helper, shared by the adapter and `derive_tool_paths`: uv's managed Pythons and tools of the host."""
+    home, env = tree(tmp_path)
+    cache = tmp_path / "runner-cache"
+
+    def bound(host: dict[str, str]) -> set[Path]:
+        return set(homemod.tool_paths(host, home=home, cache_root=cache, kind="agent", forbid=()))
+
+    uv = homemod.uv_dirs(env, home)
+    python, tools = home / ".local/share/uv/python", home / ".local/share/uv/tools"
+    assert uv == {"UV_PYTHON_INSTALL_DIR": str(python), "UV_TOOL_DIR": str(tools)}
+    assert {python, tools} <= bound(env)  # the directories the sandbox binds are the ones the helper names
+    moved = {**env, "XDG_DATA_HOME": str(home / "data")}  # still under the home, so under the tmpfs
+    for name in ("python", "tools"):
+        (home / "data" / "uv" / name).mkdir(parents=True)
+    uv = homemod.uv_dirs(moved, home)
+    assert uv == {"UV_PYTHON_INSTALL_DIR": str(home / "data/uv/python"), "UV_TOOL_DIR": str(home / "data/uv/tools")}
+    assert {Path(v) for v in uv.values()} <= bound(moved)
+    own = {**env, "UV_PYTHON_INSTALL_DIR": str(home / "py"), "UV_TOOL_DIR": str(home / "tl")}
+    for name in ("py", "tl"):
+        (home / name).mkdir()
+    uv = homemod.uv_dirs(own, home)
+    assert uv == {"UV_PYTHON_INSTALL_DIR": str(home / "py"), "UV_TOOL_DIR": str(home / "tl")}
+    assert {Path(v) for v in uv.values()} <= bound(own)

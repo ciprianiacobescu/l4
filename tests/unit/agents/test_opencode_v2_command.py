@@ -21,6 +21,7 @@ from l4.agents.opencode_v2 import (
 )
 from l4.agents.proc import ProcOutcome
 from l4.config.schema import OpencodeOptions, Profile
+from l4.sandbox.home import uv_dirs
 
 RECORDED = Path(__file__).parents[2] / "fixtures" / "recorded" / "opencode" / "2.0.32"
 RESULT_DIR = Path("/tmp/l4-step/result")  # the directory the recorded normalisations were made for
@@ -98,6 +99,16 @@ def test_each_call_gets_a_state_directory_of_its_own_and_no_data_directory(tmp_p
     for kind, env in envs.items():
         assert Path(env["XDG_STATE_HOME"]).parent == calls[kind]  # under the call's private directory
         assert "XDG_DATA_HOME" not in env  # the credentials and opencode.db live there: never redirected
+
+
+def test_the_isolation_sets_a_data_directory_and_extra_variables_only_when_given(tmp_path):  # L4-OCV-017
+    plain = isolation_env_v2(tmp_path / "config", tmp_path / "state", "{}")
+    assert "XDG_DATA_HOME" not in plain and not {"UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(plain)
+    uv = uv_dirs({"HOME": str(tmp_path / "h")}, tmp_path / "h")
+    private = isolation_env_v2(tmp_path / "config", tmp_path / "state", "{}", data_dir=tmp_path / "data", extra=uv)
+    assert private["XDG_DATA_HOME"] == str(tmp_path / "data")
+    assert {k: private[k] for k in ("UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR")} == uv
+    assert {k: v for k, v in private.items() if k not in ("XDG_DATA_HOME", *uv)} == plain  # nothing else differs
 
 
 @pytest.mark.parametrize(

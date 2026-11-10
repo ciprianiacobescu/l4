@@ -41,6 +41,7 @@ class SpyRun(FakeRun):
         super().__init__(rules)
         self.states: list[list[str] | None] = []
         self.configs: list[tuple[list[str], int] | None] = []  # (listing, mode) of `XDG_CONFIG_HOME` at the start
+        self.datas: list[tuple[list[str], int] | None] = []  # (listing, mode) of `XDG_DATA_HOME` at the start
 
     def __call__(self, argv, cwd, env, timeout):
         state = env.get("XDG_STATE_HOME")
@@ -48,6 +49,10 @@ class SpyRun(FakeRun):
         config = env.get("XDG_CONFIG_HOME")
         self.configs.append(
             (sorted(os.listdir(config)), os.stat(config).st_mode & 0o777) if config and os.path.isdir(config) else None
+        )
+        data = env.get("XDG_DATA_HOME")
+        self.datas.append(
+            (sorted(os.listdir(data)), os.stat(data).st_mode & 0o777) if data and os.path.isdir(data) else None
         )
         return super().__call__(argv, cwd, env, timeout)
 
@@ -387,3 +392,49 @@ def test_the_adapter_probe_is_the_v2_probe_and_never_starts_opencode(make_ctx):
     for step in ("binary", "auth", "quota", "hello"):
         assert OpenCodeV2Adapter().probe(GO, step, ctx).ok
     assert {os.path.basename(c[0][0]) for c in run.calls} == {"opencode2"}
+
+
+# --- SCN-OCV-38, SCN-OCV-39: a private data home for a profile that needs no stored login (L4-OCV-017) ---
+
+API_KEY_GO = v2(GO_MODEL, auth="api_key")
+SECRET = "oc-test-VALUE-123"
+
+
+def with_env(ctx, **extra):
+    return type(ctx)(**{**ctx.__dict__, "environ": {**ctx.environ, **extra}})
+
+
+def test_scn_ocv_39_the_hello_of_such_a_profile_has_an_empty_private_data_directory_of_its_own(make_ctx):
+    for candidate in (API_KEY_GO, FREE):
+        run = SpyRun({**V2_VERSION, ("run",): out_of("hello-ok-step-finish.jsonl")})
+        ctx, _ = make_ctx({}, run=run)
+        assert OpenCodeV2Adapter().probe(candidate, "hello", with_env(ctx, OPENCODE_API_KEY=SECRET)).ok
+        hello = hello_call(run)
+        env = hello[2]
+        data = env["XDG_DATA_HOME"]
+        assert run.datas[run.calls.index(hello)] == ([], 0o700)  # it existed, empty and private, when the hello started
+        assert os.path.basename(data) == "data" and os.path.dirname(data) == os.path.dirname(env["XDG_STATE_HOME"])
+        assert not os.path.exists(data)  # gone with the hello's scratch directory
+        assert "UV_PYTHON_INSTALL_DIR" not in env and "UV_TOOL_DIR" not in env  # tools are off in a hello
+
+
+def test_scn_ocv_39_the_auth_step_of_such_a_profile_starts_no_process(make_ctx):
+    run = SpyRun({**V2_VERSION})
+    ctx, _ = make_ctx({}, run=run)
+    ctx = with_env(ctx, OPENCODE_API_KEY=SECRET)
+    first = OpenCodeV2Adapter().probe(API_KEY_GO, "auth", ctx)
+    assert first.ok and first.detail == {"auth_method": "env"}
+    second = OpenCodeV2Adapter().probe(FREE, "auth", ctx)
+    assert second.ok and second.skipped and second.detail["login"] == "not needed"
+    assert [c for c in run.calls if c[0][1] != "--version"] == []  # no `auth list`, no hello
+
+
+def test_scn_ocv_38_a_profile_with_a_stored_login_keeps_the_real_data_home_in_the_hello_and_the_auth_step(make_ctx):
+    for candidate in (GO, OPENROUTER):
+        rules = {("run",): out_of("hello-ok-step-finish.jsonl"), ("auth", "list"): out_of("auth-list-env-key.json")}
+        run = SpyRun({**V2_VERSION, **rules})
+        ctx, _ = make_ctx({}, run=run)
+        OpenCodeV2Adapter().probe(candidate, "auth", ctx)
+        OpenCodeV2Adapter().probe(candidate, "hello", ctx)
+        for argv, _, env, _ in run.calls:
+            assert not {"XDG_DATA_HOME", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR"} & set(env), argv
