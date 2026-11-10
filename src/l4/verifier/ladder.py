@@ -153,6 +153,7 @@ from l4.verifier.integrity import IntegrityContext, record_outcome, run_integrit
 from l4.verifier.judge import (
     AnswerRef,
     BatchView,
+    ClauseRef,
     CriterionVerdict,
     FollowUpView,
     JudgePrompt,
@@ -169,6 +170,7 @@ from l4.verifier.judge import (
     build_judge_prompt,
     named_tests,
     render_answers,
+    render_clauses,
     reply_counts,
     run_judge,
     satisfied_refs,
@@ -421,6 +423,31 @@ def _notes(events: Sequence[LedgerEvent]) -> str:
         if e.type in ("task.red_ok", "task.done") and e.data.get("notes")
     ]
     return "\n\n".join(parts)[:MAX_NOTES_CHARS]
+
+
+def _clauses(events: Sequence[LedgerEvent]) -> list[ClauseRef]:
+    """The clauses that committed steps listed as unasserted and recorded (L4-IMP-095), in ledger order: the
+    `unasserted` of a `task.red_ok`, of a green `task.done` and of a single step's (`tdd: exempt`). A record that does
+    not hold the shape is skipped. A fix unit's task and question id are named as `_done_tasks` and an answer block do.
+    """
+    found = []
+    for e in events:
+        if e.type not in ("task.red_ok", "task.done") or not isinstance(e.data.get("unasserted"), list):
+            continue
+        phase = "red" if e.type == "task.red_ok" else "single" if e.data.get("tdd") == "exempt" else "green"
+        fix = e.data.get("fix_unit")
+        for item in e.data["unasserted"]:
+            if not isinstance(item, dict) or not all(
+                isinstance(item.get(k), str) for k in ("criterion", "clause", "why")
+            ):
+                continue
+            question = item.get("question")
+            qid = question if isinstance(question, str) else ""
+            if qid and isinstance(fix, str) and fix:
+                qid = f"{fix}/{qid}"
+            task = f"{fix}/{e.data.get('task')}" if isinstance(fix, str) and fix else str(e.data.get("task"))
+            found.append(ClauseRef(task, phase, item["criterion"], item["clause"], item["why"], qid))
+    return found
 
 
 def _guards(events: Sequence[LedgerEvent]) -> list[str]:
@@ -1405,11 +1432,12 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
     satisfied = satisfied_refs(wb.provider.tasks(wb.ref), events, _task_text(wb))  # already satisfied (L4-VER-018)
     done = _done_tasks(wb, satisfied)
     answers = _family_answers(wb, events)  # L4-VER-065
+    clauses = _clauses(events)  # L4-IMP-095
     listing = "\n\n".join(f"{c.id}  {c.alias}\n{c.text}" for c in criteria)
     family = _family_sources(wb)
     plan = plan_context(  # the spec text has a budget of its own; the criteria, the done tasks and the answers first
         fixed_chars=len(listing) + sum(len(t.text) + len(t.task) for t in done)
-        + len(render_answers(answers, wb.redactor.redact_text).text),
+        + len(render_answers(answers, wb.redactor.redact_text).text) + len(render_clauses(clauses, ids)),
         budget_tokens=wb.cfg.verifier.judge_context_budget_tokens, conventions=(), source_files=family,
         keys=None,
     )  # fmt: skip
@@ -1446,6 +1474,7 @@ def _judge_step(vc: VerifyContext, run: _Run, base_sha: str, events: Sequence[Le
                 "repaired_changes": _repaired_changes(wb, result.head_sha, events),
                 "round_outputs": _round_outputs(wb, result), "feedback": asked, "accepted": accepted,
                 "satisfied": satisfied, "tasks": done, "unread": plan.cuts, "answers": answers,
+                "clauses": clauses,
             }  # fmt: skip
             return build_judge_prompt(**{**args, **over})
 

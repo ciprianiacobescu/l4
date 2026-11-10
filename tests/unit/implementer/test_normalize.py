@@ -17,6 +17,8 @@ QUESTION = {"title": "Which rounding?", "context": "The spec is silent.", "kind"
 SUMMARY_MAX = RESULT_SCHEMA["properties"]["summary"]["maxLength"]
 NOTES_MAX = RESULT_SCHEMA["properties"]["notes_for_verifier"]["maxLength"]
 REASON_MAX = RESULT_SCHEMA["properties"]["suppressions"]["items"]["properties"]["reason"]["maxLength"]
+CLAUSE_MAX = RESULT_SCHEMA["properties"]["unasserted"]["items"]["properties"]["clause"]["maxLength"]
+WHY_MAX = RESULT_SCHEMA["properties"]["unasserted"]["items"]["properties"]["why"]["maxLength"]
 
 
 def facts(phase: str = "red", last: str | None = None, changed: tuple[str, ...] = CHANGED) -> StepFacts:
@@ -353,6 +355,110 @@ def test_the_cut_marker_is_the_constant():
 
 
 # the record holds no text of the agent
+def entry(n: int = 1, **over: Any) -> dict[str, Any]:
+    return {"criterion": CRITERION, "clause": f"clause {n}", "why": f"why {n}", **over}
+
+
+# L4-IMP-095: the `unasserted` list (SCN-IMP-514)
+def test_unasserted_that_is_not_a_list_is_dropped():
+    done = run(valid(unasserted="its action is recorded"))
+    assert done.fixes == [Fix("unasserted", "dropped")]
+    assert "unasserted" not in done.obj
+
+
+def test_unasserted_items_that_do_not_hold_the_shape_are_dropped_with_one_count():
+    bad = [
+        {"criterion": CRITERION, "clause": "c"},
+        {"criterion": "C-XYZ", "clause": "c", "why": "w"},
+        {"criterion": CRITERION, "clause": 3, "why": "w"},
+        {"criterion": CRITERION, "clause": "c", "why": ["w"]},
+        {"clause": "c", "why": "w"},
+        "its action is recorded",
+    ]
+    done = run(valid(unasserted=[entry(1), *bad]))
+    assert done.fixes == [Fix("unasserted", "dropped", count=len(bad))]
+    assert done.obj["unasserted"] == [entry(1)]
+
+
+def test_a_dropped_unasserted_item_is_also_a_problem_that_names_it():
+    """Decision 1 of the review: a dropped item must not let the step pass as if nothing was listed."""
+    bad = [
+        ({"criterion": CRITERION, "clause": "c"}, "unasserted item 2 has no why"),
+        ({"criterion": CRITERION, "clause": "c", "why": "  "}, "unasserted item 2 has no why"),
+        ({"criterion": CRITERION, "why": "w"}, "unasserted item 2 has no clause"),
+        ({"clause": "c", "why": "w"}, "unasserted item 2 has no criterion"),
+        ({"criterion": "C-0a1b2c3d (Req 1.2)", "clause": "c", "why": "w"}, '"C-0a1b2c3d (Req 1.2)"'),
+        ({"criterion": "Req 1.2", "clause": "c", "why": "w"}, '"Req 1.2"'),
+        ({"criterion": CRITERION + "\n", "clause": "c", "why": "w"}, '"C-0a1b2c3d\\n"'),  # fullmatch, not `$`
+        ({"criterion": "C-XYZ", "clause": "c", "why": "w"}, '"C-XYZ"'),
+        ("its action is recorded", "unasserted item 2 is not an object"),
+        ({"criterion": CRITERION, "clause": "c" * 5, "why": 3}, "unasserted item 2 has no why"),
+    ]
+    for item, said in bad:
+        done = run(valid(unasserted=[entry(1), item]))
+        assert [said in p and p.startswith("unasserted item 2 ") for p in done.problems] == [True], (
+            item,
+            done.problems,
+        )
+        assert done.obj["unasserted"] == [entry(1)]  # the item is still dropped, and the fix still recorded
+        assert done.fixes == [Fix("unasserted", "dropped", count=1)]
+
+
+def test_every_dropped_item_is_named_with_its_place_in_the_list():
+    done = run(valid(unasserted=[{"criterion": "Req 1.2", "clause": "c", "why": "w"}, entry(2), {"clause": "c"}]))
+    assert len(done.problems) == 2
+    assert done.problems[0].startswith("unasserted item 1 ") and done.problems[1].startswith("unasserted item 3 ")
+    assert "no criterion" in done.problems[1] and "no why" in done.problems[1]
+
+
+def test_an_unasserted_that_is_not_a_list_is_a_problem():
+    assert run(valid(unasserted="its action is recorded")).problems == ["unasserted is not a list"]
+
+
+def test_a_criterion_in_upper_case_hex_is_lowered_and_kept():
+    done = run(valid(unasserted=[entry(1, criterion="C-0A1B2C3D"), entry(2)]))
+    assert done.problems == [] and [e["criterion"] for e in done.obj["unasserted"]] == [CRITERION, CRITERION]
+    assert done.fixes == [Fix("unasserted.criterion", "replaced", count=1)]
+
+
+def test_a_clean_object_has_no_problem():
+    assert run(valid()).problems == [] and run(valid(unasserted=[entry(1)])).problems == []
+    assert run(valid(unasserted=[entry(n) for n in range(1, 5)])).problems == []  # a cut is no problem
+
+
+def test_unasserted_after_three_the_rest_are_cut_in_order():
+    done = run(valid(unasserted=[entry(n) for n in range(1, 5)]))
+    assert done.fixes == [Fix("unasserted", "cut", count=1)]
+    assert [e["clause"] for e in done.obj["unasserted"]] == ["clause 1", "clause 2", "clause 3"]
+
+
+def test_an_unasserted_clause_and_why_over_the_limit_keep_start_and_end_with_the_marker():
+    clause, why = "c" * 400, "w" * 350
+    done = run(valid(unasserted=[entry(1, clause=clause, why=why)]))
+    assert done.fixes == [Fix("unasserted.clause", "cut", length=400), Fix("unasserted.why", "cut", length=350)]
+    cut_ok(done.obj["unasserted"][0]["clause"], clause, CLAUSE_MAX)
+    cut_ok(done.obj["unasserted"][0]["why"], why, WHY_MAX)
+    assert done.obj["unasserted"][0]["criterion"] == CRITERION
+
+
+def test_scn_imp_514_dropped_cut_and_long_clause_together():
+    items = [{"criterion": CRITERION, "clause": "c"}, {"criterion": "C-XYZ", "clause": "c", "why": "w"}]
+    items += [entry(1, clause="c" * 400), entry(2), entry(3), entry(4)]
+    done = run(valid(unasserted=items))
+    assert [f.as_event() for f in done.fixes] == [
+        {"field": "unasserted", "fix": "dropped", "count": 2},
+        {"field": "unasserted", "fix": "cut", "count": 1},
+        {"field": "unasserted.clause", "fix": "cut", "length": 400},
+    ]
+    assert len(done.obj["unasserted"]) == 3 and done.obj["unasserted"][0]["clause"].endswith("removed]")
+
+
+def test_a_well_formed_unasserted_list_gives_no_fix_and_is_never_added():
+    done = run(valid(unasserted=[entry(1), entry(2), entry(3)]))
+    assert done.fixes == [] and len(done.obj["unasserted"]) == 3
+    assert "unasserted" not in run(valid()).obj
+
+
 def test_the_events_hold_no_text_of_the_agent():
     secret = "SECRET-TEXT-9d1c"
     obj = {

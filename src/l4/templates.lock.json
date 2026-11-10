@@ -12,16 +12,16 @@
     "version": 13
   },
   "implementer/green": {
-    "sha256": "05ceea5ffd0a5f3a2808712812b97208201a819bc2a29a1550d24d4fc9c6d962",
-    "version": 6
+    "sha256": "dd1fd498b810d0667f5d3acb879abf6adbb5c8b2d37949f9afd97e074cf13733",
+    "version": 7
   },
   "implementer/output": {
     "sha256": "d35afa19cc5474aee1e2985d3f70ccbeb76103e459615a6809880bf945e58b54",
     "version": 1
   },
   "implementer/red": {
-    "sha256": "9e243aef546f35a0fb9c2ce21cdb7be873367ef892130cb2476c81fbce9a5924",
-    "version": 13
+    "sha256": "1ff9e4f64f1ad889d3ce63eace3334053935cf17dd73a561e8e91ae8a9a91eef",
+    "version": 14
   },
   "implementer/single": {
     "sha256": "e3c49b925c35b8de8a9a36df35e8d6886d95cdf0df7ca4b93954f5b6eb38d7a6",

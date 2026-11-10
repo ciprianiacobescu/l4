@@ -44,10 +44,20 @@ def test_sections_in_specified_order():
 def test_rendered_prompt_hash_and_template_version():
     rendered = render_prompt("green", ctx())
     assert rendered.sha256 == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
-    assert rendered.template_version == "contract@13+green@6"
+    assert rendered.template_version == "contract@13+green@7"
     assert rendered.sources == ("proposal.md", "specs/pricing/spec.md")
-    assert render_prompt("red", ctx()).template_version == "contract@13+red@13"
+    assert render_prompt("red", ctx()).template_version == "contract@13+red@14"
     assert render_prompt("red", ctx()).sha256 != rendered.sha256
+
+
+def test_scn_imp_518_the_red_and_green_prompts_say_when_to_fill_unasserted():
+    red = render_prompt("red", ctx()).text
+    assert "list it in `unasserted`" in red and "for any reason" in red and "is not kept" in red
+    assert "Do not say it only in `notes_for_verifier`" in red
+    green = render_prompt("green", ctx()).text
+    assert "do not choose it: list it in `unasserted`" in green and "is not kept" in green
+    assert "Do not say it only in `notes_for_verifier`" in green
+    assert "unasserted" not in render_prompt("single", ctx()).text  # the single templates are unchanged
 
 
 def test_the_prompt_hash_covers_the_data_blocks():
@@ -300,7 +310,7 @@ def test_a_task_without_requirement_links_keeps_the_openspec_wording():
         "that this task's requirement names.\n" in text
     )
     task_and_criteria = text[text.index("# Task 1.1") : text.index("# Phase")]
-    assert "_Requirements:" not in task_and_criteria  # red@13 names the line itself, in its own rules
+    assert "_Requirements:" not in task_and_criteria  # red@14 names the line itself, in its own rules
 
 
 # -- live M1.5 P3 (job 5528): the red prompt must say where browser tests live (m1.x fix F5)
@@ -452,8 +462,8 @@ def test_without_a_force_item_the_block_is_unchanged():
 
 # The rendered prompts of the default context before the change: the sections below are additions only.
 TODAYS_SHA = {
-    "red": "2e0679cb64f43fa6931760f314598dc3c09c5584aa3295d0fbf99783a7db7d00",
-    "green": "5ec1fc535a21a34115c8d3eebec8d016a67f3aa9f9545a41cd1ba4191116c634",
+    "red": "cc13caa6b5acb195780e978d64181b690e4ebfcbef065d83f88cef36c62d805e",
+    "green": "c6753e5b96c70069bc7f45d81643f44a153faafab8cdcadb4517437692d851a3",
     "single": "a78ac8d1177bf1f35e4278a739760c037b64c17df024d3aedc05845c3e2bd289",
 }
 

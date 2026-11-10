@@ -57,6 +57,7 @@ class Found:
 class Normalized:
     obj: dict[str, Any]
     fixes: list[Fix] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)  # `unasserted` items that were dropped, one text for each
 
 
 def last_result_object(text: str) -> Found | None:
@@ -109,6 +110,12 @@ _CRITERION = re.compile(_PROPS["criteria_ids"]["items"]["pattern"])
 _SUMMARY_MAX: int = _PROPS["summary"]["maxLength"]
 _NOTES_MAX: int = _PROPS["notes_for_verifier"]["maxLength"]
 _REASON_MAX: int = _PROPS["suppressions"]["items"]["properties"]["reason"]["maxLength"]
+_MAX_UNASSERTED: int = _PROPS["unasserted"]["maxItems"]
+_UNASSERTED_ID = re.compile(_PROPS["unasserted"]["items"]["properties"]["criterion"]["pattern"].strip("^$"))
+_SHOWN_ID = 40  # characters of a bad criterion id that a problem text quotes
+_UNASSERTED_MAX: dict[str, int] = {
+    key: _PROPS["unasserted"]["items"]["properties"][key]["maxLength"] for key in ("clause", "why")
+}
 _ALIASES = (("notes", "notes_for_verifier"), ("suppressions_list", "suppressions"))
 
 
@@ -135,6 +142,34 @@ def _suppression(item: Any) -> bool:
         and isinstance(item.get("rule"), str)
         and isinstance(item.get("reason"), str)
     )
+
+
+def _hex_lowered(item: Any) -> Any:
+    """An `unasserted` item whose criterion is `C-` and 8 hex digits in any case, with the hex lowered; else as given.
+    An item that is the same object back means nothing was lowered."""
+    given = item.get("criterion") if isinstance(item, dict) else None
+    lowered = "C-" + given[2:].lower() if isinstance(given, str) and given[:2] == "C-" else None
+    if lowered and lowered != given and _UNASSERTED_ID.fullmatch(lowered):
+        return {**item, "criterion": lowered}
+    return item
+
+
+def _unasserted_problems(item: Any) -> list[str]:
+    """What is wrong with one `unasserted` item, in words for the agent's next prompt; empty when it holds the shape.
+    The criterion is matched whole (`fullmatch`: `$` would let a trailing newline through)."""
+    if not isinstance(item, dict):
+        return ["is not an object"]
+    found = []
+    criterion = item.get("criterion")
+    if not isinstance(criterion, str) or not criterion.strip():
+        found.append("has no criterion")
+    elif _UNASSERTED_ID.fullmatch(criterion) is None:
+        shown = json.dumps(criterion[:_SHOWN_ID] + ("..." if len(criterion) > _SHOWN_ID else ""))
+        found.append(f"has criterion {shown} that is not a criterion id (`C-` and 8 hex digits)")
+    for key in ("clause", "why"):
+        if not isinstance(item.get(key), str) or not item[key].strip():
+            found.append(f"has no {key}")
+    return found
 
 
 def _exemption(value: Any) -> bool:
@@ -269,6 +304,34 @@ def _drops(obj: dict[str, Any], fixes: list[Fix]) -> None:
             fixes.append(Fix(key, "dropped"))
 
 
+def _unasserted(obj: dict[str, Any], fixes: list[Fix], problems: list[str]) -> None:
+    """The `unasserted` list (L4-IMP-095): lower the hex of a criterion id, keep the well-formed items, at most three.
+    Never add an entry. A dropped item, or a list that is not a list, is also a problem text: the step lists a clause
+    that nobody would ask, so the harness fails the attempt instead of keeping the step."""
+    if "unasserted" not in obj:
+        return
+    given = obj["unasserted"]
+    if not isinstance(given, list):
+        del obj["unasserted"]
+        fixes.append(Fix("unasserted", "dropped"))
+        problems.append("unasserted is not a list")
+        return
+    items = [_hex_lowered(item) for item in given]
+    if lowered := sum(a is not b for a, b in zip(given, items, strict=True)):
+        fixes.append(Fix("unasserted.criterion", "replaced", count=lowered))
+    kept = []
+    for number, item in enumerate(items, 1):
+        if found := _unasserted_problems(item):
+            problems.append(f"unasserted item {number} " + "; ".join(found))
+        else:
+            kept.append(item)
+    if len(kept) < len(given):
+        fixes.append(Fix("unasserted", "dropped", count=len(given) - len(kept)))
+    if len(kept) > _MAX_UNASSERTED:
+        fixes.append(Fix("unasserted", "cut", count=len(kept) - _MAX_UNASSERTED))
+    obj["unasserted"] = [dict(item) for item in kept[:_MAX_UNASSERTED]]
+
+
 def _cuts(obj: dict[str, Any], fixes: list[Fix]) -> None:
     """Rule 13: an over-long text keeps its start and ends with the marker, the whole within the limit."""
     for key, limit in (("summary", _SUMMARY_MAX), ("notes_for_verifier", _NOTES_MAX)):
@@ -279,11 +342,16 @@ def _cuts(obj: dict[str, Any], fixes: list[Fix]) -> None:
         if len(item["reason"]) > _REASON_MAX:
             fixes.append(Fix("suppressions.reason", "cut", length=len(item["reason"])))
             item["reason"] = _cut(item["reason"], _REASON_MAX)
+    for item in obj.get("unasserted", []):
+        for key, limit in _UNASSERTED_MAX.items():
+            if len(item[key]) > limit:
+                fixes.append(Fix(f"unasserted.{key}", "cut", length=len(item[key])))
+                item[key] = _cut(item[key], limit)
 
 
 def normalize(found: Found, facts: StepFacts) -> Normalized:
     """The rules 1 to 13 of D4, in order, on a copy of the object. It never adds a question, a criterion, a
-    suppression or an exemption, never changes a present allowed status, and touches no file."""
+    suppression, an unasserted entry or an exemption, never changes a present allowed status, and touches no file."""
     obj: dict[str, Any] = drop_nulls(copy.deepcopy(found.obj))  # `null` means absent
     fixes: list[Fix] = []
     if found.source == "final_message":  # the agent wrote no usable result file: a person should see that
@@ -294,5 +362,7 @@ def normalize(found: Found, facts: StepFacts) -> Normalized:
     _status(obj, fixes)
     _summary(obj, found, facts, fixes)
     _drops(obj, fixes)
+    problems: list[str] = []
+    _unasserted(obj, fixes, problems)
     _cuts(obj, fixes)
-    return Normalized(obj, fixes)
+    return Normalized(obj, fixes, problems)
