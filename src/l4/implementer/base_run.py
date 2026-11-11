@@ -7,11 +7,14 @@ passes at head. The run:
 
 * the production files changed since the unit base, by commits or by this worktree (stubs), are swapped to their
   content at the base by `run_with_code_of` (files added since are set aside; a file deleted since stays deleted, so
-  a test needing it errors there and is not confirmed); test files, test support files and
-  the harness / spec / documentation paths (`file_kind` exempt) stay as the worktree holds them;
+  a test needing it errors there and is not confirmed); test support files and the harness / spec / documentation
+  paths (`file_kind` exempt) stay as the worktree holds them, and so do the test files that hold a decided test or no
+  reported test; the unit's other test files are at the unit base for the run (L4-IMP-097: an earlier task's test file
+  that cannot finish against the base code would keep the run from writing a report);
 * a changed dependency manifest, lock file or runner config file means the environment differs: the run is skipped;
-* the test gate runs; `red_code_in_place` puts every touched file back by sha256 in a `finally`, written fresh (no
-  preserved mtimes, so incremental builds see the restored sources as newer).
+* the test gate runs, stopped at its own limit (twice the step's test run, L4-IMP-097); `red_code_in_place` and
+  `other_tests_at_base` put every touched file back by sha256 in a `finally`, written fresh (no preserved mtimes, so
+  incremental builds see the restored sources as newer).
 
 A criterion is confirmed when one of its new tests failed by assertion there; an error (missing export, import
 error, TypeError) is no proof; a test that passes at the base too shows the criterion was satisfied before the
@@ -21,24 +24,36 @@ left it, inconclusive included (`combine`).
 """
 
 import os
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
+from math import ceil
 from pathlib import Path, PurePosixPath
 
+from l4.config.schema import duration_seconds
 from l4.evidence.scope import file_kind
 from l4.gates.junit import TestReport
 from l4.implementer import variant
 from l4.implementer.discrimination import (
+    MAX_VARIED_BYTES,
     PreSatisfied,
+    _drop_bytecode,
     _is_test_path,
     _matches,
+    _put,
+    _read,
+    _restore,
+    _unlink,
     own_test_files,
     run_with_code_of,
     unit_base,
+    worktree_files,
 )
 from l4.implementer.stubs import _is_inside
+from l4.implementer.test_locate import file_of_id
 from l4.implementer.workbench import Workbench
+from l4.vcs.git import GitError
 
 VIA = "base_run"
 MANIFESTS = (
@@ -48,6 +63,9 @@ MANIFESTS = (
     "Directory.Build.targets", "global.json", "NuGet.config",
 )  # fmt: skip
 _LINKS = ("120000", "160000")  # a symlink or a submodule in git's raw modes
+BASE_RUN_FLOOR_S = 300  # the base run's own limit is at least this, at most `gates.timeout` (L4-IMP-097)
+BASE_RUN_FACTOR = 2  # ... and twice the wall time of the step's own test run
+MAX_LISTED = (20, 50, 50)  # the paths `base_run.scope` records: kept, at the base, set aside
 
 
 SEEN_PASSES = "the base run: every new test passes against the unit base code too"
@@ -118,17 +136,111 @@ def _plan(wb: Workbench, base: str) -> tuple[list[str], str]:
     return swap, ""
 
 
+@dataclass(frozen=True)
+class Scope:
+    """What `other_tests_at_base` did (L4-IMP-097): `at_base` the changed test files given their unit-base content,
+    `aside` the added ones removed, `unscoped` why nothing was set aside (empty when the run is scoped)."""
+
+    at_base: tuple[str, ...] = ()
+    aside: tuple[str, ...] = ()
+    unscoped: str = ""
+
+
+def _decided_files(wb: Workbench, decided: Sequence[str], real: TestReport | None) -> tuple[set[str], str]:
+    """The files of the tests the run decides (design D1), or the reason the run is not scoped."""
+    if real is None:
+        return set(), "no head report"
+    if not decided:
+        return set(), "no test to decide"
+    files, own = worktree_files(wb), own_test_files(wb)
+    keep: set[str] = set()
+    for test in decided:
+        found = file_of_id(test, files, own)
+        if found is None:
+            return set(), f"the file of {test} was not found"
+        keep.add(found)
+    return keep, ""
+
+
+def _base_blob(wb: Workbench, base: str, rel: str) -> tuple[bytes | None, str]:
+    """(content at the unit base, "") of a plain file; (None, "") when the base lacks it; (None, why) when it cannot be
+    used."""
+    try:
+        listed = wb.git.run_bytes("ls-tree", "-z", base, "--", f":(literal){rel}", check=False)
+        if not listed:
+            return None, ""
+        mode = listed.split(b" ", 1)[0].decode()
+        if mode not in ("100644", "100755"):
+            return None, f"{rel} is a symlink or submodule at the unit base"
+        blob = wb.git.run_bytes("show", f"{base}:{rel}")
+    except GitError:
+        return None, f"{rel} could not be read at the unit base"
+    return (blob, "") if len(blob) <= MAX_VARIED_BYTES else (None, f"{rel} is too large to vary")
+
+
+@contextmanager
+def other_tests_at_base(wb: Workbench, base: str, keep: Collection[str], real: TestReport) -> Iterator[Scope]:
+    """L4-IMP-097: the unit's own test files that hold none of the decided tests, at the unit base for the run.
+    The files put to the base are the files of the head report's tests (`real`, tests and collection errors) that the
+    unit added or changed, that match the test globs and not the support globs, that lie under no protected path (the
+    gate would put one back to HEAD in the middle of the run) and are not in `keep`. An added file is removed, a changed
+    one gets its content at `base`. Each is read first through the no-follow helpers; one that cannot be read, a link,
+    one too large, or a base entry that is no plain file makes the run unscoped (nothing is touched). Every file is
+    put back by sha256 in a `finally` (the restore of `red_code_in_place`), a mismatch is `restore failed`."""
+    where, tdd = "test-base-run", wb.cfg.tdd
+    files, own = worktree_files(wb), own_test_files(wb)
+    heads = {test.partition("::")[0]: test for test in (*real.tests, *real.collection_errors)}  # one id per file
+    reported = {found for test in heads.values() if (found := file_of_id(test, files, own)) is not None}
+    chosen = sorted(
+        path for path in reported & own
+        if path not in keep and _matches(tdd.test_globs, path) and not _matches(tdd.test_support_globs, path)
+        and wb.protected.match(path) is None
+    )  # fmt: skip
+    originals: dict[str, tuple[bytes, int]] = {}
+    versions: dict[str, bytes | None] = {}
+    why = ""
+    for rel in chosen:
+        read = _read(wb, rel)
+        if read is None:
+            why = f"{rel} is a link, is outside the work tree, cannot be read or is too large to vary"
+            break
+        blob, why = _base_blob(wb, base, rel)
+        if why:
+            break
+        originals[rel], versions[rel] = read, blob
+    if why:
+        yield Scope(unscoped=why)
+        return
+    at_base: list[str] = []
+    aside: list[str] = []
+    try:
+        for rel, blob in versions.items():
+            if blob is None:
+                _unlink(wb, rel, where)
+                aside.append(rel)
+            else:
+                _put(wb, rel, blob, originals[rel][1], where)
+                at_base.append(rel)
+            _drop_bytecode(wb.worktree, rel)
+        yield Scope(tuple(at_base), tuple(aside))
+    finally:
+        _restore(wb, originals, where)
+
+
 def confirmed_by_base_run(
     wb: Workbench,
     candidates: Mapping[str, Sequence[str]],
     new_ids: Collection[str],
     *,
     real: TestReport | None = None,
+    head_seconds: float = 0.0,
 ) -> BaseRunResult:
     """`candidates`: criterion -> this step's new tests, which passed at head and which no earlier red and no
     zero-value run confirmed. The run is classified against `real` (L4-IMP-060): a criterion is confirmed when one of
     its new tests is a proof there; one whose tests the run could not run is `inconclusive`. A skipped run says so in
-    `reason` and decides nothing."""
+    `reason` and decides nothing. L4-IMP-097: the unit's other test files are at the unit base for the run, and the
+    run stops after twice `head_seconds`, the wall time of the step's own test gate (at least 300s, at most
+    `gates.timeout`; `gates.timeout` when unknown)."""
     if not candidates:
         return BaseRunResult()
     base = unit_base(wb)
@@ -137,7 +249,28 @@ def confirmed_by_base_run(
     paths, why = _plan(wb, base)
     if why:
         return BaseRunResult(base_sha=base, reason=f"base run skipped: {why}")
-    gate = run_with_code_of(wb, base, paths, name="test-base-run")  # restores by sha256, reports put back
+    limit = duration_seconds(wb.cfg.gates.timeout)
+    bound = min(limit, max(BASE_RUN_FLOOR_S, ceil(BASE_RUN_FACTOR * head_seconds))) if head_seconds > 0 else limit
+    decided = sorted({t for tests in candidates.values() for t in tests if t in new_ids})
+    keep, unscoped = _decided_files(wb, decided, real)
+    scoped = (
+        nullcontext(Scope(unscoped=unscoped)) if real is None or unscoped else other_tests_at_base(wb, base, keep, real)
+    )
+    with scoped as scope:
+        listed = (sorted(keep), sorted(scope.at_base), sorted(scope.aside))
+        wb.emit(
+            "base_run.scope", decided=len(decided), kept=listed[0][: MAX_LISTED[0]],
+            at_base=listed[1][: MAX_LISTED[1]], aside=listed[2][: MAX_LISTED[2]], timeout_s=bound,
+            more=sum(max(0, len(names) - most) for names, most in zip(listed, MAX_LISTED, strict=True)),
+            unscoped=scope.unscoped,
+        )  # fmt: skip
+        gate = run_with_code_of(wb, base, paths, name="test-base-run", timeout_s=bound)  # restores by sha256
+    if gate.timed_out and bound < limit:  # the run's own limit stopped it, not gates.timeout: say so (L4-IMP-097)
+        gate = replace(
+            gate,
+            reason=f"timed out after {bound}s: the base run's own limit, twice the step's test run "
+            f"(at least {BASE_RUN_FLOOR_S}s)",
+        )
     run = variant.classify(gate, real, redact=wb.redactor.redact_text)
     own = own_test_files(wb)
     confirmed: dict[str, tuple[str, ...]] = {}

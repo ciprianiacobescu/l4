@@ -1641,7 +1641,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return out
         left = {c: passing[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
         if left:  # whatever the zero-value run left (all of it, or part): last, the base run, which only confirms
-            based = confirmed_by_base_run(wb, left, new_ids, real=report)
+            based = confirmed_by_base_run(wb, left, new_ids, real=report, head_seconds=gate.seconds)
             if (out := tampered("base run")) is not None:
                 return out
         out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result, refuse_tampering)
@@ -1802,7 +1802,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         left = {c: candidates[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
         if left:
             every = {t for tests in candidates.values() for t in tests}
-            based = confirmed_by_base_run(wb, left, every, real=report)
+            based = confirmed_by_base_run(wb, left, every, real=report, head_seconds=gate.seconds)
             if (out := tampered("base run")) is not None:
                 return out
         out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result, refuse_tampering)

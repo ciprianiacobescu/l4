@@ -67,9 +67,9 @@ def based(monkeypatch):
     calls: list[dict] = []
     real_run = tdd.confirmed_by_base_run
 
-    def spy(wb, candidates, new_ids, *, real=None):
+    def spy(wb, candidates, new_ids, *, real=None, **rest):
         calls.append({c: list(t) for c, t in candidates.items()})
-        return real_run(wb, candidates, new_ids, real=real)
+        return real_run(wb, candidates, new_ids, real=real, **rest)
 
     monkeypatch.setattr(tdd, "confirmed_by_base_run", spy)
     return calls

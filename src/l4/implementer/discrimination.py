@@ -493,7 +493,7 @@ def run_with_code_of(
                 wb.cfg.gates.test.command,
                 reports=wb.cfg.gates.test.reports,
                 extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
-                timeout_s=timeout_s,
+                **({} if timeout_s is None else {"timeout_s": timeout_s}),  # the gate's own limit when none is given
             )
     finally:
         _put_reports_back(wb, kept, name)

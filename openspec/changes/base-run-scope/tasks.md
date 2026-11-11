@@ -13,12 +13,12 @@
 
 ## 2. The scope of the base run (D1, D2, D4)
 
-- [ ] 2.0 Read, before writing code, what the guards of a red step compare, and confirm design D2's last paragraph:
+- [x] 2.0 Read, before writing code, what the guards of a red step compare, and confirm design D2's last paragraph:
   `Workbench.run_gate_spec` (`snapshot_protected`, `restore_protected`, `revert_unsnapshotted`), `held_patch.ReplayGuard`
   (`restore_replay`, `_restore_one`), `stubs.ProductionGuard.check`, and `tdd._preexisting_changes` /
   `preexisting_test_changes`. If any of them keys on a file's modification time, inode or presence at gate time rather
   than its content, stop and report it instead of going on.
-- [ ] 2.1 Write the tests first in `test_base_run_scope.py`, with the fixtures and helpers of
+- [x] 2.1 Write the tests first in `test_base_run_scope.py`, with the fixtures and helpers of
   `tests/unit/implementer/test_base_run.py` (`make_bench`, `step`, `commit_head`, `zero`, `based`, `snapshot`,
   `porcelain`; import or copy what you need). To see the work tree during the run, wrap `Workbench.run_gate` with a spy
   that records, for a gate named `test-base-run`, which of the paths of interest exist and their sha256, then calls the
@@ -49,7 +49,7 @@
     recorded (`bench.events("guard.restore_failed")` or the name the code uses; grep `restore failed` in
     `discrimination.py`).
   Run them and see them fail.
-- [ ] 2.2 Then add the context manager `other_tests_at_base` and `Scope` to `src/l4/implementer/base_run.py` (design D2;
+- [x] 2.2 Then add the context manager `other_tests_at_base` and `Scope` to `src/l4/implementer/base_run.py` (design D2;
   reuse `_read`, `_put`, `_unlink`, `_restore`, `_drop_bytecode`, `worktree_files`, `own_test_files` and
   `test_locate.file_of_id`; do not change `_canonical` or `red_code_in_place`), use it in `confirmed_by_base_run` around
   `run_with_code_of`, and emit `base_run.scope` (design D4) before the gate. Update the module docstring (the
@@ -59,14 +59,14 @@
 
 ## 3. The limit (D3)
 
-- [ ] 3.1 Write the tests first (SCN-IMP-531): with `gates.timeout: 30m`, `confirmed_by_base_run(...,
+- [x] 3.1 Write the tests first (SCN-IMP-531): with `gates.timeout: 30m`, `confirmed_by_base_run(...,
   head_seconds=200.0)` calls the gate with `timeout_s=400`, `head_seconds=10.0` with 300, `head_seconds=1200.0` with
   1800, `head_seconds=0.0` with 1800 (spy on `run_with_code_of` or `Workbench.run_gate`); a spy that returns a timed-out
   result at 400 gives a classified reason containing `the base run's own limit` and leaves the criterion inconclusive
   (the run decides nothing); at 1800 (no own limit below `gates.timeout`) the reason is unchanged (`timed out after
   1800s`); `run_red` passes the step's test gate `seconds` at both call sites (spy on `confirmed_by_base_run` in
   `l4.implementer.tdd` and check `head_seconds > 0`). Run them and see them fail.
-- [ ] 3.2 Then add `head_seconds: float = 0.0` to `confirmed_by_base_run` with `BASE_RUN_FLOOR_S = 300`,
+- [x] 3.2 Then add `head_seconds: float = 0.0` to `confirmed_by_base_run` with `BASE_RUN_FLOOR_S = 300`,
   `BASE_RUN_FACTOR = 2` and the reason of design D3, and pass `head_seconds=gate.seconds` at both call sites in
   `run_red`. Run every test file named in 1.2 and 2.2.
 

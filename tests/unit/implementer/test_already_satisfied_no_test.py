@@ -119,7 +119,7 @@ def test_existing_tests_that_nothing_confirms_are_no_proof(make_bench, monkeypat
     commit_old(bench)  # the test exists and passes, but the ledger holds no red for it
     refuse(monkeypatch)
     monkeypatch.setattr(
-        tdd, "confirmed_by_base_run", lambda wb, cands, ids, *, real=None: BaseRunResult(reason="no failure")
+        tdd, "confirmed_by_base_run", lambda wb, cands, ids, *, real=None, **_: BaseRunResult(reason="no failure")
     )
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert outcome.status == "failed" and outcome.reason.startswith(f"not discriminating: {KNOWN}"), outcome.reason
