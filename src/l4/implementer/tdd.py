@@ -1492,8 +1492,9 @@ def _decide_pre_satisfied(
 
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
-    stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
-    gates; only then the commit."""
+    stub guard, run (a) with its failure kinds, the criteria, the static gates (before the pre-satisfied confirmation
+    when it has candidates, before the base run and before run (b), else after the red verdict: L4-IMP-096), the
+    pre-satisfied confirmation, run (b); only then the commit."""
     base = wb.head()
     base_report = baseline(wb, base, task=task.key)
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
@@ -2119,6 +2120,7 @@ def run_green(
     held: HeldCheck | None = None
     if not reason:
         reason = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run and any at_red accept
+        stuck = stuck or restore_replay(wb, "static gates")  # a linter that writes files: before the test-at-red run
     if not reason:
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
     stuck = stuck or restore_replay(wb, "test-at-red run")

@@ -1,8 +1,8 @@
 ## MODIFIED Requirements
 
 ### Requirement: L4-IMP-002 (amendment, where the static gates run)
-Check 6 of the red phase (static gates) SHALL run where L4-IMP-096 places it: once per step, before the step's first
-variant run when it makes one, else after check 5. Item (c) of the green phase (lint/typecheck) SHALL run, when (b)
+Check 6 of the red phase (static gates) SHALL run where L4-IMP-096 places it: once per step: before the pre-satisfied
+confirmation when it has candidates, before the base run and before run (b), else after check 5. Item (c) of the green phase (lint/typecheck) SHALL run, when (b)
 gave no failure, before the test-at-red run of corrected tests (L4-IMP-063). The rules of both are otherwise unchanged:
 a gate that passed at the step base MUST pass, a gate that already failed there is recorded as
 `gate.static_baseline_failed` and does not fail the step, and a red failure feeds the redacted, truncated gate output
@@ -40,12 +40,12 @@ and the fix chore SHALL keep their order.
 - **Then** the attempt fails with the typecheck gate's text; no `test-base-run` gate runs, no `pre_satisfied` question
   is raised and nothing is captured for a replay
 
-#### Scenario: SCN-IMP-522 (−) A replayed step with a lint error spends no accept
+#### Scenario: SCN-IMP-522 (−) A replayed step with a lint error records no accept and makes no base run
 - **Given** a held `pre_satisfied` check whose answer is `accept`, whose saved step, replayed, fails a `gates.lint`
   command that passed at the step base
 - **When** the replay runs
-- **Then** the attempt fails with the lint gate's text before the zero-value run and the base run, and the ledger holds
-  no `check.accepted` and no `criterion.pre_satisfied` of the task
+- **Then** the attempt fails with the lint gate's text before the zero-value run and the base run; the replay itself is
+  recorded (`held.replayed`), but the ledger holds no `check.accepted` and no `criterion.pre_satisfied` of the task
 
 #### Scenario: SCN-IMP-523 (−) A red step with a lint error fails before run (b)
 - **Given** a red step whose new tests fail by assertion against its stubs, and whose lint gate fails now
