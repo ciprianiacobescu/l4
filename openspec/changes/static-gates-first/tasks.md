@@ -15,7 +15,7 @@
   - SCN-IMP-523: a red step with a stub whose new tests fail by assertion (so run (b) would run) and a failing lint
     command: `failed` with the lint text, `vacuity_check` not called.
   - SCN-IMP-524: (a) a red step with no stub whose tests fail by assertion and a lint failure, and a second step that
-    also breaks a pre-existing test: the second is told `red broke pre-existing tests` (the verdict comes first when
+    also breaks a pre-existing test: the second is told `red broke existing tests` (the verdict comes first when
     no variant run is made); (b) a red step whose passing new tests are confirmed by a (monkeypatched) base run and
     whose static gates pass: `ok`, and the ledger holds exactly one `gate.finished` per lint and typecheck command
     (names `lint`, `typecheck`, not counting `-baseline`).
@@ -55,3 +55,13 @@
   zero-value run, and before a held check is raised or an accept applied (L4-IMP-096).
 - [x] 3.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
   `uv run --frozen ruff check src tests` and `uv run --frozen ruff format --check src tests`.
+
+## 4. Review fixes
+
+- [x] 4.1 SCN-IMP-522 is titled for what it pins: the replay is recorded, no accept and no base run follow.
+- [x] 4.2 `run_green` puts a replayed step back to its saved patch after the static gates (`restore_replay(wb, "static
+  gates")`); a test pins it (`held.replay_restored` names the static gates).
+- [x] 4.3 The green trade-off (a static gate's failure is told before a not-discriminating corrected test) is in the
+  design, the change-table row 126 and the CHANGELOG.
+- [x] 4.4 Tests for a tamper found while the static gates ran, for the verdict first when a step has passing new tests
+  but no candidates, and for the no-new-test path making no static gate run.

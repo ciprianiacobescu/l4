@@ -38,7 +38,7 @@ verdict failure into one message.
 
 ## Decisions
 
-### D1. Red: once, before the first variant run
+### D1. Red: once, before the pre-satisfied confirmation, the base run and run (b)
 
 `run_red` gets a local, run-once check:
 
@@ -70,7 +70,7 @@ run, and where `worse_static_gates` is called today:
 Once the outcome is known it is not recomputed: the second and third calls return it. A `tampered("static gates")`
 result is returned as today. The no-new-test path calls nothing (see Context).
 
-Why before the first variant run and not right after the test gate: the cheap red checks that today come before the
+Why before these runs and not right after the test gate: the cheap red checks that today come before the
 pre-satisfied confirmation (`check_criteria`, `over_cap_text`) keep coming first, so a step that fails one of them is
 told that failure, not the linter's, as today. Why not after `classify_red`: the red verdict needs the pre-satisfied
 result (`allowed_passing`), so it cannot move before the confirmation's runs.
@@ -82,11 +82,16 @@ reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.s
 ...
 if not reason:
     reason = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run and any at_red accept
+    stuck = stuck or restore_replay(wb, "static gates")  # a replayed step is put back to its patch, as red does
 if not reason:
     reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
 ...
 reason = reason or stuck or restore_replay(wb, "before the green commit")
 ```
+
+A static gate is a command that may write files, so a replayed step's tree is put back to its saved patch right after
+them (`restore_replay(wb, "static gates")`), before `_undiscriminating` runs `fails_at_red`, as red does through
+`tampered("static gates")`.
 
 A green step whose test gate failed does not run the static gates (as today, `reason or ...` short-circuits). The
 excerpt and the hang excerpt are unchanged.
@@ -106,5 +111,8 @@ excerpt and the hang excerpt are unchanged.
 - A red step that made a variant run and fails both a red check (the verdict, a regression, run (b)) and a static gate is
   told the static gate's failure first; it learns the other on its next attempt. One extra attempt in that case, against
   a variant run of up to `gates.timeout` saved and no question raised over a step that cannot be kept.
+- A green step whose corrected test no longer discriminates (the test-at-red run would fail it) and that also fails a
+  static gate is now told the static gate's failure first; before, it was told that the test does not discriminate. It
+  learns the other on its next attempt.
 - The static gates now also run for a red step that is then held: the hold is decided after them, so a held step's
   replay runs them again (as every replay runs every check). The cost is one static run per hold.
