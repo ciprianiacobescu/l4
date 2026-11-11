@@ -1,6 +1,6 @@
 ## 1. Red: the static gates before the first variant run (D1)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/implementer/test_static_gates_first.py`, with the fixtures of
+- [x] 1.1 Write the tests first in a new `tests/unit/implementer/test_static_gates_first.py`, with the fixtures of
   `tests/unit/implementer/conftest.py` (`make_bench`, `red_step`, `green_step`, `result`) and the pattern of
   `test_tdd_static.py` and `test_presatisfied_other_language.py`:
   - SCN-IMP-521: a red step whose new tests pass at head and go to the base run (monkeypatch `confirm_pre_satisfied`
@@ -20,7 +20,7 @@
     whose static gates pass: `ok`, and the ledger holds exactly one `gate.finished` per lint and typecheck command
     (names `lint`, `typecheck`, not counting `-baseline`).
   Run them and see them fail (SCN-IMP-524 (a) may pass already: it pins the unchanged order).
-- [ ] 1.2 Then change `run_red` in `src/l4/implementer/tdd.py` as design D1 says: the run-once local `static_gates()`
+- [x] 1.2 Then change `run_red` in `src/l4/implementer/tdd.py` as design D1 says: the run-once local `static_gates()`
   (the `worse_static_gates` call, `tampered("static gates")`, `wb.discard_changes()` and `RedOutcome("failed",
   worse)` of today), called before `confirm_pre_satisfied` when its candidates are not empty, before
   `confirmed_by_base_run`, before `vacuity_check`, and at today's place, which then uses the stored outcome. The
@@ -31,18 +31,18 @@
 
 ## 2. Green: the static gates before the test-at-red run (D2)
 
-- [ ] 2.1 Write the test first in `test_static_gates_first.py` (SCN-IMP-525): a green step after an unfreeze (build it
+- [x] 2.1 Write the test first in `test_static_gates_first.py` (SCN-IMP-525): a green step after an unfreeze (build it
   as `test_tdd_green.py` builds a green step whose corrected tests go to `fails_at_red`), whose typecheck fails on its
   change: `failed` with the typecheck text, `fails_at_red` not called (monkeypatch `l4.implementer.tdd.fails_at_red`
   to record calls), no `gate.finished` named `test-at-red`, no `at_red` hold and no `check.accepted`. Run it and see it
   fail.
-- [ ] 2.2 Then change `run_green` as design D2 says, removing `worse_static_gates` from the later `reason = reason or
+- [x] 2.2 Then change `run_green` as design D2 says, removing `worse_static_gates` from the later `reason = reason or
   ...` line. Run the tests of 1.2 plus `tests/unit/implementer/test_tdd_green.py tests/unit/implementer/test_restore_links.py
   tests/unit/implementer/test_baseline_reuse.py -q`.
 
 ## 3. Documents
 
-- [ ] 3.1 `docs/SPEC.md`: in L4-IMP-002, add to check 6 of red "It runs once per step, before the step's first variant
+- [x] 3.1 `docs/SPEC.md`: in L4-IMP-002, add to check 6 of red "It runs once per step, before the step's first variant
   run when it makes one (L4-IMP-096)." and to item (c) of green "(when (b) gave no failure, before the test-at-red run of
   corrected tests, L4-IMP-096)"; add L4-IMP-096 after L4-IMP-095 with the text of `specs/static-gates-first/spec.md`;
   add SCN-IMP-521..525 after SCN-IMP-520 in the scenario section, in the form of the scenarios around them; add row
@@ -50,8 +50,8 @@
   neutral words, the limits: a step that made a variant run and fails both a red check and a static gate is told the
   static gate first; the repair chore keeps its order; requirement and scenario ids; `openspec/changes/static-gates-first/`;
   the test file `test_static_gates_first`).
-- [ ] 3.2 `CHANGELOG.md`: under `## Unreleased`, one entry in the style of the 0.4.56 entries: the static gates of a red
+- [x] 3.2 `CHANGELOG.md`: under `## Unreleased`, one entry in the style of the 0.4.56 entries: the static gates of a red
   or green step run before its variant runs, so a lint or type error fails the attempt before a base run or a
   zero-value run, and before a held check is raised or an accept applied (L4-IMP-096).
-- [ ] 3.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
+- [x] 3.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
   `uv run --frozen ruff check src tests` and `uv run --frozen ruff format --check src tests`.
