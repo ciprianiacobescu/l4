@@ -47,7 +47,16 @@ The *reported files* are the files of the head report's tests: `file_of_id(head,
 (the part before the first `::`) of `real.tests` and `real.collection_errors`, so a file is mapped once however many
 tests it holds. The files put to the unit base for the run are the reported files that are in `own`, that are not in
 `keep`, and that match `tdd.test_globs` and not `tdd.test_support_globs`. A file that holds no reported test (a fixture,
-data, `conftest.py`, a helper module under a test glob) is never touched, and neither is a test support file.
+data, `conftest.py`, a helper module under a test glob) is never touched, and neither is a test support file. Nor is a
+file under a protected path (`security.protected.is_protected(path, wb.protected.odd_forbidden)` is not None): the gate's
+own protected-path revert (`revert_unsnapshotted`) would put such a file back to HEAD in the middle of the run and record
+a violation.
+
+The guards that watch a red step see no difference: `run_gate_spec`'s protected snapshot is taken inside the scope (after
+the files are set aside) and compared after the gate inside it too; the replay guard (`restore_replay`), the production
+guard (`ProductionGuard.check`) and the pre-existing test audit (`preexisting_test_changes`, `_preexisting_changes`) run
+after `confirmed_by_base_run` returns, when every file is back, and compare contents (blobs, sha256), not times or
+inodes.
 
 For each such file: when it exists at the unit base (`git cat-file -e <base>:<path>`), its content is that blob for the
 run; when the unit added it, it is removed for the run. Before the gate runs, every file is read through the no-follow
@@ -107,3 +116,8 @@ work-tree relative; no test source is recorded.
   then names the bound.
 - Mapping the head report's ids to files reads the work tree's file list once and maps each distinct id head once; for a
   suite of thousands of tests this is a few hundred `file_of_id` calls.
+- The proof in the consumer's case exists because its tests wrap the stub's rejection in an assertion
+  (`assert.doesNotReject`, reported as `AssertionError`). A test that lets the bare not-implemented error propagate is of
+  kind `not_implemented` there, which is no proof (L4-IMP-003): such a task is still held, now after one scoped run.
+- `discriminate_extra` (`test-extra-base`: the tests chore, the repair proofs, the verifier's extra proofs) runs the whole
+  test gate at the base in the same shape and can meet the same hang. It is not changed here.

@@ -20,9 +20,10 @@ The tests a base run decides SHALL be the candidate tests it is given that are a
 no-new-test call site, every candidate test). For the duration of the run, every file that holds a test of the head
 report (its tests and its collection errors, mapped to files with `test_locate.file_of_id`), that the unit added or
 changed since the unit base (by commits or in the work tree), that matches `tdd.test_globs` and not
-`tdd.test_support_globs`, and that holds none of the decided tests SHALL be put at the unit base: removed when the unit
-added it, given its unit-base content when the unit changed it. Test support files and files that hold no reported
-test SHALL stay as the work tree holds them. Every such file SHALL be read before the run and put back byte for byte
+`tdd.test_support_globs`, that lies under no protected path (L4-SEC protected set, `odd.forbidden_paths`), and that
+holds none of the decided tests SHALL be put at the unit base: removed when the unit added it, given its unit-base
+content when the unit changed it. Test support files and files that hold no reported test SHALL stay as the work tree
+holds them. Every such file SHALL be read before the run and put back byte for byte
 (sha256 checked) after it, with the production files, before anything else runs. When the file of a decided test
 cannot be found, when there is no head report, or when such a file is a link, lies outside the work tree, cannot be
 read or is too large to vary, the run SHALL set nothing aside (the run of L4-IMP-003 as it was) and SHALL say why.

@@ -51,4 +51,7 @@ question.
 - `docs/SPEC.md` (L4-IMP-003, the new L4-IMP-097, SCN-IMP-526..532, change-table row 127), `CHANGELOG.md`.
 - Limits: a candidate test that imports another of the unit's test files errors in the scoped run and is not confirmed by
   it (the hold that follows says so); a candidate file that itself leaves its process running still meets the limit, now
-  after twice the test run instead of after `gates.timeout`.
+  after twice the test run instead of after `gates.timeout`; a candidate that fails at the base by the stub's own
+  not-implemented error (not by assertion) is still no proof, as before; a test file under a protected path is never
+  set aside; `discriminate_extra` (`test-extra-base`, used by the tests chore, the repair proofs and the verifier's extra
+  proofs) still runs the whole suite at the base and is not changed here.

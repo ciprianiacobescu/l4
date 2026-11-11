@@ -13,6 +13,11 @@
 
 ## 2. The scope of the base run (D1, D2, D4)
 
+- [ ] 2.0 Read, before writing code, what the guards of a red step compare, and confirm design D2's last paragraph:
+  `Workbench.run_gate_spec` (`snapshot_protected`, `restore_protected`, `revert_unsnapshotted`), `held_patch.ReplayGuard`
+  (`restore_replay`, `_restore_one`), `stubs.ProductionGuard.check`, and `tdd._preexisting_changes` /
+  `preexisting_test_changes`. If any of them keys on a file's modification time, inode or presence at gate time rather
+  than its content, stop and report it instead of going on.
 - [ ] 2.1 Write the tests first in `test_base_run_scope.py`, with the fixtures and helpers of
   `tests/unit/implementer/test_base_run.py` (`make_bench`, `step`, `commit_head`, `zero`, `based`, `snapshot`,
   `porcelain`; import or copy what you need). To see the work tree during the run, wrap `Workbench.run_gate` with a spy
@@ -35,6 +40,10 @@
     (`tests/test_earlier.py` present during the run), and the event says `unscoped: "the file of tests.test_new::test_new_total was not found"`.
   - A linked test file (a symlink under `tests/` that holds a reported test) makes the run unscoped, and the link is
     unchanged after it.
+  - A test file of the unit under a protected path (configure `odd.forbidden_paths` in the bench to cover it, or use a
+    `**/migrations/**` path) stays during the run.
+  - `test_base_run.py::test_scn_imp_301_...` must still pass unchanged: its earlier commit's test file
+    (`tests/test_middleware.py`) is now set aside for the run, and the outcome is the same.
   - SCN-IMP-532: parametrize `confirmed`, `timed_out` (spy returns a timed-out `GateResult` without running) and
     `gate_error` (spy raises): the snapshot and `porcelain` are equal before and after, and no `restore failed` is
     recorded (`bench.events("guard.restore_failed")` or the name the code uses; grep `restore failed` in
