@@ -18,7 +18,7 @@ import re
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from l4.fsutil import (
     LinkedPath,
@@ -167,11 +167,14 @@ def _read(wb: Workbench, rel: str, where: str | None = None) -> tuple[bytes, int
 
 def _drop_bytecode_of(wb: Workbench, rel: str, where: str) -> None:
     """`_drop_bytecode` for a block that must go on: a `__pycache__` the test code made unreadable is recorded as a
-    refused write, never raised (this runs in `finally` blocks, after the files are put back)."""
+    refused write of that folder (the file itself was put back), never raised (this runs in `finally` blocks, after the
+    files are put back)."""
     try:
         _drop_bytecode(wb.worktree, rel)
     except OSError as exc:
-        wb.refused_write(UnsafeFile(str(exc)), path=rel, where=where)
+        cache = PurePosixPath(rel).parent / "__pycache__"
+        why = f"the cached bytecode of {rel} could not be removed ({exc.strerror or type(exc).__name__})"
+        wb.refused_write(UnsafeFile(why), path=cache.as_posix(), where=where)
 
 
 def _restore(wb: Workbench, originals: Mapping[str, tuple[bytes, int]], where: str) -> None:

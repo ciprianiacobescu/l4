@@ -1474,7 +1474,8 @@ any other blocking question (L4-IMP-001), so unaffected tasks proceed and the un
 eligible task remains [I]. Evidence: [V, spikes/03] on 1 conflicting change and 0 false positives on 1 clean change;
 the lint cannot see conflicts between requirement prose and a scenario [I].
 
-**L4-GAT-001** Gate commands MUST run with a timeout (`gates.timeout`), capture stdout/stderr to
+**L4-GAT-001** Gate commands MUST run with a timeout (`gates.timeout`; the base run of L4-IMP-003 has a lower limit
+of its own, L4-IMP-097), capture stdout/stderr to
 `.l4-out/gates/<run-id>/<gate>.log`, and be judged by exit code plus, for test gates, the parsed report.
 
 **L4-GAT-004** One test MUST NOT be able to use up the whole gate (W-D1). The harness-owned pytest plugin `l4_trace`,
@@ -2018,7 +2019,7 @@ for a red test that failed by the wrong kind of error
       re-tagging an existing test creates none [V, Kiro e2e H2: `@pytest.mark.l4` added to existing tests]), or a
       passing new test (unless its criterion is pre-satisfied, below) fails the red phase (attempt counted);
    4. regression: every test that passed at the step's base still passes, otherwise red fails with
-      `red broke pre-existing tests` [V, spikes/01, spikes/02]; the base report MAY be a reused measurement of the
+      `red broke existing tests` [V, spikes/01, spikes/02]; the base report MAY be a reused measurement of the
       previous green gate (L4-IMP-088);
    5. run (b), the **vacuity check, per criterion**, run only when check 2 passed (a stub-purity leak is never labelled
       vacuous): for **each criterion the task cites** that is not pre-satisfied (below; the discrimination check
@@ -2614,7 +2615,10 @@ holds none of the decided tests SHALL be removed. A pre-existing test file the u
 holds it (a runner may write snapshot entries next to a file at its base content that nothing would put back), and so
 SHALL test support files and files that hold no reported test. Every file removed SHALL be read before the run and put
 back byte for byte (sha256 checked) after it, with the production files, before anything else runs; a failure to drop a
-file's cached bytecode SHALL be recorded and SHALL NOT keep another file from being put back. When the file of a
+file's cached bytecode SHALL be recorded and SHALL NOT keep another file from being put back. This holds for every
+variant run that puts files back: the cache folder that could not be cleaned is recorded as a refused write of that
+folder (not of the file, which is back), so the attempt is not kept and a verification round fails, as for any write
+the harness could not make (L4-SEC-020). When the file of a
 decided test cannot be found, when there is no head report, or when such a file is a link, lies outside the work tree,
 cannot be read or is too large to vary, the run SHALL set nothing aside (nothing is removed; the run's own limit still
 applies) and SHALL say why.
@@ -10594,7 +10598,7 @@ scenario is a spec defect (§26).
   `if text: raise NotImplementedError` as the first statement of `slugify` (admissible syntax), so
   `tests/test_slugify.py::test_basic`, which passed at the step's base, now fails
 - **When** the red checks run
-- **Then** check 4 fails with `red broke pre-existing tests` naming `test_basic`; nothing is committed; the attempt is
+- **Then** check 4 fails with `red broke existing tests` naming `test_basic`; nothing is committed; the attempt is
   counted.
 
 #### SCN-IMP-40 (+) An over-implemented later task is confirmed already satisfied · L4-IMP-002, L4-IMP-003, L4-IMP-007
@@ -13125,7 +13129,8 @@ scenario is a spec defect (§26).
   and `base_run.scope` says `unscoped: the file of <id> was not found`
 
 #### SCN-IMP-531 (−) The base run stops at its own limit · L4-IMP-097, L4-IMP-060
-- **Given** `gates.timeout: 30m` and three red steps whose test gate took 200 s, 10 s and 20 minutes
+- **Given** `gates.timeout: 30m`, `gates.test_timeout: 0s` and three red steps whose test gate took 200 s, 10 s and 20
+  minutes
 - **When** each step's base run executes
 - **Then** its limit is 400 s, 300 s and 1800 s; a run of the first step that does not finish in 400 s is stopped, its
   reason names `the base run's own limit`, its criteria stay as the zero-value run left them (inconclusive: the task is

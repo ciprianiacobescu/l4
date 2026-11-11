@@ -72,7 +72,8 @@ set aside).
   and `base_run.scope` says `unscoped: the file of <id> was not found`
 
 #### Scenario: SCN-IMP-531 (−) The base run stops at its own limit
-- **Given** `gates.timeout: 30m` and three red steps whose test gate took 200 s, 10 s and 20 minutes
+- **Given** `gates.timeout: 30m`, `gates.test_timeout: 0s` and three red steps whose test gate took 200 s, 10 s and 20
+  minutes
 - **When** each step's base run executes
 - **Then** its limit is 400 s, 300 s and 1800 s; a run of the first step that does not finish in 400 s is stopped, its
   reason names `the base run's own limit`, its criteria stay as the zero-value run left them (inconclusive: the task is

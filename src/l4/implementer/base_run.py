@@ -164,7 +164,7 @@ def _decided_files(wb: Workbench, decided: Sequence[str], real: TestReport | Non
 def _exists_at_base(wb: Workbench, base: str, rel: str) -> tuple[bool, str]:
     """(whether the unit base holds `rel`, ""); (False, why) when git could not tell."""
     try:
-        return bool(wb.git.run_bytes("ls-tree", "-z", base, "--", f":(literal){rel}", check=False)), ""
+        return bool(wb.git.run_bytes("ls-tree", "-z", base, "--", f":(literal){rel}")), ""  # a git failure raises
     except GitError:
         return False, f"{rel} could not be looked up at the unit base"
 

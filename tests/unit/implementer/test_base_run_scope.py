@@ -417,8 +417,9 @@ def test_a_bytecode_folder_the_tests_made_unreadable_does_not_stop_the_restore(m
     assert sha_of(root / PRICING_TESTS) == digest(head_text)
     assert sha_of(root / NEW_PATH) == digest(FAILS_AT_BASE)
     refused = violations(bench)
-    assert ("restore failed", EARLIER_PATH) in refused and ("restore failed", PRICING) in refused
-    assert ("restore failed", PRICING_TESTS) not in refused  # nothing was done to it
+    # the refusal names the cache folder, not the file, which was put back
+    assert ("restore failed", "tests/__pycache__") in refused and ("restore failed", "src/pytdd/__pycache__") in refused
+    assert not {path for _, path in refused} & {EARLIER_PATH, PRICING, PRICING_TESTS}
 
 
 @pytest.mark.parametrize("what", ["recreate_aside", "rewrite_production", "delete_production"])

@@ -2121,7 +2121,7 @@ def run_green(
     if not reason:
         reason = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run and any at_red accept
         stuck = stuck or restore_replay(wb, "static gates")  # a linter that writes files: before the test-at-red run
-    if not reason:
+    if not reason and not stuck:  # no test-at-red run, hold or accept on a tree the replay could not put back
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
     stuck = stuck or restore_replay(wb, "test-at-red run")
     if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
