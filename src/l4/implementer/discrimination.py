@@ -165,17 +165,27 @@ def _read(wb: Workbench, rel: str, where: str | None = None) -> tuple[bytes, int
         return None
 
 
-def _restore(wb: Workbench, originals: Mapping[str, tuple[bytes, int]], where: str) -> None:
-    """Put every original back and check it by sha256, reading through the same no-follow walk. A mismatch is
-    `restore failed`, never an exception."""
-    for rel, (data, mode) in originals.items():
-        put = _put(wb, rel, data, mode, where)
+def _drop_bytecode_of(wb: Workbench, rel: str, where: str) -> None:
+    """`_drop_bytecode` for a block that must go on: a `__pycache__` the test code made unreadable is recorded as a
+    refused write, never raised (this runs in `finally` blocks, after the files are put back)."""
+    try:
         _drop_bytecode(wb.worktree, rel)
-        if not put:
+    except OSError as exc:
+        wb.refused_write(UnsafeFile(str(exc)), path=rel, where=where)
+
+
+def _restore(wb: Workbench, originals: Mapping[str, tuple[bytes, int]], where: str) -> None:
+    """Put every original back and check it by sha256, reading through the same no-follow walk; then drop the cached
+    bytecode of each, so that one unreadable `__pycache__` cannot leave a file unrestored. A mismatch or a refused
+    cleanup is recorded (`restore failed`), never an exception."""
+    for rel, (data, mode) in originals.items():
+        if not _put(wb, rel, data, mode, where):
             continue  # the refusal is recorded already
         back = _read(wb, rel)
         if back is None or _digest(back[0]) != _digest(data):
             wb.refused_write(UnsafeFile(f"{rel} differs after the restore"), path=rel, where=where)
+    for rel in originals:
+        _drop_bytecode_of(wb, rel, where)
 
 
 def _applied_names(wb: Workbench, paths: Sequence[str]) -> frozenset[str]:

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from l4.agents.fake import Step
+from l4.config.schema import duration_seconds
 from l4.gates.runner import GateResult
 from l4.implementer import base_run, tdd
 from l4.implementer.base_run import confirmed_by_base_run
@@ -127,21 +128,22 @@ def test_scn_imp_526_an_earlier_tasks_test_file_is_set_aside_and_the_candidate_i
     confirmed_via_base_run(bench)
     assert watch.during == [{EARLIER_PATH: None, NEW_PATH: digest(FAILS_AT_BASE)}]
     event = scope_event(bench)
-    assert (event["aside"], event["kept"], event["at_base"], event["unscoped"]) == ([EARLIER_PATH], [NEW_PATH], [], "")
+    assert (event["aside"], event["kept"], event["unscoped"]) == ([EARLIER_PATH], [NEW_PATH], "")
     assert event["decided"] == 1 and event["more"] == 0
     assert sha_of(bench.wb.worktree / EARLIER_PATH) == digest(EARLIER)  # back after the run
 
 
-def test_scn_imp_527_a_pre_existing_test_file_the_unit_changed_runs_at_its_base_content(make_bench, zero, watch):
+def test_scn_imp_527_a_pre_existing_test_file_the_unit_changed_stays_as_the_work_tree_holds_it(make_bench, zero, watch):
     bench: Bench = make_bench([step()])
     base_text = (bench.wb.worktree / PRICING_TESTS).read_text()
     head_text = base_text + "\n\ndef test_total_of_one():\n    assert total([1.0]) == 1.0\n"
     commit_files(bench, {PRICING: HEAD_PRICING, PRICING_TESTS: head_text})
     watch.paths = [PRICING_TESTS]
     confirmed_via_base_run(bench)
-    assert watch.during == [{PRICING_TESTS: digest(base_text)}]
+    assert watch.during == [{PRICING_TESTS: digest(head_text)}]  # a runner may write snapshots next to it
     event = scope_event(bench)
-    assert (event["at_base"], event["aside"]) == ([PRICING_TESTS], [])
+    assert (event["aside"], event["kept"], event["unscoped"]) == ([], [NEW_PATH], "")
+    assert "at_base" not in event
     assert sha_of(bench.wb.worktree / PRICING_TESTS) == digest(head_text)
 
 
@@ -156,7 +158,7 @@ def test_scn_imp_528_a_file_that_holds_a_candidate_and_earlier_tests_stays_whole
     confirmed_via_base_run(bench)
     assert watch.during == [{EARLIER_PATH: digest(whole)}]  # the earlier test is still in it
     event = scope_event(bench)
-    assert (event["kept"], event["aside"], event["at_base"]) == ([EARLIER_PATH], [], [])
+    assert (event["kept"], event["aside"]) == ([EARLIER_PATH], [])
 
 
 def test_scn_imp_529_support_files_fixtures_and_files_without_tests_stay(make_bench, zero, watch):
@@ -174,7 +176,7 @@ def test_scn_imp_529_support_files_fixtures_and_files_without_tests_stay(make_be
     confirmed_via_base_run(bench)
     stays = {p: digest(t) for p, t in files.items() if p not in (PRICING, EARLIER_PATH)}
     assert watch.during == [{EARLIER_PATH: None, **stays}]
-    assert (scope_event(bench)["aside"], scope_event(bench)["at_base"]) == ([EARLIER_PATH], [])
+    assert scope_event(bench)["aside"] == [EARLIER_PATH]
 
 
 def test_scn_imp_530_a_candidate_whose_file_is_not_found_sets_nothing_aside(make_bench, zero, watch, monkeypatch):
@@ -189,7 +191,7 @@ def test_scn_imp_530_a_candidate_whose_file_is_not_found_sets_nothing_aside(make
     assert watch.during == [{EARLIER_PATH: digest(EARLIER)}]
     event = scope_event(bench)
     assert event["unscoped"] == f"the file of {NEW_ID} was not found"
-    assert (event["kept"], event["at_base"], event["aside"]) == ([], [], [])
+    assert (event["kept"], event["aside"]) == ([], [])
 
 
 def test_scn_imp_530_a_run_with_no_head_report_sets_nothing_aside(make_bench):
@@ -218,6 +220,7 @@ def test_a_linked_test_file_makes_the_run_unscoped_and_stays_a_link(make_bench, 
     ]
     event = scope_event(bench)
     assert "tests/test_linked.py" in event["unscoped"] and event["aside"] == []
+    assert event["kept"] == []  # an unscoped run keeps nothing apart
     assert sha_of(wt / "tests/test_linked.py") == LINK
 
 
@@ -247,7 +250,6 @@ def head_state(bench: Bench) -> str:
 @pytest.mark.parametrize("mode", ["confirmed", "timed_out", "gate_error"])
 def test_scn_imp_532_the_work_tree_is_the_same_after_a_scoped_base_run(make_bench, monkeypatch, mode):
     bench: Bench = make_bench([])
-    base_text = (bench.wb.worktree / PRICING_TESTS).read_text()
     head_text = head_state(bench)
     gate = bench.wb.run_gate("test", bench.wb.cfg.gates.test.command, reports=bench.wb.cfg.gates.test.reports)
     assert gate.report is not None and NEW_ID in gate.report.tests
@@ -272,8 +274,7 @@ def test_scn_imp_532_the_work_tree_is_the_same_after_a_scoped_base_run(make_benc
     else:
         got = confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=gate.report)
         assert bool(got.confirmed) == (mode == "confirmed"), got
-    assert during == [{EARLIER_PATH: None, PRICING_TESTS: digest(base_text)}]  # the scope was on during the run
-    assert head_text != base_text
+    assert during == [{EARLIER_PATH: None, PRICING_TESTS: digest(head_text)}]  # the scope was on during the run
     assert snapshot(bench.wb.worktree) == before and porcelain(bench) == status
     assert [e for e in bench.events("guard.violation") if e.get("rule") == "restore failed"] == []
 
@@ -294,7 +295,7 @@ def run_with_timeouts(monkeypatch, calls: list[int | None]) -> None:
     ids=["twice the step run", "at least 300s", "at most gates.timeout", "step run unknown"],
 )
 def test_scn_imp_531_the_base_run_stops_at_its_own_limit(make_bench, monkeypatch, head, limit):
-    bench: Bench = make_bench([], timeout="30m")
+    bench: Bench = make_bench([], timeout="30m", test_timeout="0s")
     calls: list[int | None] = []
     run_with_timeouts(monkeypatch, calls)
     got = confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, head_seconds=head)
@@ -307,15 +308,30 @@ def test_scn_imp_531_the_base_run_stops_at_its_own_limit(make_bench, monkeypatch
 
 
 def test_scn_imp_531_the_reason_names_the_limit_and_the_hold_says_so(make_bench, monkeypatch):
-    bench: Bench = make_bench([], timeout="30m")
+    bench: Bench = make_bench([], timeout="30m", test_timeout="0s")
     run_with_timeouts(monkeypatch, [])
     got = confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, head_seconds=200.0)
     assert (
-        "timed out after 400s: the base run's own limit, twice the step's test run (at least 300s)"
-        in got.inconclusive[KNOWN]
+        "timed out after 400s: the base run's own limit (twice the step's test run, or the step's test run plus one "
+        "test's limit, at least 300s)" in got.inconclusive[KNOWN]
     )
     zero = PreSatisfied({}, {}, "", {KNOWN: "the zero-value run could not decide"})
     assert "the base run's own limit" in base_run.combine(zero, got).message
+
+
+@pytest.mark.parametrize(
+    ("test_timeout", "head", "limit"),
+    [("auto", 200.0, 800), ("auto", 10.0, 610), ("auto", 1000.0, 1800), ("5m", 200.0, 500), ("5m", 400.0, 800)],
+    ids=["auto per-test limit", "auto, short run", "capped at gates.timeout", "5m plus run", "twice the run wins"],
+)
+def test_scn_imp_531_the_limit_leaves_room_for_one_tests_own_limit(make_bench, monkeypatch, test_timeout, head, limit):
+    """`gates.timeout: 30m`; the `auto` per-test limit is 10 minutes."""
+    bench: Bench = make_bench([], timeout="30m", test_timeout=test_timeout)
+    calls: list[int | None] = []
+    run_with_timeouts(monkeypatch, calls)
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, head_seconds=head)
+    assert calls == [limit]
+    assert scope_event(bench)["timeout_s"] == limit
 
 
 def test_scn_imp_531_a_limit_is_never_above_gates_timeout(make_bench, monkeypatch):
@@ -344,3 +360,146 @@ def test_scn_imp_531_run_red_passes_the_step_test_gate_time(make_bench, zero, mo
     monkeypatch.setattr(tdd, "confirmed_by_base_run", spy)
     run_red(bench.wb, TASK, attempt=1)
     assert len(seen) == 1 and seen[0] > 0, seen
+
+
+def head_run(bench: Bench) -> tuple[str, object]:
+    """`head_state` and the head run's report."""
+    head_text = head_state(bench)
+    gate = bench.wb.run_gate("test", bench.wb.cfg.gates.test.command, reports=bench.wb.cfg.gates.test.reports)
+    assert gate.report is not None and NEW_ID in gate.report.tests
+    return head_text, gate.report
+
+
+def violations(bench: Bench) -> list[tuple[str | None, str | None]]:
+    return [(e.get("rule"), e.get("path")) for e in bench.events("guard.violation")]
+
+
+def act_during_the_gate(monkeypatch, action) -> list[int]:
+    """`action(worktree)` runs after the real gate of `test-base-run` (test code acts during the run); the list holds
+    how many `base_run.scope` events were in the ledger when the gate was called."""
+    real_gate = Workbench.run_gate
+    scopes: list[int] = []
+
+    def spy(self, name, command, **kwargs):
+        if name != "test-base-run":
+            return real_gate(self, name, command, **kwargs)
+        ledger = self.ref.path / ".l4" / "ledger"
+        scopes.append(sum(text.count('"base_run.scope"') for text in (f.read_text() for f in ledger.glob("*.jsonl"))))
+        done = real_gate(self, name, command, **kwargs)
+        action(self.worktree)
+        return done
+
+    monkeypatch.setattr(Workbench, "run_gate", spy)
+    return scopes
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any folder")
+def test_a_bytecode_folder_the_tests_made_unreadable_does_not_stop_the_restore(make_bench, monkeypatch):
+    """A refused `__pycache__` cleanup is recorded and the rest is put back: every file is back byte for byte."""
+    bench: Bench = make_bench([])
+    head_text, report = head_run(bench)
+    caches = [bench.wb.worktree / "tests" / "__pycache__", bench.wb.worktree / "src" / "pytdd" / "__pycache__"]
+
+    def lock(root: Path) -> None:
+        for cache in caches:
+            cache.mkdir(exist_ok=True)
+            os.chmod(cache, 0)
+
+    act_during_the_gate(monkeypatch, lock)
+    try:
+        confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=report)  # must not raise
+    finally:
+        for cache in caches:
+            os.chmod(cache, 0o755)
+    root = bench.wb.worktree
+    assert sha_of(root / EARLIER_PATH) == digest(EARLIER)  # set aside for the run
+    assert sha_of(root / PRICING) == digest(HEAD_PRICING)  # swapped to its base content for the run
+    assert sha_of(root / PRICING_TESTS) == digest(head_text)
+    assert sha_of(root / NEW_PATH) == digest(FAILS_AT_BASE)
+    refused = violations(bench)
+    assert ("restore failed", EARLIER_PATH) in refused and ("restore failed", PRICING) in refused
+    assert ("restore failed", PRICING_TESTS) not in refused  # nothing was done to it
+
+
+@pytest.mark.parametrize("what", ["recreate_aside", "rewrite_production", "delete_production"])
+def test_a_gate_that_rewrites_deletes_or_recreates_a_scoped_file_leaves_it_back(make_bench, monkeypatch, what):
+    bench: Bench = make_bench([])
+    _, report = head_run(bench)
+    before, status = snapshot(bench.wb.worktree), porcelain(bench)
+
+    def act(root: Path) -> None:
+        if what == "recreate_aside":
+            (root / EARLIER_PATH).write_text("planted by the gate\n")
+        elif what == "rewrite_production":
+            (root / PRICING).write_text("garbage\n")
+        else:
+            (root / PRICING).unlink()
+
+    scopes = act_during_the_gate(monkeypatch, act)
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=report)
+    assert snapshot(bench.wb.worktree) == before and porcelain(bench) == status
+    assert violations(bench) == []
+    assert scopes == [1]  # `base_run.scope` is recorded before the gate runs
+
+
+def test_a_support_file_that_holds_a_reported_test_stays(make_bench, watch):
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    support = "tests/helpers/test_selfcheck.py"  # `**/tests/helpers/**` is a support glob, `**/test_*.*` a test glob
+    text = HEADER.format(c=UNKNOWN) + "def test_selfcheck():\n    assert total([1.0]) == 1.0\n"
+    commit_files(bench, {PRICING: HEAD_PRICING, support: text, "tests/helpers/__init__.py": ""})
+    (bench.wb.worktree / NEW_PATH).write_text(FAILS_AT_BASE)
+    gate = bench.wb.run_gate("test", bench.wb.cfg.gates.test.command, reports=bench.wb.cfg.gates.test.reports)
+    assert gate.report is not None and "tests.helpers.test_selfcheck::test_selfcheck" in gate.report.tests
+    watch.paths = [support]
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=gate.report)
+    assert watch.during == [{support: digest(text)}]
+    assert scope_event(bench)["aside"] == []
+
+
+def test_a_file_whose_only_report_entry_is_a_collection_error_is_set_aside(make_bench, watch):
+    bench: Bench = make_bench([])
+    tdd.run_setup(bench.wb)
+    broken = "tests/test_broken.py"
+    text = "import no_such_module_anywhere\n\n\ndef test_x():\n    pass\n"
+    commit_files(bench, {PRICING: HEAD_PRICING, broken: text})
+    (bench.wb.worktree / NEW_PATH).write_text(FAILS_AT_BASE)
+    gate = bench.wb.run_gate(
+        "test", bench.wb.cfg.gates.test.command, reports=bench.wb.cfg.gates.test.reports,
+        extra_env={"PYTEST_ADDOPTS": "--continue-on-collection-errors"},
+    )  # fmt: skip
+    assert gate.report is not None and gate.report.collection_errors, gate.reason
+    watch.paths = [broken]
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=gate.report)
+    assert watch.during == [{broken: None}]
+    assert scope_event(bench)["aside"] == [broken]
+    assert sha_of(bench.wb.worktree / broken) == digest(text)
+
+
+def test_a_file_that_cannot_be_removed_is_not_listed_as_set_aside(make_bench, monkeypatch):
+    bench: Bench = make_bench([])
+    _, report = head_run(bench)
+    monkeypatch.setattr(base_run, "_unlink", lambda wb, rel, where: None)  # the removal was refused
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=report)
+    assert scope_event(bench)["aside"] == []
+
+
+def test_the_limit_reaches_run_gate(make_bench, monkeypatch):
+    """The chain `confirmed_by_base_run` -> `run_with_code_of` -> `Workbench.run_gate` carries the limit."""
+    bench: Bench = make_bench([])
+    _, report = head_run(bench)
+    limits: list[int | None] = []
+    real_gate = Workbench.run_gate
+
+    def spy(self, name, command, **kwargs):
+        if name == "test-base-run":
+            limits.append(kwargs.get("timeout_s"))
+        return real_gate(self, name, command, **kwargs)
+
+    monkeypatch.setattr(Workbench, "run_gate", spy)
+    confirmed_by_base_run(bench.wb, {KNOWN: [NEW_ID]}, {NEW_ID}, real=report, head_seconds=200.0)
+    gates = bench.wb.cfg.gates
+    expected = min(
+        duration_seconds(gates.timeout), max(300, 400, 200 + gates.test_timeout_seconds())
+    )  # twice the run, the run plus one test's limit, at least 300s
+    assert limits == [expected] and expected > 300
