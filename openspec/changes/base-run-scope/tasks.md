@@ -30,8 +30,8 @@
     ["tests/test_earlier.py"]`, `kept: ["tests/test_new.py"]`, `unscoped: ""`.
   - SCN-IMP-527: an earlier commit changes a test file that exists at the unit base (create it before the unit base in
     the bench's repository, as the bench creates its base files, or commit it on the base branch first; read
-    `conftest.py` for how the unit base is made): during the run it holds the base content (`at_base`), after it the
-    head content.
+    `conftest.py` for how the unit base is made): during the run it holds the head content, as the work tree holds it
+    (a pre-existing test file the unit changed stays), and it is listed nowhere in `base_run.scope`.
   - SCN-IMP-528: the red step appends its candidate test to `tests/test_earlier.py`: the file stays whole during the run
     (its earlier test included) and is under `kept`.
   - SCN-IMP-529: an earlier commit adds `tests/conftest.py`, `tests/fixtures/data.json` and a support file matching the
@@ -50,7 +50,7 @@
     `discrimination.py`).
   Run them and see them fail.
 - [x] 2.2 Then add the context manager `other_tests_at_base` and `Scope` to `src/l4/implementer/base_run.py` (design D2;
-  reuse `_read`, `_put`, `_unlink`, `_restore`, `_drop_bytecode`, `worktree_files`, `own_test_files` and
+  reuse `_read`, `_unlink`, `_restore`, `_drop_bytecode_of`, `worktree_files`, `own_test_files` and
   `test_locate.file_of_id`; do not change `_canonical` or `red_code_in_place`), use it in `confirmed_by_base_run` around
   `run_with_code_of`, and emit `base_run.scope` (design D4) before the gate. Update the module docstring (the
   `test files ... stay as the worktree holds them` sentence). Run the tests of 1.2 plus
@@ -74,17 +74,34 @@
 
 - [x] 4.1 `docs/SPEC.md`: in L4-IMP-003's paragraph **Confirmation by a base run**, after "while test files, test support
   files and harness, spec and documentation paths (evidence kind `exempt`) stay as the worktree holds them", add
-  "(except the unit's own test files that hold none of the tests the run decides, which are at the unit base for the
-  run, L4-IMP-097)", and after "Every file touched is put back byte for byte (sha256 checked) before anything else
+  "(except the test files the unit added that hold none of the tests the run decides, which are set aside for the run,
+  L4-IMP-097)", and after "Every file touched is put back byte for byte (sha256 checked) before anything else
   runs." add "The run has its own limit (L4-IMP-097)."; add L4-IMP-097 after L4-IMP-096 (or after L4-IMP-095 when
   L4-IMP-096 is not in this branch) with the text of `specs/base-run-scope/spec.md`; add SCN-IMP-526..532 after the last
   SCN-IMP scenario; add `base_run.scope` wherever the SPEC lists ledger event types (grep `criterion.pre_satisfied`
   in the SPEC's event catalogue, if it has one); add row 127 `base-run-scope` to the change table of section 21 (what
   changed, the functions, the consumer case in neutral words (a consumer's TypeScript unit: the base run hit the
   30-minute gate timeout three times because an earlier task's test file left its process running against the base
-  code; a reproduction with the unit's other test files set aside wrote a report in about 7 minutes and confirmed the
-  five candidates), the limits of the proposal, the ids, `openspec/changes/base-run-scope/`, the test file
+  code; a reproduction with the unit's other test files set aside wrote a report in about 7 minutes and L4's
+  classifier reads the five candidates there as proofs), the limits of the proposal, the ids, `openspec/changes/base-run-scope/`, the test file
   `test_base_run_scope`).
 - [x] 4.2 `CHANGELOG.md`: under `## Unreleased`, one entry in the style of the 0.4.56 entries (L4-IMP-097).
-- [x] 4.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
+- [x] 4.3 Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`, `uv run --frozen pytest tests/unit/docs -q`,
   `uv run --frozen ruff check src tests` and `uv run --frozen ruff format --check src tests`.
+
+## 5. Review fixes
+
+- [x] 5.1 `_restore` puts every original back and checks it by sha256 first, then drops the cached bytecode of each in a
+  second pass, each call guarded (`_drop_bytecode_of`: an `OSError` is a refused write, never raised); the bytecode drop
+  in the swap loop of `other_tests_at_base` is guarded the same way. Test: test code makes `__pycache__` folders
+  unreadable during `test-base-run`; every file is back and a refusal is recorded. Also run `test_zero_keep_loop`,
+  `test_vacuity`, `test_planted_links` and `test_restore_links` (the restore of `red_code_in_place` is the same helper).
+- [x] 5.2 A test pins that `run_with_code_of` passes `timeout_s` to `Workbench.run_gate`.
+- [x] 5.3 The limit is `min(gates.timeout, max(300, 2 * head_seconds, head_seconds + gates.test_timeout))` and applies to
+  scoped and unscoped runs; the reason text, SCN-IMP-531 and the spec text say so.
+- [x] 5.4 Only test files the unit added are set aside; a pre-existing test file the unit changed stays as the work tree
+  holds it (SCN-IMP-527 rewritten; `Scope.at_base`, the `at_base` event field and the base-blob read are gone).
+- [x] 5.5 Tests for the support-glob exclusion, a collection-error-only file, `base_run.scope` recorded before the gate,
+  and a gate that recreates a set-aside file or rewrites or deletes a swapped production file.
+- [x] 5.6 `base_run.scope.kept` is empty when the run is unscoped; `aside` lists only files actually removed; the limits
+  of the proposal name test ids that do not map to a file.

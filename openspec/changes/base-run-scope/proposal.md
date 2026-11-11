@@ -13,22 +13,23 @@ closed them, so its test process never exited and the runner waited for it until
 take 3 to 8 seconds each at head. The runner's own per-test limit does not help: the tests end, the process does not.
 That file decides nothing: the base run only reads the outcome of the step's own candidate tests.
 
-The same reproduction with the unit's other test files set aside (added ones removed, changed ones at their base
-content) finished in about 7 minutes under heavy load and wrote a report. All five candidates failed there by assertion,
-which L4's own classifier (`variant.test_outcome`) reads as a proof: the base run would have confirmed the task with no
-question.
+The same reproduction with the unit's other test files set aside finished in about 7 minutes under heavy load and wrote
+a report. L4's own classifier (`variant.test_outcome`) reads the five candidates there as proofs: the base run would
+have confirmed the task with no question.
 
 ## What Changes
 
-- The base run puts the unit's other test files at the unit base for its run: a file that holds a test of the head
-  report, that the unit added or changed (by commits or in the work tree), and that holds none of the tests the base run
-  decides is removed for the run when the unit added it, and holds its unit-base content when the unit changed it.
-  Every such file is put back byte for byte (sha256 checked) before anything else runs, like the production files.
-  Test support files and files that hold no reported test (fixtures, data, `conftest.py`) stay as the work tree holds
-  them. When the file of any decided test cannot be found, nothing is set aside and the run is today's.
-- The base run gets its own time limit: twice the wall time of the step's own test gate, at least 5 minutes and at most
-  `gates.timeout`. A base run that runs past it is stopped and decides nothing, as a timed-out base run does today; its
-  reason names the limit.
+- The base run sets aside the unit's other new test files for its run: a file that holds a test of the head report,
+  that the unit added (by commits or in the work tree; the unit base lacks it), and that holds none of the tests the
+  base run decides is removed for the run. Every such file is put back byte for byte (sha256 checked) before anything
+  else runs, like the production files, even when test code made a `__pycache__` folder unreadable. A pre-existing test
+  file the unit changed stays as the work tree holds it (a Jest or Vitest run at its base content could write snapshot
+  entries the head `.snap` lacks, which nothing puts back), and so do test support files and files that hold no reported
+  test (fixtures, data, `conftest.py`). When the file of any decided test cannot be found, nothing is set aside.
+- The base run gets its own time limit, scoped or not: twice the wall time of the step's own test gate, or that time
+  plus one test's limit (`gates.test_timeout`), whichever is longer, at least 5 minutes and at most `gates.timeout`. A
+  base run that runs past it is stopped and decides nothing, as a timed-out base run does today; its reason names the
+  limit.
 - The ledger records the scope of each base run (`base_run.scope`).
 
 ## Capabilities
@@ -51,7 +52,10 @@ question.
 - `docs/SPEC.md` (L4-IMP-003, the new L4-IMP-097, SCN-IMP-526..532, change-table row 127), `CHANGELOG.md`.
 - Limits: a candidate test that imports another of the unit's test files errors in the scoped run and is not confirmed by
   it (the hold that follows says so); a candidate file that itself leaves its process running still meets the limit, now
-  after twice the test run instead of after `gates.timeout`; a candidate that fails at the base by the stub's own
+  after the run's own limit instead of after `gates.timeout`; a candidate that fails at the base by the stub's own
   not-implemented error (not by assertion) is still no proof, as before; a test file under a protected path is never
-  set aside; `discriminate_extra` (`test-extra-base`, used by the tests chore, the repair proofs and the verifier's extra
-  proofs) still runs the whole suite at the base and is not changed here.
+  set aside; test ids that do not map to a file (Node's built-in junit reporter's `test::` class names, Go import
+  paths, C# or Java class names, a class name that carries a `describe` chain) make the run unscoped, which keeps
+  today's run with the new limit; a pre-existing test file the unit changed stays as the work tree holds it;
+  `discriminate_extra` (`test-extra-base`, used by the tests chore, the repair proofs and the verifier's extra proofs)
+  still runs the whole suite at the base and is not changed here.

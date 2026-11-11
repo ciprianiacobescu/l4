@@ -38,19 +38,24 @@ verifier's runs; reading a partial report of a stopped run; the limit of any oth
 
 `decided = sorted({t for tests in candidates.values() for t in tests if t in new_ids})`. With `files =
 worktree_files(wb)` and `own = own_test_files(wb)`, `keep = {file_of_id(t, files, own) for t in decided}`. When any of
-them is None, or `real` is None, the run is unscoped: nothing is set aside (today's run), and the scope event says why
+them is None, or `real` is None, the run is unscoped: nothing is set aside (today's work tree; the limit of D3 still applies), and the scope event says why
 (`unscoped: "the file of <id> was not found"`, `"no head report"`).
 
-### D2. Which test files are put to the unit base
+### D2. Which test files are set aside
 
 The *reported files* are the files of the head report's tests: `file_of_id(head, files, own)` for each distinct id head
 (the part before the first `::`) of `real.tests` and `real.collection_errors`, so a file is mapped once however many
-tests it holds. The files put to the unit base for the run are the reported files that are in `own`, that are not in
-`keep`, and that match `tdd.test_globs` and not `tdd.test_support_globs`. A file that holds no reported test (a fixture,
-data, `conftest.py`, a helper module under a test glob) is never touched, and neither is a test support file. Nor is a
-file under a protected path (`security.protected.is_protected(path, wb.protected.odd_forbidden)` is not None): the gate's
-own protected-path revert (`revert_unsnapshotted`) would put such a file back to HEAD in the middle of the run and record
-a violation.
+tests it holds. The files set aside for the run are the reported files that are in `own`, that are not in `keep`, that
+match `tdd.test_globs` and not `tdd.test_support_globs`, that lie under no protected path (`wb.protected.match(path)` is
+not None: the gate's own protected-path revert (`revert_unsnapshotted`) would put such a file back to HEAD in the middle
+of the run and record a violation) **and that the unit added**: the unit base lacks them (an empty `git ls-tree <base>
+-- :(literal)<path>`). A file that holds no reported test (a fixture, data, `conftest.py`, a helper module under a test
+glob) is never touched, and neither is a test support file.
+
+A pre-existing test file the unit changed stays as the work tree holds it, as before this change. Putting it at its base
+content for the run could make a Jest or Vitest run write snapshot entries that the head `.snap` file lacks, and nothing
+would put them back; the work tree would differ after the run. Such a file is not chosen (and does not make the run
+unscoped).
 
 The guards that watch a red step see no difference: `run_gate_spec`'s protected snapshot is taken inside the scope (after
 the files are set aside) and compared after the gate inside it too; the replay guard (`restore_replay`), the production
@@ -58,24 +63,27 @@ guard (`ProductionGuard.check`) and the pre-existing test audit (`preexisting_te
 after `confirmed_by_base_run` returns, when every file is back, and compare contents (blobs, sha256), not times or
 inodes.
 
-For each such file: when it exists at the unit base (`git cat-file -e <base>:<path>`), its content is that blob for the
-run; when the unit added it, it is removed for the run. Before the gate runs, every file is read through the no-follow
-helpers of `discrimination.py` (`_read`); a file that is a link, is outside the work tree, cannot be read, or is larger
-than `MAX_VARIED_BYTES`, makes the run unscoped (D1's fallback): nothing is set aside and the scope event names the
-file. The swap uses `_put` and `_unlink` and the restore uses `_restore` (sha256 checked; a mismatch is the existing
-`restore failed` record, never an exception), in a `finally` around `run_with_code_of`, so the work tree is
-byte-identical after the run whatever the gate did (the guarantee of SCN-IMP-86).
+Before the gate runs, every file is read through the no-follow helpers of `discrimination.py` (`_read`); a file that is a
+link, is outside the work tree, cannot be read, or is larger than `MAX_VARIED_BYTES`, or a base lookup that git cannot
+answer, makes the run unscoped (D1's fallback): nothing is set aside and the scope event names the file. The swap uses
+`_unlink` and the restore uses `_restore` (sha256 checked; a mismatch is the existing `restore failed` record, never an
+exception), in a `finally` around `run_with_code_of`, so the work tree is byte-identical after the run whatever the gate
+did (the guarantee of SCN-IMP-86). `_restore` puts every original back first and drops the cached bytecode of each only
+after that, each call guarded: a `__pycache__` folder that test code made unreadable is recorded as a refused write
+(`wb.refused_write`, `restore failed`) and never raised, and never keeps a later file from being put back. The same
+guard covers the bytecode drop in the swap loop. This also holds for the restore of `red_code_in_place`, which shares
+`_restore`.
 
 The context manager lives in `base_run.py`:
 
 ```python
 @contextmanager
 def other_tests_at_base(wb: Workbench, base: str, keep: Collection[str], real: TestReport) -> Iterator[Scope]:
-    """L4-IMP-097: the unit's own test files that hold none of the decided tests, at the unit base for the run."""
+    """L4-IMP-097: the test files the unit added that hold none of the decided tests, removed for the run."""
 ```
 
-`Scope` holds `at_base` (changed files given their base content), `aside` (added files removed) and `unscoped` (the
-reason, empty when scoped).
+`Scope` holds `aside` (added files actually removed: the file is checked to be gone after `_unlink`, so a refused
+removal is not listed) and `unscoped` (the reason, empty when scoped).
 
 ### D3. The base run's own limit
 
@@ -86,32 +94,43 @@ process run; 0.0 for a gate that did not start). `Workbench.run_gate(..., timeou
 
 ```python
 limit = duration_seconds(wb.cfg.gates.timeout)
-bound = min(limit, max(BASE_RUN_FLOOR_S, ceil(BASE_RUN_FACTOR * head_seconds))) if head_seconds > 0 else limit
+one_test = wb.cfg.gates.test_timeout_seconds()  # 0: no per-test limit, nothing added
+bound = (
+    min(limit, max(BASE_RUN_FLOOR_S, ceil(BASE_RUN_FACTOR * head_seconds), ceil(head_seconds) + one_test))
+    if head_seconds > 0
+    else limit
+)
 ```
 
 with `BASE_RUN_FLOOR_S = 300` and `BASE_RUN_FACTOR = 2`. Both call sites in `run_red` pass `head_seconds=gate.seconds`.
 When the run is stopped at a bound below `gates.timeout`, the gate result's reason becomes `timed out after <bound>s:
-the base run's own limit, twice the step's test run (at least 300s)` (`dataclasses.replace`), so the classified run's
+the base run's own limit (twice the step's test run, or the step's test run plus one test's limit, at least 300s)`
+(`dataclasses.replace`), so the classified run's
 reason (`the test-base-run run wrote no readable report (...)`) and the hold that follows name it.
 
 Why twice the step's test run: the scoped base run runs no more tests than the step's own run (the same suite less the
-unit's other test files) against older code; twice leaves room for a loaded machine. Why a floor: a suite of seconds
+unit's other test files) against older code; twice leaves room for a loaded machine. Why the step's test run plus one
+test's limit: a run that is cut in before one test's own limit (`gates.test_timeout`, `auto` is the smaller of 10 minutes
+and half of `gates.timeout`) would kill a test the runner itself would still wait for; on a short suite twice the run is
+less than that. The limit applies to scoped and unscoped runs alike (an unscoped run sets nothing aside, and the limit
+still applies). Why a floor: a suite of seconds
 would get a bound that a slow start (a test database, a build) can pass. The factor and the floor are constants, not
 configuration: `gates.timeout` stays the one knob, and the bound never exceeds it.
 
 ### D4. The ledger
 
-Before the gate, `wb.emit("base_run.scope", decided=len(decided), kept=sorted(keep)[:20], at_base=sorted(at_base)[:50],
-aside=sorted(aside)[:50], more=<count left out of the two lists>, timeout_s=bound, unscoped=<reason or "">)`. Paths are
-work-tree relative; no test source is recorded.
+Before the gate, `wb.emit("base_run.scope", decided=len(decided), kept=sorted(keep)[:20], aside=sorted(aside)[:50],
+more=<count left out of the two lists>, timeout_s=bound, unscoped=<reason or "">)`. `kept` is empty when the run is
+unscoped (the files are not kept apart, nothing is set aside). Paths are work-tree relative; no test source is
+recorded.
 
 ## Risks / Trade-offs
 
 - A candidate test that imports another of the unit's test files (a shared helper defined in a test file) errors in the
   scoped run: an error is no proof, so its criterion stays as the zero-value run left it (inconclusive: the task is held,
   as today when the run gives no answer). Moving such a helper to a support file avoids it.
-- A file the unit changed that also defines a fixture another kept file imports gets its base version for the run; the
-  same rule as above applies.
+- A file the unit added that also defines a fixture another kept file imports is removed for the run; the same rule as
+  above applies.
 - A candidate file that itself never lets its process exit at the base still stops the run, now at the bound. The hold
   then names the bound.
 - Mapping the head report's ids to files reads the work tree's file list once and maps each distinct id head once; for a
