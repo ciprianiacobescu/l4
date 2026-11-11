@@ -56,6 +56,14 @@ def test_hanging_command_is_killed_and_log_kept(work):
     assert "started" in result.log_path.read_text()
 
 
+def test_the_result_carries_the_wall_time_of_the_command(work):
+    """L4-IMP-097: the base run's limit is twice the wall time of the step's own test gate."""
+    result = go(work, GateSpec("slow", "sleep 1"))
+    assert result.status == "pass" and 0.9 < result.seconds < 20
+    assert go(work, GateSpec("x", "/no/such/binary --flag")).seconds == 0.0  # a command that did not start
+    assert go(work, GateSpec("none", "")).seconds == 0.0
+
+
 def test_a_passing_command_without_reports_passes_on_its_exit_code(work):
     assert go(work, GateSpec("setup", "true")).status == "pass"
     failing = go(work, GateSpec("lint", "false"))

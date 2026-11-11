@@ -1,12 +1,12 @@
 ## 1. The wall time of a gate and a per-call limit (D3)
 
-- [ ] 1.1 Write the tests first: in `tests/unit/gates/` (next to the existing `run_gate` tests; find them with
+- [x] 1.1 Write the tests first: in `tests/unit/gates/` (next to the existing `run_gate` tests; find them with
   `grep -rln "def test.*timed_out\|timed out after" tests/unit/gates`), a gate whose command sleeps briefly gives
   `GateResult.seconds > 0`, a gate that cannot start gives `0.0`; in `tests/unit/implementer/test_base_run_scope.py`
   (new), `Workbench.run_gate(name, command, timeout_s=1)` on a command that sleeps 5 seconds is stopped with
   `timed_out` and the reason `timed out after 1s`, and without `timeout_s` the limit is `gates.timeout`. Run them and
   see them fail.
-- [ ] 1.2 Then add `seconds: float = 0.0` to `GateResult` (last field, so positional construction elsewhere keeps
+- [x] 1.2 Then add `seconds: float = 0.0` to `GateResult` (last field, so positional construction elsewhere keeps
   working), measured in `gates.runner.run_gate` around the process run (`time.monotonic()`), and `timeout_s: int | None
   = None` to `Workbench.run_gate` (used for `GateSpec.timeout_s` when given) and to `run_with_code_of` (passed on). Run
   `uv run --frozen pytest tests/unit/gates tests/unit/implementer/test_base_run.py tests/unit/implementer/test_base_run_scope.py -q`.

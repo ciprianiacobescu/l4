@@ -480,10 +480,11 @@ def run_with_code_of(
     *,
     name: str,
     extra_env: Mapping[str, str] | None = None,
+    timeout_s: int | None = None,
 ) -> GateResult:
     """The test gate with the production files swapped to their content at `sha` (`red_code_in_place`), going on past
     collection errors; the gate result tells no report, no test and a missing id apart. The reports the gate writes
-    are put back as the real run left them."""
+    are put back as the real run left them. `timeout_s`: the run's own limit instead of `gates.timeout` (L4-IMP-097)."""
     kept = _keep_reports(wb, name)
     try:
         with red_code_in_place(wb, sha, paths, where=name):
@@ -492,6 +493,7 @@ def run_with_code_of(
                 wb.cfg.gates.test.command,
                 reports=wb.cfg.gates.test.reports,
                 extra_env=merge_pytest_env(KEEP_GOING, extra_env or {}),
+                timeout_s=timeout_s,
             )
     finally:
         _put_reports_back(wb, kept, name)

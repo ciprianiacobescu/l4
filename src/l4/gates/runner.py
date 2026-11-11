@@ -7,6 +7,7 @@ M1: formats other than JUnit, `serve`, Playwright.
 """
 
 import shlex
+import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -41,6 +42,7 @@ class GateResult:
     report: TestReport | None = None  # parsed whenever a readable report exists, whatever the exit code
     timed_out: bool = False
     deadline: bool = False  # the run's soft deadline stopped the command (L4-IMP-068): the caller hands the step back
+    seconds: float = 0.0  # the wall time of the command (L4-IMP-097); 0.0 for a gate whose command did not start
 
 
 def judge_test_gate(
@@ -128,6 +130,7 @@ def run_gate(
 ) -> GateResult:
     files = _report_files(worktree, spec.reports)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    seconds = 0.0  # the command's wall time, set once it has run (L4-IMP-097)
 
     def result(
         status: Literal["pass", "fail"],
@@ -137,7 +140,7 @@ def run_gate(
         timed_out: bool = False,
         deadline: bool = False,
     ) -> GateResult:
-        return GateResult(spec.name, status, reason, code, log_path, report, timed_out, deadline)
+        return GateResult(spec.name, status, reason, code, log_path, report, timed_out, deadline, seconds)
 
     def linked_report(relative: str, link: str) -> GateResult:
         reason = f"report path {relative} has a symbolic link at {link}"
@@ -171,6 +174,7 @@ def run_gate(
             return stale_report(relative, exc)
     wrapped = sandbox.wrap(argv, sandbox_spec, build_gate_env(host_env, sandbox_spec, extra=extra_env))
     out_path, err_path = log_path.with_suffix(".out"), log_path.with_suffix(".err")
+    started = time.monotonic()
     try:
         outcome = (runner or ProcRunner()).run(
             wrapped.argv, wrapped.env, worktree, stdout_path=out_path, stderr_path=err_path, timeout_s=spec.timeout_s,
@@ -178,6 +182,7 @@ def run_gate(
     except OSError as exc:
         log_path.write_text("", encoding="utf-8")
         return result("fail", f"cannot start the command ({type(exc).__name__})")
+    seconds = time.monotonic() - started
     text = out_path.read_text(encoding="utf-8", errors="replace") + err_path.read_text(
         encoding="utf-8", errors="replace"
     )
