@@ -1155,6 +1155,17 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   saw. `the base run: every new test passes against the unit base code too` means the tests pass with the unit's code
   put back: read them before you `accept`, because a test that checks nothing passes there too. Before 0.4.54 such a
   task failed every red attempt with `no project source module is imported by those tests`.
+- From 0.4.57 the base run removes, for its run, the test files that the unit added and that hold none of the step's
+  new tests. It also has its own limit: twice the step's test run, or the step's test run plus one test's limit
+  (`gates.test_timeout`), whichever is longer, at least 300 s and at most `gates.timeout`. The reason
+  `timed out after <n>s: the base run's own limit (...)` means that the base run did not finish in that limit. A
+  larger `gates.timeout` does not help when the step's test run set the limit. Read what the run removed and kept:
+  `l4 status --unit <unit> --events --type base_run.scope` (`aside`, `kept`, `timeout_s`). When `unscoped` is not
+  empty, the run removed nothing, and the text says why. A new test of the step that does not let its process exit
+  against the unit base code (for example, a test that opens servers and closes them only when the code works) still
+  stops the run. Answer `retry: <note>` and ask in the note that the test closes what it opens.
+- From 0.4.57 the lint and type gates of a red step run before the zero-value run, the base run and run (b). A step
+  that fails one of them fails the attempt there, and L4 does not ask this question for it.
 - Read the cause. `l4 status --unit <unit>` prints `Cause: Q-NNN: <title> (<reason>)` and `Next:` with both answers.
   The ledger holds the evidence: `l4 status --unit <unit> --events --type check.inconclusive` (the reason, the runs
   that were made, the functions that were kept real, and the `excerpt` of the failing run in `gate.finished`).
