@@ -123,7 +123,7 @@ def test_scn_imp_524_the_static_gates_of_a_confirmed_step_run_once(make_bench, m
     monkeypatch.setattr(
         tdd,
         "confirmed_by_base_run",
-        lambda wb, cands, ids, *, real=None: BaseRunResult(
+        lambda wb, cands, ids, *, real=None, **_: BaseRunResult(
             confirmed={c: tuple(t) for c, t in cands.items()}, base_sha="b" * 40
         ),
     )
