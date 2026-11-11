@@ -22,7 +22,7 @@ def inconclusive(monkeypatch) -> None:
         lambda wb, cands, *, real=None: PreSatisfied(inconclusive={c: REASON for c in cands}),
     )
     monkeypatch.setattr(
-        tdd, "confirmed_by_base_run", lambda wb, cands, ids, *, real=None: BaseRunResult(reason="no failure")
+        tdd, "confirmed_by_base_run", lambda wb, cands, ids, *, real=None, **_: BaseRunResult(reason="no failure")
     )
 
 

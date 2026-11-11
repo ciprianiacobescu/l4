@@ -39,7 +39,7 @@ def zero_says(monkeypatch, *, refuted: tuple[str, ...] = ()) -> None:
     monkeypatch.setattr(
         tdd,
         "confirmed_by_base_run",
-        lambda wb, cands, ids, *, real=None: BaseRunResult(reason="none of its new tests fails by assertion"),
+        lambda wb, cands, ids, *, real=None, **_: BaseRunResult(reason="none of its new tests fails by assertion"),
     )
 
 

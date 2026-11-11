@@ -452,14 +452,15 @@ class Workbench:
         extra_env: Mapping[str, str] | None = None,
         note: Callable[[TestReport], dict] | None = None,
         builds_env: bool = False,
+        timeout_s: int | None = None,
     ) -> GateResult:
         """`network` defaults to `gates.network`; the setup step passes True (it downloads the dependencies).
         `extra_env` (the coverage plugin's `cov_env`) is merged with the trace plugin's: `PYTEST_ADDOPTS` and
-        `PYTHONPATH` join, any other key is added."""
+        `PYTHONPATH` join, any other key is added. `timeout_s` replaces `gates.timeout` for this run (L4-IMP-097)."""
         allowed = self.cfg.gates.network == "allow" if network is None else network
         spec = GateSpec(
-            name, command, tuple(reports), self.cfg.gates.test.format, duration_seconds(self.cfg.gates.timeout),
-            frozenset(must_contain),
+            name, command, tuple(reports), self.cfg.gates.test.format,
+            duration_seconds(self.cfg.gates.timeout) if timeout_s is None else timeout_s, frozenset(must_contain),
         )  # fmt: skip
         return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note, builds_env=builds_env)
 
