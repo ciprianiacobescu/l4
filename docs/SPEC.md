@@ -2032,7 +2032,8 @@ for a red test that failed by the wrong kind of error
       red step; otherwise the red attempt fails and the redacted, truncated gate output is fed back to the retry, and
       the red prompt names these commands. Red tests are frozen for green, so a static-gate error inside them could
       never be fixed later [V, live M0 run 2026-10-03: an unused import in a red test halted the unit; with this check
-      the retry fixed it]. A gate that already failed at the base is recorded as `gate.static_baseline_failed`.
+      the retry fixed it]. A gate that already failed at the base is recorded as `gate.static_baseline_failed`. It runs
+      once per step, before the step's first variant run when it makes one (L4-IMP-096).
 
    **Zero-value stubs** come from the return annotation by AST rewrite: Python `str→""`, `int→0`, `float→0.0`,
    `bool→False`, `list→[]`, `dict→{}`, `set→set()`, `tuple→()`, `bytes→b""`; unannotated or unknown → `None`; a
@@ -2089,7 +2090,7 @@ for a red test that failed by the wrong kind of error
    dependencies added in green (pytest plugins, jest reporters, test runners) are flagged for step 1. The harness then
    (a) runs the red tests **and test-support files as committed in the red commit**, checked out into a scratch copy,
    against the green production code, except the paths of a `task.unfrozen` of the task — they must pass; (b) runs the full test gate — no new failures relative to the
-   base (its report MAY be a reused measurement, L4-IMP-088); (c) runs lint/typecheck: a static gate that passed at the green step base MUST pass; a gate that already failed at the step base is recorded as `gate.static_baseline_failed` (warning, shown in `verification.md`) and does not fail the step [V, live M0 run 2026-10-03: without the baseline rule, pre-existing lint debt halts every task]. Then it marks the task done and commits `feat(<unit>): <task title>` with
+   base (its report MAY be a reused measurement, L4-IMP-088); (c) runs lint/typecheck (when (b) gave no failure, before the test-at-red run of corrected tests, L4-IMP-096): a static gate that passed at the green step base MUST pass; a gate that already failed at the step base is recorded as `gate.static_baseline_failed` (warning, shown in `verification.md`) and does not fail the step [V, live M0 run 2026-10-03: without the baseline rule, pre-existing lint debt halts every task]. Then it marks the task done and commits `feat(<unit>): <task title>` with
    `L4-TDD: green`. If a red test is genuinely wrong, the agent reports `status: blocked` with a `technical` question
    instead of editing it. A human answer to that question (`answered`, or an `accepted` suggestion; never
    `answered-by-clarifier`) that names a frozen test file (a repository-relative path, optionally followed by `:<line>`)
@@ -2581,6 +2582,26 @@ judge's system text and `judge@13` SHALL NOT change, and the `notes_for_verifier
 there; the green step chose a value, the judge passed the unit, and the next unit met another capability's spec that
 sets the field to null, which cost a verdict question and a spec fix. A `done` result's `questions` are not read (only a
 `blocked` result's are raised), and an open question whose task is done holds nothing.]
+
+**L4-IMP-096 The static gates of a step come before its variant runs.** A red step's static gates (check 6 of
+L4-IMP-002: every `gates.lint` and `gates.typecheck` command, judged against the step base) SHALL run once per step,
+before the first run that the step's checks make with production code varied, swapped or set aside: the zero-value run of
+the pre-satisfied confirmation, the base run (L4-IMP-003) and run (b). They SHALL so run before a held check of the step
+is raised (L4-IMP-063) and before a recorded `accept` is applied to it. A step that makes no such run SHALL run them
+where L4-IMP-002 lists them, after its red verdict. A static gate that passed at the step base and fails SHALL fail the
+attempt at that point, with the text and feedback of check 6, and no later check of the step SHALL run. The cheap checks
+that come before the pre-satisfied confirmation (the criteria check, the per-test cap of L4-VER-052) SHALL keep coming
+first. A red step that adds no test, changes no file and reports `already_satisfied` SHALL make no static gate run, as
+before.
+
+A green step whose test gate gives no failure SHALL run its static gates before the test-at-red run of corrected tests
+(L4-IMP-063) and before an `at_red` accept is applied; a green step whose test gate failed SHALL NOT run them, as before.
+The static gates of a red or green step SHALL run at most once per step. The repair chore (L4-IMP-091), the tests chore
+and the fix chore SHALL keep their order. [V, a consumer's TypeScript unit: a red step for a task that added no green
+code wrote one test file whose tests passed at head; the base run took the 30-minute gate timeout, the task was held and
+the delegate accepted it, the replay ran the test gate and the base run again and recorded the accept, and only then
+`gates.typecheck` failed, in 9 seconds, on a type error in the new file: the attempt failed, the accept was spent on a
+step that could never be kept, and the next attempt raised the same question again.]
 
 ### 7.5 Post-step guards, commits and trailers
 
@@ -9154,6 +9175,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 123 | `unasserted-clause-question` | a clause of a cited scenario that a step leaves unasserted, or a value it would decide that the spec does not settle, is asked before the task goes on, and the judge checks what a committed step still left unasserted. `l4/implementer-result@1` gains `unasserted` (at most 3 `{criterion, clause, why}`, 1 to 300 characters each text; the packaged schema, its fixture and SPEC 7.4; the file-result schema keeps it; the Codex strict copy makes it nullable, the recorded 0.160.0 strict schema stays as recorded) and `ImplementerResult.unasserted`; `normalize._unasserted` lowers the hex of a criterion id, drops a malformed item (matched whole) with a problem text, cuts after three and cuts a long text; `agent_step` fails the attempt, like an invalid result, for a dropped item or a criterion id that is not the unit's (`clauses.foreign_problems`), so neither is ever asked. `l4.implementer.clauses` (new): `split_clauses` gives the new entries and the settled ones (an answered question of the same task, fix unit and criterion, recorded as `question.raised{clause: {criterion, phase, text_sha}}` and still for the criterion's text, whose hash is `text_sha`; the criterion, never the clause's words, is the key) and `clause_question` the `ambiguous` question (`Task <k> (<phase>) left a clause of <criterion> unasserted: <clause>`, the clause and reason quoted, Blocking tasks the task). `l4.implementer.tdd.agent_step` returns a `blocked` step when the result lists a new entry, whatever its status; `StepOutcome`, `RedOutcome` and `GreenOutcome` carry the `clauses`, `loop._questions` and `_raise_blocked` raise them after the result's own questions (no summary question then), so the question holds the still pending task and the unit cannot reach verification while it is open, with no new rule in the orchestrator, the delegate or the planner. `task.red_ok` and the green and single `task.done` record the settled entries (`unasserted: [{criterion, clause, why, question}]`, `question` only for an answered, accepted or clarified one; a dismissed question settles the entry, and the judge line says `answer: (dismissed)`); `ladder._clauses` reads them and `judge.build_judge_prompt(clauses=)` shows those of the prompt's criteria in the section `## Clauses the implementer's tests do not assert (check each against the code)`, after the answers and before the hint, at most 6,000 characters, charged to the judge's budget; the system text stays `judge@13`. Templates `red@14` and `green@7` say when to fill the field; `contract@13` and `output@1` are unchanged; the lock is regenerated. A consumer's red step wrote in its notes that it did not assert a field because the spec text was ambiguous; green chose a value, the judge passed, and the next unit met another capability's spec that sets the field to null (L4-IMP-095, L4-IMP-005, L4-IMP-020, SCN-IMP-280, SCN-VER-170, SCN-IMP-510..519; `openspec/changes/unasserted-clause-question/`). Limits: an agent that writes only a note is judged as today; a later clause of a criterion already asked for the task is not asked, only shown to the judge; the questions of a `done` result are still not read | a red step that lists an unasserted clause parks the unit with an `ambiguous` question and runs again with the answer; the unit tests (`test_unasserted_clauses`, `test_judge_clauses`, `test_unasserted_clause`, `test_normalize`, `test_result`, `test_codex`, `test_template_lock`) |
 | 124 | `ui-hold-covered` | a UI criterion that step 4 covers with a discriminating test and that the UI test writer calls `not_testable` is a note, not a hold, and the writer is shown the e2e suite's support files. `l4.verifier.ui_step.covered_by_step4(trace)` (new, pure): criterion → the passing, adequate tracing tests within the cap whose proof is not `pass_to_pass` and carries no unproven label, for a `covered` criterion with no `held` reason, read from `VerifyResult.trace` when step 5 starts (step 4's trace with step 4a's audit tests); `ladder._generate_step` hands it to `generate.generate_ui_tests(covered=…)`, which sets `GeneratedOutcome.covered_by` on a `not_testable` outcome only and emits `verify.generated{covered_by}`; `unclosed_holds` and `fixunit` treat it as closed; `report` adds `covered by step 4: <ids>; a note, not a hold (L4-VER-067)` to the row and stores `covered_by`; `evidence._generated` restores it, so a reused round keeps the stored answer and decides nothing again. `l4.verifier.conventions.e2e_support_files(git, base_sha)` (new): `e2e/conftest.py` and the other non-test `.py` files under `e2e/` at the merge base, at most six, 8,000 characters each, 20,000 together, the rest named; `generate_ui_test` puts them after the page snapshot; the e2e rules say to use their fixtures and helpers (`testwriter@7`, `templates.lock.json`). In a consumer run a unit that changed one web file raised ten UI holds, twelve verdict questions, for ten criteria of which step 4 covered eight and the writer called those eight `not_testable`; generated browser tests lacked the suite's sign-in helper, test users and accessibility assertion (L4-VER-067, L4-VER-077, L4-VER-002, SCN-VER-298..307; `openspec/changes/ui-hold-covered/`). Limits: which criteria are UI-facing is unchanged (every criterion of a unit that changed a UI path), so the writer is still asked for each gap in every fresh round; a criterion the writer wrongly calls `not_testable` and a unit test covers is kept from a PASS only by the judge's adequacy review of that test (and, when another test would still pass the criterion after the judge rejects the covering one, by the UI hold that comes back, SCN-VER-307); the repository root's `conftest.py` and non-Python helpers are not shown | the unit tests (`test_ui_step`, `test_generate`, `test_report_m15`, `test_resume`, `test_fixunit`, `test_ui_flow`, `test_memory_flow`, `test_conventions`, `test_testwriter`) |
 | 125 | `opencode-v2-current` | OpenCode 2 is supported at `@opencode/cli` 2.2.6, checked live through L4's own probe and run in a Linux container with L4's bubblewrap sandbox and on macOS: an implementer's permissions are an allow-list (`*:*` refused first, so OpenCode's own tools such as `worktree_create`, and any tool a later version adds, start refused; `worktree_remove` and `skill` stay offered, a stated residual), its shell may not run the OpenCode CLI (`opencode*`, `opencode2*`, `*bin/opencode*`; v2 only), a profile that needs no stored login (`OPENCODE_API_KEY` or an `opencode/` model) gets a private data home per step and its sandbox binds neither the real OpenCode data home nor the real config home (the cache home stays shared read-write, a stated residual), the adapter is no longer experimental, and U2, U5, U7, U9 (in part) and U11 are recorded with live fixtures while U1, U3, U4, U6 and U10 stay on their fallbacks (L4-OCV-015…019, L4-OCV-001…013 amended; `openspec/changes/opencode-v2-current/`; replaces B8 and B9 of row 68 for the rows it records) | the unit tests on the `tests/fixtures/recorded/opencode/2.2.6/live-*` recordings pass, and the first unit of a consumer repository on a v2 profile with an API key reaches `in_review` with its implementer and judge on OpenCode 2 |
+| 126 | `static-gates-first` | the static gates of a red or green step run before its variant runs, so a lint or type error fails the attempt before a base run, a zero-value run or run (b), and before a held check is raised or a recorded accept is applied. `l4.implementer.tdd.run_red` keeps the static gates' outcome in a run-once local (`static_gates`: `worse_static_gates`, `tampered("static gates")`, the discard and the `failed` outcome of before) and asks it before `confirm_pre_satisfied` when the step has candidates (and so before `confirmed_by_base_run` and `_decide_pre_satisfied`), before `vacuity_check` and where `worse_static_gates` stood, which then reads the stored outcome; the no-new-test path calls nothing. `run_green` runs `worse_static_gates` when the test gate gave no failure, before `_undiscriminating` (the test-at-red run and an `at_red` hold or accept), and no longer on the line after it. In a consumer's TypeScript unit a red step wrote one test file whose five tests passed at head; the zero-value run varies Python files only, the base run took the 30-minute gate timeout, the task was held and the delegate accepted it, the replay ran the test gate and the base run again and recorded the accept, and only then `gates.typecheck` failed on a type error in the new file, so the accept was spent on a step that could never be kept (L4-IMP-096, L4-IMP-002, L4-IMP-003, L4-IMP-063, SCN-IMP-521..525; `openspec/changes/static-gates-first/`). Limits: a red step that made a variant run and fails both a red check (the verdict, a regression, run (b)) and a static gate is told the static gate first and learns the other on its next attempt; the repair chore keeps its order (its proof runs come before the gates, so that the files they change can be told from the repaired tests'), and the tests chore and the fix chore already ran the static gates before their discrimination runs; a held step's replay runs the static gates again, one run per hold | a unit whose new test has a lint or type error fails its red attempt in seconds with that gate's text, with no base run and no question; the unit tests (`test_static_gates_first`, `test_tdd_static`, `test_tdd_green`, `test_held_accept`, `test_base_run`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13002,6 +13024,39 @@ scenario is a spec defect (§26).
   instruction says so; an entry settled by an answer the section shows ends `| answer: Q-002`, as before. A quoted
   answer is redacted before it is cut (a token that crosses the 600th character leaves no part of itself), is one
   line, and a `|` or a `</l4:data>` in it cannot add a field or close the block
+
+#### SCN-IMP-521 (−) A red step with a type error fails before the base run · L4-IMP-096, L4-IMP-002
+- **Given** a red step in a project whose test gate is not pytest, whose new tests pass at head (so the zero-value run
+  cannot decide them and they go to the base run), and whose `gates.typecheck` passed at the step base and fails now
+- **When** the red checks run
+- **Then** the attempt fails with the typecheck gate's text; no `test-base-run` gate runs, no `pre_satisfied` question
+  is raised and nothing is captured for a replay
+
+#### SCN-IMP-522 (−) A replayed step with a lint error spends no accept · L4-IMP-096, L4-IMP-065
+- **Given** a held `pre_satisfied` check whose answer is `accept`, whose saved step, replayed, fails a `gates.lint`
+  command that passed at the step base
+- **When** the replay runs
+- **Then** the attempt fails with the lint gate's text before the zero-value run and the base run, and the ledger holds
+  no `check.accepted` and no `criterion.pre_satisfied` of the task
+
+#### SCN-IMP-523 (−) A red step with a lint error fails before run (b) · L4-IMP-096, L4-IMP-002
+- **Given** a red step whose new tests fail by assertion against its stubs, and whose lint gate fails now
+- **When** the red checks run
+- **Then** the attempt fails with the lint gate's text and no zero-value gate of run (b) runs
+
+#### SCN-IMP-524 (+) A step without a variant run keeps the order, and the static gates run once · L4-IMP-096, L4-IMP-002
+- **Given** a red step whose new tests fail by assertion and that adds no stub, so it makes no variant run, and a red
+  step whose passing new tests go to the base run and are confirmed there
+- **When** each is checked
+- **Then** the first runs its static gates after its red verdict, as before, and fails on a red check before them when
+  it has one; the ledger of each step holds one `gate.finished` for each `gates.lint` and `gates.typecheck` command
+
+#### SCN-IMP-525 (−) A green step with a type error makes no test-at-red run · L4-IMP-096, L4-IMP-063
+- **Given** a green step after a person unfroze a red test file, whose corrected tests pass at the green code, and
+  whose typecheck fails now
+- **When** the green checks run
+- **Then** the attempt fails with the typecheck gate's text; no `test-at-red` gate runs and no `at_red` check is held or
+  accepted
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
