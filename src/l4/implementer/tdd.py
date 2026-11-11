@@ -1492,8 +1492,9 @@ def _decide_pre_satisfied(
 
 def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | None = None) -> RedOutcome:
     """One red attempt, with the checks in SPEC order (L4-IMP-002): the protected-path revert (in `agent_step`), the
-    stub guard, run (a) with its failure kinds, the criteria, the pre-satisfied confirmation, run (b), the static
-    gates; only then the commit."""
+    stub guard, run (a) with its failure kinds, the criteria, the static gates (before the pre-satisfied confirmation
+    when it has candidates, before the base run and before run (b), else after the red verdict: L4-IMP-096), the
+    pre-satisfied confirmation, run (b); only then the commit."""
     base = wb.head()
     base_report = baseline(wb, base, task=task.key)
     static_baseline(wb, base)  # before the agent runs: the worktree is exactly the base
@@ -1515,6 +1516,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     scope = enforce_red_scope(wb, task, base)
     guard = ProductionGuard(wb, base)  # test code run by the gates must not move production files after this point
 
+    static: list[RedOutcome | None] = []  # the static gates' outcome, once per step (L4-IMP-096)
+
     def tampered(where: str) -> RedOutcome | None:
         notes = guard.check(where)
         if unsafe := stop_on_unsafe(wb):  # a planted link halts the unit (raised); a failed restore fails the attempt
@@ -1535,6 +1538,19 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     def refuse_tampering() -> RedOutcome | None:  # before a hold: the person is never shown a tampering step
         found = preexisting_test_changes(wb, task, base, stale, listed)
         return _reject_preexisting(wb, found) if found else None
+
+    def static_gates() -> RedOutcome | None:
+        """Check 6, run once and before the step's first variant run, a held check or an accept (L4-IMP-096): the later
+        calls give the same outcome."""
+        if not static:
+            # a lint error in a test file would be frozen and deadlock green
+            worse = worse_static_gates(wb, base, "red")
+            out = tampered("static gates")
+            if out is None and worse:
+                wb.discard_changes()
+                out = RedOutcome("failed", worse)
+            static.append(out)
+        return static[0]
 
     run_setup(wb)  # an agent-edited environment must not decide the gate
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
@@ -1630,9 +1646,10 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         passing = {c: t for c, t in tracing.items() if all(report.tests[i].status == "passed" for i in t)}
         earlier = {**proved_earlier, **confirmed_by_earlier_red(wb, passing, report, new_ids)}  # L4-IMP-003
         by_spec = {c: t for c, t in passing.items() if c in spec_confirmed and c not in earlier}  # L4-IMP-093
-        confirmation = confirm_pre_satisfied(
-            wb, {c: t for c, t in passing.items() if c not in earlier and c not in by_spec}, real=report
-        )
+        candidates = {c: t for c, t in passing.items() if c not in earlier and c not in by_spec}
+        if candidates and (out := static_gates()) is not None:  # L4-IMP-096: before the zero-value run and the base run
+            return out
+        confirmation = confirm_pre_satisfied(wb, candidates, real=report)
         for criterion in proved_earlier:  # proved by tests that exist already: recorded like the no-new-test path
             wb.emit(
                 "criterion.pre_satisfied", task=task.key, criterion=criterion, tests=list(existing[criterion]), via=VIA
@@ -1641,7 +1658,9 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
             return out
         left = {c: passing[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
         if left:  # whatever the zero-value run left (all of it, or part): last, the base run, which only confirms
-            based = confirmed_by_base_run(wb, left, new_ids, real=report)
+            if (out := static_gates()) is not None:  # L4-IMP-096: already known here; kept so an edit keeps the order
+                return out
+            based = confirmed_by_base_run(wb, left, new_ids, real=report, head_seconds=gate.seconds)
             if (out := tampered("base run")) is not None:
                 return out
         out, overridden = _decide_pre_satisfied(wb, task, passing, confirmation, based, result, refuse_tampering)
@@ -1802,7 +1821,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         left = {c: candidates[c] for c in (*confirmation.unconfirmed, *confirmation.inconclusive)}
         if left:
             every = {t for tests in candidates.values() for t in tests}
-            based = confirmed_by_base_run(wb, left, every, real=report)
+            based = confirmed_by_base_run(wb, left, every, real=report, head_seconds=gate.seconds)
             if (out := tampered("base run")) is not None:
                 return out
         out, overridden = _decide_pre_satisfied(wb, task, candidates, confirmation, based, result, refuse_tampering)
@@ -1848,6 +1867,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
         head_stubs = head_stub_modules(wb, sorted({t for tests in open_criteria.values() for t in tests}))
         zeroed = sorted({*zeroed, *head_stubs})
     if open_criteria and zeroed:
+        if (out := static_gates()) is not None:  # L4-IMP-096: before run (b)
+            return out
         vacuity = vacuity_check(wb, zeroed, open_criteria, real=report)
         if (out := tampered("vacuity check")) is not None:
             return out
@@ -1890,12 +1911,8 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                 "answer_sha256": run_b_overrides[criterion].answer_sha256,
                 **override_who(run_b_overrides[criterion]),
             }  # fmt: skip
-    worse = worse_static_gates(wb, base, "red")  # a lint error in a test file would be frozen and deadlock green
-    if (out := tampered("static gates")) is not None:
+    if (out := static_gates()) is not None:  # once per step: a step that made a variant run has its outcome already
         return out
-    if worse:
-        wb.discard_changes()
-        return RedOutcome("failed", worse)
     new_tests = frozenset(new_ids)
     notes = result.notes_for_verifier  # the schema caps it at 2000 characters
     if tracing and not open_criteria and not (named_changed or other_changed):
@@ -2102,6 +2119,9 @@ def run_green(
         wb.emit("gate.hung", task=task.key, tests=[h.id for h in hung], attempt=attempt)
     held: HeldCheck | None = None
     if not reason:
+        reason = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run and any at_red accept
+        stuck = stuck or restore_replay(wb, "static gates")  # a linter that writes files: before the test-at-red run
+    if not reason and not stuck:  # no test-at-red run, hold or accept on a tree the replay could not put back
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
     stuck = stuck or restore_replay(wb, "test-at-red run")
     if held is not None and (unsafe := stop_on_unsafe(wb)):  # a planted link or a failed restore wins over a hold
@@ -2115,7 +2135,7 @@ def run_green(
             wb.discard_changes()  # back to the red commit, which stays; the attempt is not counted
             return GreenOutcome("held", held=kept)
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
-    reason = reason or worse_static_gates(wb, base, "green") or stuck or restore_replay(wb, "before the green commit")
+    reason = reason or stuck or restore_replay(wb, "before the green commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
         wb.discard_changes()
