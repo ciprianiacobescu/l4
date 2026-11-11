@@ -72,7 +72,7 @@
 
 ## 4. Documents
 
-- [ ] 4.1 `docs/SPEC.md`: in L4-IMP-003's paragraph **Confirmation by a base run**, after "while test files, test support
+- [x] 4.1 `docs/SPEC.md`: in L4-IMP-003's paragraph **Confirmation by a base run**, after "while test files, test support
   files and harness, spec and documentation paths (evidence kind `exempt`) stay as the worktree holds them", add
   "(except the unit's own test files that hold none of the tests the run decides, which are at the unit base for the
   run, L4-IMP-097)", and after "Every file touched is put back byte for byte (sha256 checked) before anything else
@@ -85,6 +85,6 @@
   code; a reproduction with the unit's other test files set aside wrote a report in about 7 minutes and confirmed the
   five candidates), the limits of the proposal, the ids, `openspec/changes/base-run-scope/`, the test file
   `test_base_run_scope`).
-- [ ] 4.2 `CHANGELOG.md`: under `## Unreleased`, one entry in the style of the 0.4.56 entries (L4-IMP-097).
-- [ ] 4.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
+- [x] 4.2 `CHANGELOG.md`: under `## Unreleased`, one entry in the style of the 0.4.56 entries (L4-IMP-097).
+- [x] 4.3 Run `uv run --frozen python scripts/check_spec.py`, `uv run --frozen pytest tests/unit/docs -q`,
   `uv run --frozen ruff check src tests` and `uv run --frozen ruff format --check src tests`.
