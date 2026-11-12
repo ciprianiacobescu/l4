@@ -575,3 +575,19 @@ def test_the_tests_the_text_names_but_the_harness_kept_are_listed_inside_the_dat
     assert "more than one test matches" in section and section.count("</l4:data>") == 1
     assert "src/a.test.ts::lists" in section
     assert "# Existing tests this task changes in place" not in render_prompt("red", ctx()).text
+
+
+@pytest.mark.parametrize("role", ["red", "green", "single"])
+def test_scn_imp_535_the_prompt_names_the_static_commands_the_agent_may_run(role):
+    text = render_prompt(role, ctx(static_gate_commands=("pnpm run lint", "pnpm run typecheck"))).text
+    gate = text[text.index("# Gate command") : text.index("# Output")]
+    assert "You may run `pnpm run lint`, `pnpm run typecheck` yourself before you finish" in gate
+    assert "the harness also runs them after your step" in gate
+    assert "cannot run in this sandbox (it needs the network, or a cache it cannot write)" in gate
+    assert "check what it checks by reading the code instead" in gate
+    if role == "red":
+        assert "a lint or type error in a test file rejects this attempt, and those files are frozen afterwards" in gate
+    else:
+        assert "and rejects the task while they fail" in gate
+    plain = render_prompt(role, ctx()).text
+    assert "You may run" not in plain and "by reading the code" not in plain

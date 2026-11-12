@@ -997,7 +997,10 @@ def agent_step(
         profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
         prompt=prompt, result_path=tmp / "result.json", raw_events_path=raw_events,
         env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
-        permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
+        permission_policy=PermissionPolicy(
+            "implement", gate_prefix=wb.cfg.gates.test.command,
+            static_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck),
+        ),
         wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
         stall_timeout_s=float(idle_s) if idle_s else None, watch=watch, host_env=wb.host_env,
     )  # fmt: skip

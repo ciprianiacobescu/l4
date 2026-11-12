@@ -16,7 +16,7 @@ from l4.agents.copilot_cli import (
     CopilotStop,
     build_command,
     effective_model,
-    gate_rule,
+    gate_rules,
     parse,
     read_usage,
     stream_facts,
@@ -304,7 +304,9 @@ def test_scn_fac_31_the_implementer_argv_allows_writes_the_gate_binary_and_the_r
     step = req.result_path.parent
     assert argv[15:] == ["--allow-tool=write", "--allow-tool=shell(.venv/bin/python:*)", "--add-dir", str(step)]
     assert proc.calls[0]["cwd"] == req.cwd
-    assert gate_rule(None) == [] and gate_rule("  ") == [] and gate_rule("make test") == ["--allow-tool=shell(make:*)"]
+    assert (
+        gate_rules(None) == [] and gate_rules("  ") == [] and gate_rules("make test") == ["--allow-tool=shell(make:*)"]
+    )
     bare, _ = run_mode(tmp_path / "b", "implement", preset_session_id="s")
     assert "--allow-tool=write" in copilot_argv(bare.calls[0]) and not any(
         a.startswith("--allow-tool=shell") for a in copilot_argv(bare.calls[0])
@@ -810,3 +812,22 @@ def test_the_adapter_writes_the_mcp_file_shape_the_cli_loaded(tmp_path):
     entry = mine["mcpServers"]["serena"]
     assert sorted(entry) == sorted(recorded_file["mcpServers"]["serena"]) == ["args", "command", "env"]
     assert isinstance(entry["args"], list) and entry["env"] == {"CI": "true"}
+
+
+def test_scn_imp_534_an_implementer_gets_one_shell_rule_per_first_word(tmp_path):
+    policy = PermissionPolicy(
+        "implement", gate_prefix=".venv/bin/pytest -q",
+        static_commands=(
+            ".venv/bin/ruff check .", ".venv/bin/ruff format --check .", ".venv/bin/mypy src",
+            "pnpm --dir web exec tsc --noEmit", "  ",
+        ),
+    )  # fmt: skip
+    proc, _ = run_mode(tmp_path, "implement", permission_policy=policy, preset_session_id="s")
+    shell = [a for a in copilot_argv(proc.calls[0]) if a.startswith("--allow-tool=shell")]
+    assert shell == [
+        "--allow-tool=shell(.venv/bin/pytest:*)", "--allow-tool=shell(.venv/bin/ruff:*)",
+        "--allow-tool=shell(.venv/bin/mypy:*)", "--allow-tool=shell(pnpm:*)",
+    ]  # fmt: skip
+    for mode in ("judge", "read_only"):
+        other, _ = run_mode(tmp_path / mode, mode, permission_policy=PermissionPolicy(mode, static_commands=("make",)))
+        assert not any(a.startswith("--allow-tool=shell") for a in copilot_argv(other.calls[0]))

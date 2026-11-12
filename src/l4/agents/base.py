@@ -66,13 +66,24 @@ class McpServer:
         return {"command": self.command, "args": list(self.args), "env": dict(self.env)}
 
 
+def shell_commands(gate_prefix: str | None, static_commands: Sequence[str] = ()) -> tuple[str, ...]:
+    """The shell commands an implementer may run, each once and in order: the test gate's, then the lint and type
+    gates' (L4-IMP-098). Blank entries are dropped."""
+    found = (command.strip() for command in (gate_prefix or "", *static_commands))
+    return tuple(dict.fromkeys(command for command in found if command))
+
+
 @dataclass(frozen=True)
 class PermissionPolicy:
-    """`implement` edits the worktree and runs `gate_prefix`; `read_only` only reads; `judge` has no tools at all
-    (a tool-less structured-output call, SPEC 8.1 "CLI judge")."""
+    """`implement` edits the worktree and runs `gate_prefix` and `static_commands`; `read_only` only reads; `judge` has
+    no tools at all (a tool-less structured-output call, SPEC 8.1 "CLI judge")."""
 
     mode: Literal["implement", "read_only", "judge"]
-    gate_prefix: str | None = None  # e.g. ".venv/bin/python -m pytest"; the only shell command an implementer may run
+    gate_prefix: str | None = None  # e.g. ".venv/bin/python -m pytest": the test gate's command
+    static_commands: tuple[str, ...] = ()  # the gates.lint then gates.typecheck commands (L4-IMP-098)
+
+    def shell_commands(self) -> tuple[str, ...]:
+        return shell_commands(self.gate_prefix, self.static_commands)
 
 
 @dataclass(frozen=True)

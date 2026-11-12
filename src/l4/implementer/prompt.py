@@ -358,13 +358,18 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         )
     if ctx.static_gate_commands:
         listed = ", ".join(f"`{c}`" for c in ctx.static_gate_commands)
+        gate += f"\nYou may run {listed} yourself before you finish; the harness also runs them after your step"
         if role == "red":
             gate += (
-                f"\nThe harness also runs {listed} after your step. Your new tests (and any stub) must pass them: "
-                "a lint or type error in a test file rejects this attempt, and those files are frozen afterwards."
+                ". Your new tests (and any stub) must pass them: a lint or type error in a test file rejects this "
+                "attempt, and those files are frozen afterwards."
             )
         else:
-            gate += f"\nThe harness also runs {listed} after your step and rejects the task while they fail."
+            gate += " and rejects the task while they fail."
+        gate += (
+            " When one of them cannot run in this sandbox (it needs the network, or a cache it cannot write), check "
+            "what it checks by reading the code instead."
+        )
     if role == "red" and ctx.e2e_dir:
         # an e2e directory under `tests/` (`tests/e2e`) is not contradicted by "never under `tests/`"
         elsewhere = "and nowhere else" if f"{ctx.e2e_dir}/".startswith("tests/") else "never under `tests/`"
