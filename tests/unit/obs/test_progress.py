@@ -375,6 +375,30 @@ def test_the_idle_line_is_a_warning_naming_the_key(console):
     assert lines(console)[-1].endswith("for 1h 2m; L4 stopped it (implementer.idle_timeout)")
 
 
+def test_the_idle_line_names_a_raised_limit(console):
+    """L4-IMP-099: the idle limit of an adapter that shows no open call was raised to the longest gate run."""
+    ProgressTrace()(
+        event(
+            "agent.idle",
+            task="2.1",
+            phase="red",
+            attempt=1,
+            profile="free",
+            silent_s=632,
+            tool_calls=3,
+            silent=False,
+            limit_s=632,
+            raised_by={"gate": "baseline", "seconds": 381},
+        )
+    )
+    ProgressTrace()(event("agent.idle", task="2.1", phase="red", attempt=2, profile="free", silent_s=300, limit_s=300))
+    assert lines(console) == [
+        "task 2.1 red attempt 1: no activity from free for 10m; L4 stopped it "
+        "(implementer.idle_timeout, raised to 10m for the longest gate run)",
+        "task 2.1 red attempt 2: no activity from free for 5m; L4 stopped it (implementer.idle_timeout)",
+    ]
+
+
 def test_a_silent_idle_line_says_it_is_a_limit_of_the_profile(console):
     ProgressTrace()(
         event("agent.idle", task="2.1", phase="red", attempt=1, profile="free", silent_s=600, tool_calls=0, silent=True)

@@ -201,22 +201,3 @@ def test_the_previous_attempt_block_of_a_raised_silent_stop_names_the_raised_lim
     assert "went silent: no output for 10m, so L4 stopped it" in prompt_of(bench)
     bench.wb.previous_attempt = PreviousAttempt("impl", "silent", task="1.1")
     assert "went silent: no output for 5m, so L4 stopped it" in prompt_of(bench)
-
-
-def test_the_progress_line_names_the_raised_limit():
-    from l4.progress import ProgressTrace
-
-    from ..obs.test_progress import event
-
-    raised = event(
-        "agent.idle", task="2.1", phase="red", attempt=1, profile="free", silent_s=632, tool_calls=3, silent=False,
-        limit_s=632, raised_by={"gate": "baseline", "seconds": 381},
-    )  # fmt: skip
-    plain = event("agent.idle", task="2.1", phase="red", attempt=1, profile="free", silent_s=300, limit_s=300)
-    assert ProgressTrace._agent_idle(None, raised)[1] == (
-        "task 2.1 red attempt 1: no activity from free for 10m; L4 stopped it "
-        "(implementer.idle_timeout, raised to 10m for the longest gate run)"
-    )
-    assert ProgressTrace._agent_idle(None, plain)[1] == (
-        "task 2.1 red attempt 1: no activity from free for 5m; L4 stopped it (implementer.idle_timeout)"
-    )

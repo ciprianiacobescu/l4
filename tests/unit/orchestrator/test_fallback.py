@@ -107,6 +107,7 @@ def test_a_silent_step_moves_the_task_and_the_run_without_counting(run_l4, tdd_r
     requests = run.adapter.requests
     assert [r.profile.vendor for r in requests] == [requests[0].profile.vendor] + [requests[1].profile.vendor] * 3
     assert requests[1].profile.vendor != requests[0].profile.vendor  # the step again, and the next task, on impl-b
+    assert "went silent: no output for 10m, so L4 stopped it" in requests[1].prompt  # the limit's text, L4-IMP-099
     assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
     assert run.outcome["units"][0]["profiles"] == {"implementer": "impl-b", "fallback_from": "impl"}
 
