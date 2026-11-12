@@ -12,6 +12,7 @@ checkout of the red commit for green (a).
 
 import hashlib
 import logging
+import math
 import re
 import shlex
 import shutil
@@ -793,8 +794,8 @@ def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None)
         return _escalation_block(previous) if previous.phase == phase else ()
     stopped = f"stopped on a {previous.limit_kind} limit while working on this task"
     if previous.limit_kind == "silent":  # L4-IMP-087: it did nothing for the whole idle time
-        idle = wb.cfg.implementer.idle_timeout
-        stopped = f"went silent: no output for {idle}, so L4 stopped it, while working on this task"
+        quiet = previous.detail or f"no output for {wb.cfg.implementer.idle_timeout}"  # the raised limit, if it was
+        stopped = f"went silent: {quiet}, so L4 stopped it, while working on this task"
     text = (
         f"The agent before you (profile {previous.profile}) {stopped}. "
         "Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
@@ -943,6 +944,24 @@ def _prompt(
 
 SILENT_AGAIN = "silent: already once for this task"
 
+# L4-IMP-099: the agent's own run of a gate command, in its sandbox and under the runner's load, can take longer than
+# the harness's, so the idle limit of an adapter that cannot show an open call is the longest gate run times this, plus
+# this
+IDLE_FLOOR_FACTOR = 1.5
+IDLE_FLOOR_MARGIN_S = 60
+
+
+def idle_limit(wb: Workbench, idle_s: int, step_limit_s: int) -> tuple[int, tuple[str, int] | None]:
+    """L4-IMP-099: (the idle limit of an implementer step in seconds, the gate that raised it and its whole seconds).
+    `implementer.idle_timeout` unless the adapter's stream reader cannot show an open tool call and a gate run of this
+    unit run was measured: then the larger of it and the longest run's floor, at most the step's wall-clock limit."""
+    if not idle_s or wb.impl.capabilities().open_calls or wb.gate_peak is None:
+        return idle_s, None
+    name, seconds = wb.gate_peak
+    floor = math.ceil(IDLE_FLOOR_FACTOR * seconds) + IDLE_FLOOR_MARGIN_S
+    limit_s = min(max(idle_s, floor), step_limit_s)
+    return limit_s, (name, round(seconds)) if limit_s > idle_s else None
+
 
 def _silent_before(wb: Workbench, task: Task) -> bool:
     """Has this task already had a silent stop (L4-IMP-087) in its window: any profile, any run of the unit? The window
@@ -992,6 +1011,7 @@ def agent_step(
         )
 
     idle_s = duration_seconds(impl_cfg.idle_timeout)
+    limit_s, raised_by = idle_limit(wb, idle_s, RunRequest.timeout_s)
     watch = ActivityWatch(duration_seconds(impl_cfg.heartbeat), on_beat)  # clock: time.monotonic, the runner's
     request = RunRequest(
         profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
@@ -999,7 +1019,7 @@ def agent_step(
         env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
         permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
         wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
-        stall_timeout_s=float(idle_s) if idle_s else None, watch=watch, host_env=wb.host_env,
+        stall_timeout_s=float(limit_s) if limit_s else None, watch=watch, host_env=wb.host_env,
     )  # fmt: skip
     try:
         resultalias.link(wb.worktree, tmp)  # the short path a prompt-contract adapter writes its result to (MAG)
@@ -1036,7 +1056,8 @@ def agent_step(
         silent = silent and not again
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
-            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent,
+            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent, limit_s=limit_s,
+            **({"raised_by": {"gate": raised_by[0], "seconds": raised_by[1]}} if raised_by else {}),
             **({"reason": SILENT_AGAIN} if again else {}),
         )  # fmt: skip
     wb.emit(
@@ -1061,7 +1082,7 @@ def agent_step(
     if run.status in LIMIT_STATUSES:
         raise RoleLimit(run)
     if silent:  # a limit of kind `silent`: the limit path cools the profile and moves on, no failed attempt
-        quiet = f"no output for {impl_cfg.idle_timeout}"
+        quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
         signal = LimitSignal(
             wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
         )
@@ -1069,11 +1090,16 @@ def agent_step(
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":
-            reason = (
-                f"the agent showed no activity for {impl_cfg.idle_timeout} (implementer.idle_timeout), so L4 stopped it"
-                if watch.stopped_idle_s is not None
-                else f"the agent step reached its time limit ({ago(request.timeout_s)})"
-            )
+            reason = f"the agent step reached its time limit ({ago(request.timeout_s)})"
+            if watch.stopped_idle_s is not None:
+                shown = f"{impl_cfg.idle_timeout} (implementer.idle_timeout)"
+                if raised_by:  # L4-IMP-099
+                    shown = (
+                        f"{ago(limit_s)} (implementer.idle_timeout {impl_cfg.idle_timeout}, raised to the longest "
+                        f"gate run of this run plus a margin, because {wb.selected.profile.adapter} shows no open "
+                        "tool call)"
+                    )
+                reason = f"the agent showed no activity for {shown}, so L4 stopped it"
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths
         invalid = run.status != "timeout" and (run.detail or "").startswith("result invalid")
         return StepOutcome("failed", reason=reason, excerpt=result_values_line(RESULT_SCHEMA, role) if invalid else "")

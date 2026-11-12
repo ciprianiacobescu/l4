@@ -42,3 +42,33 @@ def test_a_fallen_back_workbench_does_not_carry_the_kept_run(run_l4, monkeypatch
     [(old, fresh, kept)] = seen
     assert fresh is not old and kept is None
     assert fresh.baselines is old.baselines
+
+
+# --- idle-gate-floor (L4-IMP-099): the longest gate run is a fact of the unit run, so the new workbench carries it ---
+
+
+def plant_peak(monkeypatch, method: str, seen: list) -> None:
+    real = getattr(Orchestrator, method)
+
+    def wrapped(self, *args, **kwargs):
+        wb = next(a for a in (*args, *kwargs.values()) if hasattr(a, "gate_peak"))
+        wb.gate_peak = ("baseline", 381.0)
+        fresh = real(self, *args, **kwargs)
+        seen.append(fresh.gate_peak)
+        return fresh
+
+    monkeypatch.setattr(Orchestrator, method, wrapped)
+
+
+def test_an_escalated_workbench_carries_the_longest_gate_run(run_l4, monkeypatch):
+    seen: list = []
+    plant_peak(monkeypatch, "_escalate", seen)
+    assert run_l4([FAIL, FAIL, red_step(), green_step()], **TWO).code == 0
+    assert seen == [("baseline", 381.0)]
+
+
+def test_a_fallen_back_workbench_carries_the_longest_gate_run(run_l4, monkeypatch, fake_clock):
+    seen: list = []
+    plant_peak(monkeypatch, "_fall_back", seen)
+    assert run_l4([red_step(), limited(), green_step()], **TWO).code == 0
+    assert seen == [("baseline", 381.0)]

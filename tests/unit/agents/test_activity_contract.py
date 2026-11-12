@@ -58,3 +58,22 @@ def test_watch_contract_attributes():
     assert isinstance(watch.clock, Callable)
     assert Signal("start").id is None
     assert Beat(1.0, 0, 1.0, 0, 0.0, False).counts is False
+
+
+# --- idle-gate-floor 1.1: whether the adapter's stream reader shows a tool call as open (L4-IMP-099) ---
+
+
+def test_open_calls_is_false_only_for_the_adapters_whose_reader_cannot_show_an_open_call():
+    from l4.agents.claude_code import ClaudeCodeAdapter
+    from l4.agents.codex import CodexAdapter
+    from l4.agents.command import CommandAdapter
+    from l4.agents.copilot_cli import CopilotCliAdapter
+    from l4.agents.fake import FakeAdapter
+    from l4.agents.kiro_cli import KiroCliAdapter
+    from l4.agents.opencode import OpenCodeAdapter
+    from l4.agents.opencode_v2 import OpenCodeV2Adapter
+
+    for adapter in (OpenCodeAdapter(), OpenCodeV2Adapter(), CommandAdapter()):
+        assert adapter.capabilities().open_calls is False, type(adapter).__name__
+    for adapter in (ClaudeCodeAdapter(), CodexAdapter(), KiroCliAdapter(), CopilotCliAdapter(), FakeAdapter([])):
+        assert adapter.capabilities().open_calls is True, type(adapter).__name__

@@ -1244,7 +1244,8 @@ class Orchestrator:
             self._selected = chosen if veto is None else _with_constraints(chosen, (), drop=veto)
         signal = limit if isinstance(limit, LimitSignal) else limit.limit
         kind = signal.kind if signal else limit.status if isinstance(limit, RunResult) else "rate_limit"
-        self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task)
+        detail = signal.raw_excerpt if signal is not None and kind == "silent" else None
+        self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task, detail=detail)
         return self._select()
 
     def _job_remaining_s(self) -> float | None:
@@ -1291,7 +1292,7 @@ class Orchestrator:
         if isinstance(chosen, str):
             return chosen
         fresh = self._workbench(selected=chosen)
-        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
         fresh.previous_attempt = PreviousAttempt(
             request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
         )
@@ -1350,7 +1351,7 @@ class Orchestrator:
         log.warning("%s: %s hit a limit (%s); moving on", self.services.ref.id, self._select().profile_name, exc)
         self.switch_profile(exc.result, task)
         fresh = self._workbench()
-        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
         return fresh
 
     def _close_parents(self, wb: Workbench) -> None:
