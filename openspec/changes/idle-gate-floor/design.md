@@ -55,8 +55,12 @@ In `agent_step`, with `idle_s` from `implementer.idle_timeout`:
 limit_s = idle_s
 if idle_s and not wb.impl.capabilities().open_calls and wb.gate_peak:
     floor = ceil(IDLE_FLOOR_FACTOR * peak_seconds) + IDLE_FLOOR_MARGIN_S   # 1.5, 60
-    limit_s = min(max(idle_s, floor), request_timeout_s)
+    limit_s = max(idle_s, min(floor, step_limit_s))
 ```
+
+The cap never lowers the limit below `implementer.idle_timeout`: with `idle_timeout: 40m` (above the step's 30-minute
+limit) the limit stays 40m, as before this change, and `raised_by` is recorded only when `limit_s > idle_s`. The step
+limit is the request's `timeout_s`.
 
 `stall_timeout_s=float(limit_s)`. `IDLE_FLOOR_FACTOR = 1.5` and `IDLE_FLOOR_MARGIN_S = 60` are module constants with a
 comment: the agent's own run of the command, in its sandbox and under the runner's load, can take longer than the

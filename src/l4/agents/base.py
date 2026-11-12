@@ -97,6 +97,7 @@ class AgentCaps:
     quota_query: bool
     worktree_cwd: bool
     served_model: bool = False  # the run reports the model that served it (claude-code `modelUsage`)
+    open_calls: bool = True  # the stream reader shows a tool call as open while it runs (L4-IMP-099)
 
 
 Runner = Callable[[Sequence[str], Path, Mapping[str, str], float], Any]

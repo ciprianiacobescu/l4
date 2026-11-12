@@ -2,12 +2,14 @@
 (`ctx.shared["fall_back"]`, `Orchestrator.switch_profile`) and the task is retried once on the next implementer
 profile, so the cool-down, the outcome's profiles and `L4-Fallback-From` follow it. Nothing left still parks."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 
 from l4.agents.base import LimitSignal
-from l4.agents.fake import Step
+from l4.agents.fake import FakeAdapter, Step
+from l4.verifier import fixloop
 
 from ..implementer.conftest import red_step
 from ..orchestrator.conftest import BRANCH
@@ -80,3 +82,46 @@ def test_a_second_limit_on_the_same_fix_task_cools_the_profile_that_hit_it(run_l
     assert run.code == 12
     assert [e["profile"] for e in run.events("availability.cooldown")] == ["impl", "impl-b"]
     assert len(run.events("availability.fallback")) == 1
+
+
+def test_a_fixes_fallen_back_workbench_carries_the_longest_gate_run(run_l4, valid_spec, fake_clock, monkeypatch):
+    """L4-IMP-099: the longest gate run is a fact of the unit run, so the fix loop's rebuilt workbench carries it."""
+    seen: list = []
+    real = fixloop._fall_back
+
+    def planted(ctx, wb, *args, **kwargs):
+        wb.gate_peak = ("baseline", 381.0)
+        fresh = real(ctx, wb, *args, **kwargs)
+        seen.append((wb, fresh))
+        return fresh
+
+    monkeypatch.setattr(fixloop, "_fall_back", planted)
+    run = run_l4([red_step(), noqa_green(), limited(), chore_fix(), judge()], **TWO)
+    assert run.code == 0, run.triggers()
+    [(old, fresh)] = seen
+    assert fresh is not old and fresh.gate_peak == ("baseline", 381.0)
+
+
+def test_a_raised_silent_fix_step_tells_the_next_profile_the_raised_limit(run_l4, valid_spec, fake_clock, monkeypatch):
+    """L4-IMP-099, `_fall_back`: the fix step of an opencode-like profile is silent for its raised limit (632 s for a
+    gate of 381 s, `idle_timeout: 5m`), so the next profile is told `no output for 10m`, not `5m`."""
+    caps = FakeAdapter([]).capabilities()
+    monkeypatch.setattr(FakeAdapter, "capabilities", lambda self: replace(caps, open_calls=False))
+    real, built = fixloop._child_workbench, []
+
+    def planted(*args, **kwargs):
+        wb = real(*args, **kwargs)
+        if not built:  # the fix unit's first workbench: a gate run of 381 s is a fact of the unit run
+            wb.gate_peak = ("baseline", 381.0)
+        built.append(wb)
+        return wb
+
+    monkeypatch.setattr(fixloop, "_child_workbench", planted)
+    quiet = Step(idle_s=632, status="timeout", writes={"leftover.txt": "half"})
+    run = run_l4(
+        [red_step(), noqa_green(), quiet, chore_fix(), judge()], **TWO | {"implementer": {"idle_timeout": "5m"}}
+    )
+    assert run.code == 0, run.triggers()
+    assert run.adapter.requests[2].stall_timeout_s == 632.0
+    retried = run.adapter.requests[3].prompt
+    assert 'kind="previous-attempt"' in retried and "went silent: no output for 10m" in retried

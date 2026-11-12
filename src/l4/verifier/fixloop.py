@@ -349,8 +349,11 @@ def _fall_back(
     previous = on or wb.selected.profile_name
     ctx.shared["fall_back"](exc.result, task)
     fresh = _child_workbench(ctx, fix, iteration)
-    fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
-    fresh.previous_attempt = PreviousAttempt(previous, limit.kind if limit is not None else exc.result.status, task)
+    fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
+    kind = limit.kind if limit is not None else exc.result.status
+    fresh.previous_attempt = PreviousAttempt(
+        previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind == "silent" else None
+    )
     return fresh
 
 
@@ -370,7 +373,7 @@ def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str,
             return chosen
         fresh = _child_workbench(ctx, fix, iteration, selected=chosen)
         moved[request.task] = chosen.profile_name
-        fresh.baselines, fresh.static_baselines = wb.baselines, wb.static_baselines
+        fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
         fresh.previous_attempt = PreviousAttempt(
             request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
         )

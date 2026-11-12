@@ -286,10 +286,13 @@ class ProgressTrace:
             limit = "; no tool call was made, so it is a limit of the profile, not a failed attempt"
         elif d.get("reason"):
             limit = f"; {d['reason']}, so it counts as a failed attempt"
+        key = "implementer.idle_timeout"
+        if d.get("raised_by"):  # L4-IMP-099
+            key = f"implementer.idle_timeout, raised to {ago(_num(d.get('limit_s')) or 0)} for the longest gate run"
         return (
             logging.WARNING,
             f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: no activity from {d.get('profile')} "
-            f"for {ago(silent or 0)}; L4 stopped it (implementer.idle_timeout){limit}",
+            f"for {ago(silent or 0)}; L4 stopped it ({key}){limit}",
         )
 
     def _agent_finished(self, e: LedgerEvent) -> tuple[int, str]:

@@ -297,6 +297,7 @@ The important log lines:
 | `[l4] <unit> task <k> <phase> attempt <n>: <profile> working <elapsed>, <c> tool calls, last activity <t> ago` | The heartbeat line. It shows that the agent step goes on. L4 writes it every `implementer.heartbeat` (default 2 minutes). While a tool call is open, the line ends with `, <m> tool call(s) open for <t>`. A `command` step gives no count: the line is `working <elapsed>`. Read [4.6](#46-is-the-job-stuck). |
 | `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout)` | A warning. The agent printed nothing for `implementer.idle_timeout` and had no open tool call, so L4 stopped it (`agent.idle`). The attempt failed, unless the line ends with `; no tool call was made, so it is a limit of the profile, not a failed attempt` (a silent stop, below). |
 | `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout); no tool call was made, so it is a limit of the profile, not a failed attempt` | A warning, from 0.4.42. The agent did nothing for the whole idle time, with another profile in `roles.implementer`. The profile cools for `availability.default_cooldown`, its cached hello is cleared, the task goes on on the next usable profile, and nothing counts as a failed attempt (`agent.idle{silent: true}`). A second one for the same task ends with `; silent: already once for this task, so it counts as a failed attempt`. |
+| `[l4] <unit> task <k> <phase> attempt <n>: no activity from <profile> for <t>; L4 stopped it (implementer.idle_timeout, raised to <limit> for the longest gate run)` | A warning, from 0.4.58. The same stop as the line above, for an OpenCode or `command` step. The idle limit of such a step is raised to 1.5 times the longest gate run of this unit run plus 60 seconds, at most the step's 30 minutes, because the stream of OpenCode shows no open tool call, so `<t>` is the raised limit and not `implementer.idle_timeout`. `agent.idle` has `limit_s` and `raised_by`. The attempt's reason reads `the agent showed no activity for <limit> (implementer.idle_timeout <t0>, raised to the longest gate run of this run plus a margin, because <adapter> shows no open tool call), so L4 stopped it`. |
 | `[l4] <unit> gate baseline reused (the green run of <sha>)` | An INFO line from 0.4.42. The task's baseline is the report of the previous task's green test gate, because the code is the same, so the test gate did not run again (`gate.reused`). |
 | `red: <n> new tests fail, as intended` (one: `red: 1 new test fails, as intended`) | The red gate is as it must be: only new tests fail, and they fail by an assertion. The raw gate line is now at DEBUG. For another red result, the raw gate line stays at INFO. |
 | `[l4] run: <unit>: waiting_capacity, retry_after <time>: <why>` | No agent is available, and when the harness tries again. With no recorded time, the line is `[l4] run: <why>`. |
@@ -497,7 +498,10 @@ agent's stream shows the largest context of one call.
 The event `agent.idle{task, phase, attempt, profile, silent_s, tool_calls}` says that L4 stopped an agent that had no
 activity for `implementer.idle_timeout`. It comes before `agent.finished` of the same step. From 0.4.42 it also has
 `silent` (`true` when the agent made no tool call and another profile can take the task: a limit of the profile, not a
-failed attempt) and, for the second silent stop of a task, `reason`. The event `gate.reused{name, from, task, source_sha,
+failed attempt) and, for the second silent stop of a task, `reason`. From 0.4.58 it also has `limit_s`, the idle limit
+that applied in seconds, and, when the limit was raised above `implementer.idle_timeout` for an OpenCode or `command`
+step (see [4.6](#46-is-the-job-stuck)), `raised_by{gate, seconds}`: the name and the whole seconds of the longest gate
+run of the unit run that raised it. The event `gate.reused{name, from, task, source_sha,
 tree}` says that a task's baseline took the report of the green test gate of `source_sha`. The event `run.started` has
 the field `ci_url` (`run.started.ci_url`), the CI link of the run. The event `gate.finished` of a red gate has `red_new_failing` (the number of new tests
 that fail by an assertion). The heartbeat line is not a ledger event.
@@ -522,13 +526,19 @@ minutes. A long step is not a fault. Look for signs of life first.
    |---|---|
    | The count of tool calls grows, and `last activity` is small | The agent works. Wait. |
    | `last activity` grows, and a tool call is open | A long command runs, for example a test run. Wait. |
-   | `last activity` grows, and no tool call is open | The agent is silent. L4 stops it after `implementer.idle_timeout` (default 10 minutes). With no tool call so far and a later profile in `roles.implementer`, the profile cools and the task moves on. |
+   | `last activity` grows, and no tool call is open | The agent is silent. L4 stops it after `implementer.idle_timeout` (default 10 minutes). For OpenCode, from 0.4.58, the limit is raised to at least 1.5 times the longest gate run of the unit run plus 60 seconds. With no tool call so far and a later profile in `roles.implementer`, the profile cools and the task moves on. |
    | No heartbeat line for more than 2 minutes | The step is not running. The job can wait for a gate, a judge or a push. Read the last lines of the log. |
 
 2. Know the limits. L4 stops an agent step in two cases:
 
    - The agent prints nothing for `implementer.idle_timeout` (default 10 minutes) and has no open tool call. L4 sends
      SIGINT, waits 5 seconds, and then kills the process. The log has the warning `no activity from <profile> for <t>`.
+     From 0.4.58, for an OpenCode step (and a `command` step), whose stream never shows an open tool call, the limit is
+     raised to at least 1.5 times the longest test, lint or typecheck gate run of the unit run plus 60 seconds (at most
+     the step's 30 minutes, and never below `implementer.idle_timeout`), so a gate that the agent runs itself does not
+     read as silence. The warning then ends with `(implementer.idle_timeout, raised to <limit> for the longest gate
+     run)`. Raise `implementer.idle_timeout` only when a step is idle for another reason, for example a long command
+     that is not a gate.
    - One agent step takes more than 30 minutes. The failure reason is `the agent step reached its time limit (30m)`.
 
    Both stops fail the attempt, not the unit, with one exception from 0.4.42: an idle stop in which the agent made no
@@ -2722,11 +2732,14 @@ These limits make operation more difficult. Know them before you start.
   the push, use `--no-push`.
 - The commands and options of [10.4](#104-commands-for-operation) that are not available.
 - An OpenCode step or a `command` step with one silent command longer than `implementer.idle_timeout` is stopped. The
-  stream of OpenCode shows a tool call only at its end, so L4 cannot see that the call is open. Raise
-  `implementer.idle_timeout` for such a project. A claude-code, codex or kiro-cli step is not stopped while a tool call
+  stream of OpenCode shows a tool call only at its end, so L4 cannot see that the call is open. From 0.4.58, the idle
+  limit of such a step is raised to at least 1.5 times the longest gate run of the unit run plus 60 seconds, so the
+  test, lint and typecheck gates need no change of `implementer.idle_timeout`; raise it only when a step is idle for
+  another reason (a long command that is not a gate, or a gate not yet run in this unit run). A claude-code, codex or kiro-cli step is not stopped while a tool call
   is open. From 0.4.42, with a later profile in `roles.implementer`, an OpenCode step whose first tool call runs longer
   than `implementer.idle_timeout` reads as silent: the profile cools for `availability.default_cooldown` and the task
-  moves on, at most once per task, and the second such stop of the task counts as a failed attempt.
+  moves on, at most once per task, and the second such stop of the task counts as a failed attempt (the limit is then
+  the raised one).
 - `Last activity:` of `l4 status` can be one step old: it comes from the ledger on the unit branch, and the ledger is
   pushed at each step commit. A cancelled run shows as an open run until a later run starts; `l4 yolo status` calls
   it "ended without a record" once it is older than its job timeout or its CI run completed (L4-IMP-073).
