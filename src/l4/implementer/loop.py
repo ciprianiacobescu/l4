@@ -26,7 +26,7 @@ from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import GuardNote, guard_note_text
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.held import MAX_CONTEXT_BYTES, MAX_SUBJECTS, MIN_CONTEXT_BYTES, HeldCheck, held_question
-from l4.implementer.held_patch import write_held
+from l4.implementer.held_patch import NearPass, write_held
 from l4.implementer.result import ResultQuestion
 from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
@@ -573,6 +573,10 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     retry: str | None = (
         None  # `failure` and what the guards put back in that attempt: the next prompt's, not the ledger's
     )
+    # L4-IMP-100: the changes of a green attempt that failed only its static gates, for the next attempt of this task
+    # (a different `Workbench` after an escalation, so a local of this loop); `nearest` is the halt's note (D6)
+    carry: NearPass | None = None
+    nearest: dict[str, tuple[int, str]] = {}
     red: RedOutcome | None = None if chore else resume_red(wb, task)
     start = "single" if chore else "red" if red is None else "green"
     # D7b: earlier runs' failures can say to move through several profiles; the first move is asked from the profile
@@ -614,6 +618,7 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
                 return TaskOutcome("blocked", "single", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
+            carry = None
             attempts["red"] += 1
             _check_step(wb, "red", task.key, attempts["red"])
             with deadline.timed(wb.emit):
@@ -636,7 +641,8 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             attempts["green"] += 1
             _check_step(wb, "green", task.key, attempts["green"])
             with deadline.timed(wb.emit):
-                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry)
+                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
+            carry = None  # applied once, or dropped: only the attempt just run can hand on a new one
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -648,6 +654,9 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
                 assert done.held is not None
                 return TaskOutcome("blocked", "green", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "green", done.reason, done.excerpt
+            carry = done.near_pass
+            if carry is not None:
+                nearest["green"] = (attempts["green"], wb.selected.profile_name)
             if hung_frozen := _hung_frozen(wb, red, done):
                 # a frozen test that hangs once the code works is the owner's to edit: no attempt can change it, and
                 # a halt would name nothing (W-D1). A test that is not frozen is retried with the frame in the prompt.
@@ -664,6 +673,7 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
             "task.attempt_failed", task=task.key, phase=phase, attempt=step, profile=profile, reason=failure,
             excerpt_lines=len(excerpt.splitlines()),
             **({"excerpt": _ledger_text(wb, excerpt)} if excerpt else {}),
+            **({"near_pass": True} if phase == "green" and carry is not None else {}),
         )  # fmt: skip
         before = wb.selected.profile_name
         wb, why = _escalate_while_due(wb, task, phase, failures, reasons, attempts, escalate, limit, limit_after)
@@ -681,8 +691,12 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}{why_no_move}; last failure: {failure}"
     if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code
         reason += REPAIR_EXHAUSTED_NOTE
+    near = nearest.get(current)
+    if near is not None:  # D6: the newest near pass of this phase in this run
+        reason += f"; nearest: attempt {near[0]} ({near[1]}) passed every test and failed only its lint or type gates"
     wb.emit(
         "breaker.tripped", reason="max_task_attempts", task=task.key, phase=current,
         attempts=sum(failures[current].values()), profiles=ran, last_failure=failure,
+        **({"near_pass": {"attempt": near[0], "profile": near[1]}} if near is not None else {}),
     )  # fmt: skip
     return TaskOutcome("halt", reason)

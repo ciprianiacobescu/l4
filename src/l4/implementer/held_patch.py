@@ -260,17 +260,68 @@ def _file_diff(wb: Workbench, path: str, patch_rel: str) -> str:
     return "\n".join([*lines[:MAX_SOURCE_LINES], note])
 
 
+def step_patch(wb: Workbench) -> bytes:
+    """The work tree's changes against HEAD as a binary patch, without the ledger: what `capture` saves of a step. The
+    index is left as it was."""
+    wb.git.run("add", "-A", config=(*wb.exclude_config, ("core.autocrlf", "false"), ("core.safecrlf", "false")))
+    try:
+        return wb.git.run_bytes(
+            *GIT_PLAIN, "diff", "--cached", "--binary", *DIFF_FLAGS, "HEAD", "--", ".", f":(exclude){wb.ledger_rel}"
+        )  # fmt: skip
+    finally:
+        wb.git.run("reset", "-q")
+
+
+@dataclass(frozen=True)
+class NearPass:
+    """L4-IMP-100: a green attempt that passed every test and failed only its static gates. Held in memory for the
+    next attempt of the task in this run: the patch is never written anywhere, the ledger gets its digest and paths."""
+
+    task: str
+    attempt: int
+    profile: str
+    patch: bytes
+    patch_sha256: str
+    files: tuple[str, ...]
+    gates: tuple[str, ...]  # `lint` / `typecheck`, in order, each once
+
+
+def apply_near_pass(wb: Workbench, task: str, attempt: int, carry: NearPass | None) -> NearPass | None:
+    """Apply `carry` to the work tree as uncommitted changes, with the call `replay_step` uses, and record
+    `task.near_pass_applied`. Returns it when it was applied; a patch that does not apply is dropped, with the error's
+    first line in `task.near_pass_dropped`, and the attempt starts from the red commit."""
+    if carry is None or carry.task != task:
+        return None
+    facts = {"task": task, "attempt": attempt, "from_attempt": carry.attempt}
+    try:
+        wb.git.run_input_bytes(*GIT_PLAIN, *APPLY_FLAGS, "-", data=carry.patch)
+    except GitError as exc:
+        wb.discard_changes()
+        lines = (exc.stderr.strip() or str(exc)).splitlines()
+        wb.emit("task.near_pass_dropped", **facts, reason=lines[0][:300])
+        return None
+    wb.emit(
+        "task.near_pass_applied", **facts, from_profile=carry.profile, patch_sha256=carry.patch_sha256,
+        files=list(carry.files[:50]),
+    )  # fmt: skip
+    return carry
+
+
+def drop_near_pass(wb: Workbench, task: str, attempt: int, carry: NearPass | None, reason: str) -> None:
+    """Record that `carry` is not applied to this attempt (a replay comes first)."""
+    if carry is not None and carry.task == task:
+        wb.emit("task.near_pass_dropped", task=task, attempt=attempt, from_attempt=carry.attempt, reason=reason)
+
+
 def capture(wb: Workbench, held: HeldCheck, result: ImplementerResult | None) -> HeldCheck:
     """`held` with the step's changes, its result, the list of paths it changes, the diff of each file that is no
     named test and the source and digest of each named test. Called while the changes are still in the work tree:
     `discard_changes` follows. The index is left as it was. Whatever its size, the step is saved whole."""
+    patch = step_patch(wb)
     wb.git.run("add", "-A", config=(*wb.exclude_config, ("core.autocrlf", "false"), ("core.safecrlf", "false")))
     patch_rel = held_rel(wb, held.task, held.check, "patch")
     files = worktree_files(wb)  # once: the sources and the digests of up to 60 tests read the same listing
     try:
-        patch = wb.git.run_bytes(
-            *GIT_PLAIN, "diff", "--cached", "--binary", *DIFF_FLAGS, "HEAD", "--", ".", f":(exclude){wb.ledger_rel}"
-        )  # fmt: skip
         changes = _changes(wb)
         diffs = tuple(
             (path, _file_diff(wb, path, patch_rel) if n < MAX_DIFF_FILES else _NOT_SHOWN.format(where=patch_rel))
