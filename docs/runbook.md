@@ -766,6 +766,15 @@ new run late, and the time is the difference between your clock and the forge's.
   that it started from (`implementer.escalated`). A cheaper profile that the step has moved past gets no attempt of that
   step until `l4 retry`, `l4 resume` or `l4 restart` starts a new window. Each continuation is one more run of a delivery plan, so `limit_runs` is reached sooner
   (`l4 yolo resume --extend-runs N`).
+- From 0.4.58 a green attempt that passed every test and failed only its lint or type gates is a near pass
+  (`task.attempt_failed` has `near_pass: true`). The next green attempt of the task in the same run starts from its
+  changes, as uncommitted changes on the red commit, also when another profile runs it, and its prompt has a
+  `near pass` block. L4 applies a near pass once. `task.near_pass_applied` records the attempt and the files that the
+  next attempt started from. `task.near_pass_dropped` records why it did not (`replay`: a held step to replay came first;
+  or the error of a patch that does not apply). A later run (a retry, a resume, the run after a soft deadline) starts
+  from the red commit.
+- From 0.4.58 the implementer can run the `gates.lint` and `gates.typecheck` commands itself before it finishes a step.
+  L4 still runs them after the step, and only that run decides the attempt.
 
 ## 7. Procedures for each state
 
@@ -1258,7 +1267,7 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 
 | The cause starts with | Code | Cause | What to do before you retry |
 |---|---|---|---|
-| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` or, when two or more profiles ran the step, `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). With a chain of profiles, each profile has its own count, and the detail names the profiles in the order that they ran. When a later profile exists and a move to it was refused, the detail has `; no later profile can take it (<reason>)` before `; last failure:`: read the reason (a cooling profile, a spent one, or none usable). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. Write the `--reason` of `l4 retry` for the implementer of that task: it reads the reason as a note (see the NOTE on escalation below). |
+| `task <k>: max_task_attempts (<n>) reached in <red\|green\|single>; last failure: …` or, when two or more profiles ran the step, `task <k>: max_task_attempts (<n>) reached in <phase> on <p1> (<f1>), <p2> (<f2>); last failure: …` | `max_task_attempts` | The agent failed the same step `<n>` times (`implementer.max_task_attempts`, default 3). With a chain of profiles, each profile has its own count, and the detail names the profiles in the order that they ran. When a later profile exists and a move to it was refused, the detail has `; no later profile can take it (<reason>)` before `; last failure:`: read the reason (a cooling profile, a spent one, or none usable). From 0.4.58, when a green attempt of that phase in this run passed every test and failed only its lint or type gates, the detail has `; nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates` right after the phase. That attempt was the nearest to done: read its reason (`l4 status --unit <unit> --events --type task.attempt_failed`, the row with `near_pass: true`). | Read the last failure. Correct its cause: an unclear task or spec, a test environment problem, or a gate configuration. Push the correction to `<branch>`. Write the `--reason` of `l4 retry` for the implementer of that task: it reads the reason as a note (see the NOTE on escalation below). |
 | ``task <k> cannot be selected: its checkbox is not an empty `[ ]` `` or `task <k> of <name>-fix-<n> cannot be selected: …` | `unselectable_task` | The checkbox of the task in `tasks.md` is not `- [ ]`. | Correct the checkbox on `<branch>`: in `tasks.md`, or for a fix unit in `<unit folder>-fix-<n>/tasks.md`. |
 | `the test gate cannot run at the base: …`, `tests do not collect at the base: …` or `the test gate cannot run at the red checkpoint: …` | `baseline_failed` | The test command does not run, or finds no tests, before the agent starts. | Set `gates.test.command` in `.l4/config.yaml` on `<base>`. Correct the code and the test setup on `<branch>`. If you corrected them on `<base>`, merge `<base>` into `<branch>` ([7.7](#77-base-merge-conflict)). |
 | `secret in the outgoing commits, push blocked: <path> (<kind>)` | `secret_in_push` | The commits of the run contain a secret. | Remove the source of the secret at `<path>`. Push the correction. |
