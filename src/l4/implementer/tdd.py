@@ -238,12 +238,12 @@ def outside_links_reason(wb: Workbench, base: str, phase: str) -> str:
 class RoleLimit(Exception):
     """The agent reported a usage limit or lost its login mid-run: the role is unavailable (exit 12)."""
 
-    def __init__(self, result: RunResult) -> None:
+    def __init__(self, result: RunResult, carry: NearPass | None = None) -> None:
         super().__init__(result.detail or result.status)
         self.result = result
-        # L4-IMP-100: the near pass the limited green attempt started from, set by `_run_task` for the fallback's next
-        # profile; None for every other limit (a red step's, a verifier's)
-        self.carry: NearPass | None = None
+        # L4-IMP-100: the near pass the limited green step started from (applied, not only handed in), for the
+        # fallback's next profile; None for every other limit (a red step's, a verifier's)
+        self.carry = carry
 
 
 Excerpter = Callable[[TestReport, Sequence[str]], str]  # (report, test ids) -> the bounded, redacted failure text
@@ -826,13 +826,20 @@ def _previous_attempt_block(
     return (("previous attempt", block),)
 
 
-def _near_pass_block(carried: NearPass) -> tuple[tuple[str, str], ...]:
-    """L4-IMP-100: the attempt whose changes are in the checkout passed every test and failed only its static gates."""
+def _near_pass_block(carried: NearPass, shown: bool = True) -> tuple[tuple[str, str], ...]:
+    """L4-IMP-100: the attempt whose changes are in the checkout passed every test and failed only its static gates.
+    `shown`: the prompt holds the previous failure, which is those gates' output. After a limit's fallback it holds
+    none (the attempt before was the limited one), and the agent runs the gates to read what they report
+    (L4-IMP-098)."""
     who = re.sub(r"[^A-Za-z0-9._-]", "_", carried.profile)
     gates = " and ".join(carried.gates)
+    output = (
+        "their output is under the previous failure" if shown
+        else "this prompt does not hold their output: run them to read what they report"
+    )  # fmt: skip
     text = (
         f"Attempt {carried.attempt} of this task (profile {carried.profile}) passed every test of the test gate, and "
-        f"its {gates} gate{'s' * (len(carried.gates) > 1)} failed; their output is under the previous failure. Its "
+        f"its {gates} gate{'s' * (len(carried.gates) > 1)} failed; {output}. Its "
         "changes are in the checkout as uncommitted changes on the red commit. Fix what those gates report and keep "
         "the rest unless a fix needs it. You start in a new session, with no transcript of that attempt."
     )
@@ -951,7 +958,7 @@ def _prompt(
             *_accepted(wb),
             *accepted_tests_block(wb, role, task),
             *_previous_attempt_block(wb, task, role, carried),
-            *(_near_pass_block(carried) if carried is not None else ()),
+            *(_near_pass_block(carried, previous_failure is not None) if carried is not None else ()),
             *((note_block(note, redact=redact),) if note is not None else ()),
         ),
     )  # fmt: skip
@@ -1128,13 +1135,13 @@ def agent_step(
     if stopped:  # after the cleanup, `agent.finished` and the reported cost: `run_unit` hands the step back (D5)
         raise deadline.DeadlineReached("during", during="agent")
     if run.status in LIMIT_STATUSES:
-        raise RoleLimit(run)
+        raise RoleLimit(run, carried)
     if silent:  # a limit of kind `silent`: the limit path cools the profile and moves on, no failed attempt
         quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
         signal = LimitSignal(
             wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
         )
-        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet))
+        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet), carried)
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":

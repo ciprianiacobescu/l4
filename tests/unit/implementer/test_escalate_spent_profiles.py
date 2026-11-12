@@ -249,6 +249,23 @@ def test_every_later_profile_spent_gives_one_refusal_and_a_halt_that_says_why(ma
     assert outcome.reason.index("no later profile can take it") < outcome.reason.index("; last failure: ")
 
 
+def test_the_nearest_attempt_comes_before_a_refused_move_in_the_halt(make_bench):
+    """L4-IMP-100 D6: `_halt` cuts the reason at 300 characters and a refused move's reasons can be long, so the
+    nearest attempt comes right after the phase. The near pass is seeded on this run's ledger: only the order is
+    tested."""
+    bench = make_bench(reds(3), **THREE)
+    for n in (1, 2, 3):
+        fail(bench, "red", n, profile="impl-b", **({"near_pass": True} if n == 2 else {}))
+    for n in (4, 5, 6):
+        fail(bench, "red", n, profile="impl-c")
+    outcome = run_task(bench.wb, TASK, escalate=SelectingHook())
+    assert outcome.status == "halt" and outcome.reason.startswith(
+        "task 1.1: max_task_attempts (3) reached in red on impl-b (3), impl-c (3), impl (3); nearest: attempt 2 "
+        "(impl-b) passed every test and failed only its lint or type gates; no later profile can take it ("
+    )
+    assert outcome.reason.index("; no later profile") < outcome.reason.index("; last failure: ")
+
+
 # ---- SCN-IMP-504: a cooling target is skipped, and the run starts on its own profile
 
 
