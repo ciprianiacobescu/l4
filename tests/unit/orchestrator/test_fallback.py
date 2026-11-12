@@ -3,12 +3,14 @@
 with a `retry_after` that `l4 plan` and a later `l4 run` honour (forge-and-ci 2.32)."""
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from l4.agents.base import LimitSignal
-from l4.agents.fake import Step
+from l4.agents.fake import FakeAdapter, Step
 from l4.cli import main
 from l4.exitcodes import ExitCode
+from l4.orchestrator import Orchestrator
 
 from ..implementer.conftest import green_step, red_step, result
 from .conftest import BRANCH, UNIT
@@ -194,3 +196,28 @@ def test_a_hook_that_sees_a_limit_moves_the_implementer_through_the_shared_fall_
     assert moved[0].fallback_from == "impl"
     # the switch is the orchestrator's: the outcome names the profile that took over
     assert run.outcome["units"][0]["profiles"] == {"implementer": "impl-b", "fallback_from": "impl"}
+
+
+def test_a_raised_silent_stop_tells_the_next_profile_the_raised_limit(run_l4, fake_clock, monkeypatch):
+    """L4-IMP-099, `switch_profile`: an opencode-like step silent for the limit raised to the longest gate run (632 s
+    for a gate of 381 s, `idle_timeout: 5m`) tells the next profile `no output for 10m`, not `5m`."""
+    caps = FakeAdapter([]).capabilities()
+    monkeypatch.setattr(FakeAdapter, "capabilities", lambda self: replace(caps, open_calls=False))
+    real, built = Orchestrator._workbench, []
+
+    def planted(self, *args, **kwargs):
+        wb = real(self, *args, **kwargs)
+        if not built:  # the run's first workbench: a gate run of 381 s is a fact of the unit run
+            wb.gate_peak = ("baseline", 381.0)
+        built.append(wb)
+        return wb
+
+    monkeypatch.setattr(Orchestrator, "_workbench", planted)
+    run = run_l4(
+        [Step(idle_s=632, status="timeout"), red_step(), green_step()], **TWO | {"implementer": {"idle_timeout": "5m"}}
+    )
+    assert run.code == 0, run.triggers()
+    assert run.adapter.requests[0].stall_timeout_s == 632.0
+    [idle] = run.events("agent.idle")
+    assert (idle["silent"], idle["limit_s"]) == (True, 632)
+    assert "went silent: no output for 10m, so L4 stopped it" in run.adapter.requests[1].prompt

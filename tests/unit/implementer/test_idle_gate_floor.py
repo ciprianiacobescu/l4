@@ -7,6 +7,7 @@ import pytest
 
 import l4.implementer.workbench as workbench
 from l4.agents.fake import Step
+from l4.gates.runner import GateSpec
 from l4.implementer.tdd import RoleLimit, run_red
 
 from .conftest import Bench, green_step, red_step
@@ -75,11 +76,25 @@ def test_a_variant_or_other_run_does_not_count(make_bench, timed, name):
 
 
 def test_a_run_of_a_command_that_is_not_the_configured_one_does_not_count(make_bench, timed):
-    bench: Bench = make_bench([], lint=["true"])
-    timed["baseline"], timed["lint"] = {"seconds": 900.0}, {"seconds": 900.0}
+    bench: Bench = make_bench([], lint=["true"], typecheck=["true"])
+    timed["baseline"], timed["lint"], timed["typecheck"] = {"seconds": 900.0}, {"seconds": 900.0}, {"seconds": 900.0}
     bench.wb.run_gate("baseline", "echo not the test command")
     bench.wb.run_gate("lint", "echo not the lint command")
+    bench.wb.run_gate("typecheck", "echo not the typecheck command")
     assert bench.wb.gate_peak is None
+
+
+def test_a_run_on_another_checkout_does_not_count(make_bench, timed, tmp_path):
+    """The verifier runs the test command at the merge base (`tree=`): the implementer never runs it there."""
+    bench: Bench = make_bench([])
+    other = tmp_path / "base-checkout"
+    bench.wb.git.run("clone", "-q", str(bench.wb.worktree), str(other))
+    timed["baseline"] = {"seconds": 900.0}
+    spec = GateSpec("baseline", bench.wb.cfg.gates.test.command, bench.wb.cfg.gates.test.reports, timeout_s=60)
+    bench.wb.run_gate_spec(spec, network=False, tree=other)
+    assert bench.wb.gate_peak is None
+    bench.wb.run_gate_spec(spec, network=False, tree=bench.wb.worktree)  # the unit's own tree, named, counts
+    assert bench.wb.gate_peak == ("baseline", 900.0)
 
 
 def test_a_run_that_timed_out_or_was_stopped_by_the_deadline_does_not_count(make_bench, timed, armed_deadline):
@@ -201,3 +216,37 @@ def test_the_previous_attempt_block_of_a_raised_silent_stop_names_the_raised_lim
     assert "went silent: no output for 10m, so L4 stopped it" in prompt_of(bench)
     bench.wb.previous_attempt = PreviousAttempt("impl", "silent", task="1.1")
     assert "went silent: no output for 5m, so L4 stopped it" in prompt_of(bench)
+
+
+def test_the_cap_never_lowers_the_limit_below_the_key(make_bench, monkeypatch):
+    """idle_timeout 40m is above the step's 30m limit: the cap is the step's, but the key stays."""
+    bench = make_bench([Step(idle_s=2400, status="timeout", tool_calls=2)], implementer={"idle_timeout": "40m"})
+    _opencode_like(bench, monkeypatch)
+    bench.wb.gate_peak = ("baseline", 1400.0)
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    assert bench.adapter.requests[0].stall_timeout_s == 2400.0
+    [idle] = bench.events("agent.idle")
+    assert idle["limit_s"] == 2400 and "raised_by" not in idle
+    assert outcome.reason == "the agent showed no activity for 40m (implementer.idle_timeout), so L4 stopped it"
+
+
+def test_a_floor_below_the_key_changes_nothing_in_the_event_or_the_reason(make_bench, monkeypatch):
+    bench = make_bench([Step(idle_s=600, status="timeout", tool_calls=2)], implementer={"idle_timeout": "10m"})
+    _opencode_like(bench, monkeypatch)
+    bench.wb.gate_peak = ("lint-baseline", 15.0)  # a floor of 83 s
+    outcome = run_red(bench.wb, TASK, attempt=1)
+    [idle] = bench.events("agent.idle")
+    assert idle["limit_s"] == 600 and "raised_by" not in idle
+    assert outcome.reason == "the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it"
+
+
+def test_a_peak_with_a_fraction_gives_a_whole_second_limit_and_a_rounded_whole_second_peak(make_bench, monkeypatch):
+    bench = make_bench([Step(idle_s=631, status="timeout", tool_calls=2)], implementer={"idle_timeout": "5m"})
+    _opencode_like(bench, monkeypatch)
+    bench.wb.gate_peak = ("baseline", 380.6)
+    run_red(bench.wb, TASK, attempt=1)
+    assert bench.adapter.requests[0].stall_timeout_s == 631.0  # ceil(1.5 * 380.6) = 571, plus 60
+    [idle] = bench.events("agent.idle")
+    seconds = idle["raised_by"]["seconds"]
+    assert isinstance(seconds, int) and seconds == round(380.6) == 381
+    assert idle["limit_s"] == 631 and isinstance(idle["limit_s"], int)

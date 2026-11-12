@@ -466,9 +466,12 @@ class Workbench:
         )  # fmt: skip
         return self.run_gate_spec(spec, network=allowed, extra_env=extra_env, note=note, builds_env=builds_env)
 
-    def _count_gate_run(self, spec: GateSpec, result: GateResult) -> None:
+    def _count_gate_run(self, spec: GateSpec, result: GateResult, tree: Path | None = None) -> None:
         """L4-IMP-099: remember the longest run of a command the implementer may run on the work tree as it is. A
-        variant run (code varied, or at the base), a run that timed out and one the deadline stopped say nothing."""
+        variant run (code varied, or at the base), a run on another checkout (the verifier's merge base), a run that
+        timed out and one the deadline stopped say nothing."""
+        if tree is not None and tree != self.worktree:
+            return
         gates = self.cfg.gates
         counted = (
             (spec.name in ("baseline", "test") and spec.command == gates.test.command)
@@ -544,7 +547,7 @@ class Workbench:
         self._report_links(root, spec)  # ... and one the gate planted: the restores that follow must find a real folder
         self.restore_ledger()
         result = self._cross_check(spec, result, record)
-        self._count_gate_run(spec, result)
+        self._count_gate_run(spec, result, tree)
         shutil.rmtree(record_dir, ignore_errors=True)
         discard_tree(self.unit_cache / "gate-tmp" / SCRATCH_DIR)  # a gate's private caches go with it
         if builds_env:

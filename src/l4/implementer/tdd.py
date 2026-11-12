@@ -954,12 +954,13 @@ IDLE_FLOOR_MARGIN_S = 60
 def idle_limit(wb: Workbench, idle_s: int, step_limit_s: int) -> tuple[int, tuple[str, int] | None]:
     """L4-IMP-099: (the idle limit of an implementer step in seconds, the gate that raised it and its whole seconds).
     `implementer.idle_timeout` unless the adapter's stream reader cannot show an open tool call and a gate run of this
-    unit run was measured: then the larger of it and the longest run's floor, at most the step's wall-clock limit."""
+    unit run was measured: then the larger of it and the longest run's floor, the floor capped at the step's
+    wall-clock limit (the cap never lowers the limit below `implementer.idle_timeout`)."""
     if not idle_s or wb.impl.capabilities().open_calls or wb.gate_peak is None:
         return idle_s, None
     name, seconds = wb.gate_peak
     floor = math.ceil(IDLE_FLOOR_FACTOR * seconds) + IDLE_FLOOR_MARGIN_S
-    limit_s = min(max(idle_s, floor), step_limit_s)
+    limit_s = max(idle_s, min(floor, step_limit_s))
     return limit_s, (name, round(seconds)) if limit_s > idle_s else None
 
 
@@ -1011,7 +1012,6 @@ def agent_step(
         )
 
     idle_s = duration_seconds(impl_cfg.idle_timeout)
-    limit_s, raised_by = idle_limit(wb, idle_s, RunRequest.timeout_s)
     watch = ActivityWatch(duration_seconds(impl_cfg.heartbeat), on_beat)  # clock: time.monotonic, the runner's
     request = RunRequest(
         profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
@@ -1019,8 +1019,10 @@ def agent_step(
         env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
         permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
         wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
-        stall_timeout_s=float(limit_s) if limit_s else None, watch=watch, host_env=wb.host_env,
+        watch=watch, host_env=wb.host_env,
     )  # fmt: skip
+    limit_s, raised_by = idle_limit(wb, idle_s, request.timeout_s)  # L4-IMP-099: the step's limit is the request's
+    request.stall_timeout_s = float(limit_s) if limit_s else None
     try:
         resultalias.link(wb.worktree, tmp)  # the short path a prompt-contract adapter writes its result to (MAG)
         with wb.wip_snapshots(task.key, role, attempt) as box:
@@ -1094,10 +1096,10 @@ def agent_step(
             if watch.stopped_idle_s is not None:
                 shown = f"{impl_cfg.idle_timeout} (implementer.idle_timeout)"
                 if raised_by:  # L4-IMP-099
+                    adapter = wb.selected.profile.adapter or "unknown"
                     shown = (
                         f"{ago(limit_s)} (implementer.idle_timeout {impl_cfg.idle_timeout}, raised to the longest "
-                        f"gate run of this run plus a margin, because {wb.selected.profile.adapter} shows no open "
-                        "tool call)"
+                        f"gate run of this run plus a margin, because {adapter} shows no open tool call)"
                     )
                 reason = f"the agent showed no activity for {shown}, so L4 stopped it"
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths

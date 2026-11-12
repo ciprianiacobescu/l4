@@ -6,7 +6,9 @@ and 2.x, which write a tool call only when it ends, and an adapter with no strea
 larger of `implementer.idle_timeout` and 1.5 times the longest wall time of a gate run the harness made earlier in the
 same unit run of a command the implementer may run on the work tree as it is (a `baseline` or `test` run of
 `gates.test.command`, and the runs of `gates.lint` and `gates.typecheck` commands, their baselines included), plus 60
-seconds, rounded up to a whole second, and at most the step's wall-clock limit. A gate run that timed out or that the
+seconds, rounded up to a whole second, and at most the step's wall-clock limit; the cap SHALL never lower the limit
+below `implementer.idle_timeout`, so the limit is the larger of `implementer.idle_timeout` and the smaller of that floor
+and the step's limit. A gate run that timed out or that the
 soft deadline stopped, and a variant run (`test-base-run`, the zero-value run, `test-at-red`, `test-extra-base`) SHALL
 NOT count. With no such run measured, or with `implementer.idle_timeout: 0`, the limit SHALL be as before. An adapter
 whose reader shows open calls (claude-code, codex, kiro-cli, copilot-cli) SHALL keep `implementer.idle_timeout`.
@@ -32,10 +34,12 @@ the raised limit. A silent stop (L4-IMP-087) SHALL use the same limit, and its t
 
 #### Scenario: SCN-IMP-539 (+) Without a measured run, with the watchdog off, or above the step limit, the limit is bounded
 - **Given** an opencode step with no counted gate run yet (or only a `test-base-run` of 1800 s, or a `baseline` that
-  timed out), a step with `implementer.idle_timeout: 0`, and a step after a `baseline` run of 1400 s
+  timed out), a step with `implementer.idle_timeout: 0`, a step after a `baseline` run of 1400 s, and a step with
+  `implementer.idle_timeout: 40m` after a `baseline` run of 1400 s
 - **When** each step starts
-- **Then** the first has the limit `implementer.idle_timeout`, the second has no idle stop, and the third has the step's
-  wall-clock limit (1800 s), not 2160 s
+- **Then** the first has the limit `implementer.idle_timeout`, the second has no idle stop, the third has the step's
+  wall-clock limit (1800 s), not 2160 s, and the fourth keeps 2400 s (the cap never lowers the limit below
+  `implementer.idle_timeout`; no `raised_by`)
 
 #### Scenario: SCN-IMP-540 (+) A silent stop waits for the raised limit
 - **Given** two implementer profiles, the first on opencode, the run of SCN-IMP-537, and an agent that makes no tool call

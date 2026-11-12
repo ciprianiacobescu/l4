@@ -9,6 +9,7 @@ import pytest
 from l4.agents.base import LimitSignal
 from l4.agents.fake import Step
 from l4.orchestrator import Orchestrator
+from l4.verifier import fixloop
 
 from ..implementer.conftest import IMPL, green_step, red_step, result
 from ..orchestrator.test_fallback import TWO
@@ -39,6 +40,30 @@ def test_the_tasks_of_a_fix_unit_move_to_the_next_profile(run_l4, valid_spec, fa
     assert [e["profile"] for e in run.events("task.attempt_failed")] == ["impl", "impl"]
     assert run.events("breaker.tripped") == []
     assert run.outcome["units"][0]["profiles"].get("implementer") == "impl"  # the run's profile did not move
+
+
+def test_an_escalated_fix_workbench_carries_the_longest_gate_run(run_l4, valid_spec, fake_clock, monkeypatch):
+    """L4-IMP-099: the fix loop's escalation rebuilds the workbench on the next profile and keeps the gate peak."""
+    seen: list = []
+    real = fixloop._escalation
+
+    def planted(*args, **kwargs):
+        escalate = real(*args, **kwargs)
+
+        def wrapped(wb, request):
+            wb.gate_peak = ("baseline", 381.0)
+            fresh = escalate(wb, request)
+            seen.append((wb, fresh))
+            return fresh
+
+        return wrapped
+
+    monkeypatch.setattr(fixloop, "_escalation", planted)
+    invalid = Step()
+    run = run_l4([red_step(), noqa_green(), invalid, invalid, chore_fix(), judge()], **TWO)
+    assert run.code == 0
+    [(old, fresh)] = seen
+    assert fresh is not old and fresh.gate_peak == ("baseline", 381.0)
 
 
 def test_without_the_entry_point_in_the_fix_context_the_tasks_do_not_move(run_l4, valid_spec, monkeypatch):
