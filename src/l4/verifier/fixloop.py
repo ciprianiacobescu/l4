@@ -26,6 +26,7 @@ from l4.clarifier.ports import QuestionView
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
+from l4.implementer.held_patch import NearPass
 from l4.implementer.loop import Escalate, EscalationRequest, run_task
 from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
 from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
@@ -397,6 +398,7 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
         return _halt(ctx, f"the fix unit {name} is not a fix unit of {s.ref.id}", fix_unit=name)
     wb = _child_workbench(ctx, fix, state.iteration)
     retried: set[str] = set()  # tasks already moved to another profile after a limit
+    carries: dict[str, NearPass] = {}  # task -> the near pass the limit cut short, for its next profile (L4-IMP-100)
     moved: dict[str, str] = {}  # task -> the profile it moved to (fix-unit-escalate D2)
     escalate = _escalation(ctx, fix, state.iteration, moved)
     while True:
@@ -417,7 +419,7 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             s.ledger.append("fix.done", fix_unit=name, round=marker.round, findings=list(marker.findings))
             return FixOutcome("done")
         try:
-            outcome = run_task(wb, task, escalate=escalate)
+            outcome = run_task(wb, task, escalate=escalate, carry=carries.pop(task.key, None))
         except BaselineFailed as exc:
             return _halt(ctx, str(exc), fix_unit=name)
         except PlantedLink as exc:
@@ -433,6 +435,8 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             if task.key in retried or "fall_back" not in ctx.shared:
                 raise
             retried.add(task.key)
+            if exc.carry is not None:
+                carries[task.key] = exc.carry
             wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key))
             continue
         finally:

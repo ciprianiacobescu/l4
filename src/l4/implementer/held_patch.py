@@ -23,7 +23,7 @@ import re
 import stat
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -280,7 +280,7 @@ class NearPass:
     task: str
     attempt: int
     profile: str
-    patch: bytes
+    patch: bytes = field(repr=False)  # never printed: it is the work of an agent, and as large as its diff
     patch_sha256: str
     files: tuple[str, ...]
     gates: tuple[str, ...]  # `lint` / `typecheck`, in order, each once

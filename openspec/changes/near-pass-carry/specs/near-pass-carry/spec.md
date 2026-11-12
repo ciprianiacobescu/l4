@@ -2,8 +2,10 @@
 
 ### Requirement: L4-IMP-100 A green attempt that passed every test and failed only its static gates is the next attempt's start
 A green attempt is a near pass when its test gate gives no failure (L4-IMP-002 (b)) and it fails only because a static
-gate that passed at the step base fails now (L4-IMP-096): no replay put-back failure, no refused write and no link
-outside the work tree. A replayed step (L4-IMP-065) SHALL NOT be a near pass. Before a near pass's changes are
+gate that passed at the step base fails now (L4-IMP-096): no replay put-back failure, no refused write, no link
+outside the work tree and no text shaped like a secret in the changed files (the scan an agent step gets, L4-SEC-008,
+which a lint command that writes a file can trip after the step's own scan). A replayed step (L4-IMP-065) SHALL NOT be
+a near pass, and neither SHALL a step whose changes cannot be taken (a git error) or are empty. Before a near pass's changes are
 discarded the harness SHALL keep them in memory (the work tree's diff against the red commit, binary, without the
 ledger, as a held step is captured) with the profile, the attempt and the names of the failed static gates, and
 `task.attempt_failed` SHALL carry `near_pass: true`.
@@ -12,19 +14,29 @@ The next green attempt of the task in the same run SHALL start from the red comm
 uncommitted changes, whatever profile runs it (an escalation included), and its prompt SHALL hold a `near pass` block:
 the attempt and profile that wrote the changes, that every test passed, which static gates failed (their output is the
 previous failure), and that it is to fix what they report and keep the rest unless a fix needs it. The previous-attempt
-and escalation blocks SHALL NOT then say that the earlier changes were discarded. The changes SHALL be applied once: the
+block of a limit or a silent stop SHALL always say that the limited agent's changes were discarded; an escalation block
+SHALL say that the changes of the profile it describes are in the checkout only when the near pass in the checkout is that
+profile's (`previous_attempt` outlives the attempt that set it), and otherwise keeps its text, which says they were
+discarded. The `near pass` block alone names the attempt and profile whose changes are in the checkout. The changes SHALL
+be applied once: the
 attempt after that SHALL start from the red commit as before, unless it was itself a near pass, whose changes replace
 them. The applied changes SHALL go through every guard and check of a green step, as an agent's own changes do; no replay
-guard SHALL be armed for them. A step to replay that `find_replay` finds SHALL come first, and the near pass SHALL then
-be dropped. The harness SHALL record `task.near_pass_applied{task, attempt, from_attempt, from_profile, patch_sha256,
+guard SHALL be armed for them, and they are applied inside the step's guarded block, after the grant of a person's answer
+is computed. A step to replay that `find_replay` finds, or refuses, SHALL come first, and the near pass SHALL then be
+dropped. A limit (quota, login, a silent stop) of an attempt that started from a near pass SHALL hand it on: the task's
+next run in the same unit run, on the next profile, starts from the same changes (the fallback keeps the red commit they
+are against), and `task.near_pass_applied` is recorded again with the same `from_attempt`. The harness SHALL record `task.near_pass_applied{task, attempt, from_attempt, from_profile, patch_sha256,
 files}` when it applies them, and `task.near_pass_dropped{task, attempt, from_attempt, reason}` when it does not (a
 replay, or a patch that does not apply, after which the attempt starts from the red commit). The patch SHALL NOT be
 written to the repository, the ledger or a log.
 
-When the task halts on `max_task_attempts`, the reason SHALL end with `; nearest: attempt <n> (<profile>) passed every
-test and failed only its lint or type gates` for the newest near pass of the phase in this run, and `breaker.tripped`
-SHALL carry `near_pass{attempt, profile}`. A near pass SHALL be kept for the run only: a later run (a retry, a resume, the
-run after a soft deadline) starts from the red commit. A red step, a single (chore) step and a green attempt whose test
+When the task halts on `max_task_attempts`, the reason SHALL read `task <k>: max_task_attempts (<n>) reached in <where>;
+nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates; last failure: <failure>`, the
+nearest clause before the last failure because the orchestrator cuts the reason at 300 characters, for the newest near
+pass of the phase in this run (read from this run's `task.attempt_failed{near_pass: true}` of the task, phase and fix
+unit, so a restart after a limit still names it), and `breaker.tripped` SHALL carry `near_pass{attempt, profile}`. A near
+pass SHALL be kept for the run only: a later run (a retry, a resume, the run after a soft deadline) starts from the red
+commit, unless it restores an interrupted step's work in progress (`refs/l4/wip/...`), which holds the carried changes. A red step, a single (chore) step and a green attempt whose test
 gate failed, however few tests failed, SHALL NOT be near passes.
 
 #### Scenario: SCN-IMP-541 (+) The next attempt starts from a near pass
@@ -40,7 +52,8 @@ gate failed, however few tests failed, SHALL NOT be near passes.
 - **Given** two implementer profiles A and B, `escalate_after: 1`, and A's green attempt 1, a near pass
 - **When** the phase moves to B and B's attempt 2 starts
 - **Then** B's work tree holds A's changes and its escalation block says that they are in the checkout, not that they were
-  discarded
+  discarded; when B's own attempt 2 is the near pass and attempt 3 follows, attempt 3's escalation block (still A's) says
+  A's changes were discarded, and only its `near pass` block names B's attempt 2
 
 #### Scenario: SCN-IMP-543 (−) A failed test is no near pass
 - **Given** a green attempt whose test gate fails one red test, and another whose test gate passes but whose agent wrote
@@ -59,14 +72,23 @@ gate failed, however few tests failed, SHALL NOT be near passes.
 - **Given** a task whose green attempt 4 (claude-sonnet) was a near pass and whose attempt 5 reached the step's time limit,
   after which the profile is spent
 - **When** the task halts
-- **Then** its reason ends `; last failure: the agent step reached its time limit (30m); nearest: attempt 4
-  (claude-sonnet) passed every test and failed only its lint or type gates`, and `breaker.tripped` holds `near_pass:
-  {attempt: 4, profile: claude-sonnet}`
+- **Then** its reason reads `task 1.1: max_task_attempts (5) reached in green; nearest: attempt 4 (claude-sonnet) passed
+  every test and failed only its lint or type gates; last failure: the agent step reached its time limit (30m)`, and
+  `breaker.tripped` holds `near_pass: {attempt: 4, profile: claude-sonnet}`
 
 #### Scenario: SCN-IMP-546 (−) A replay or a patch that does not apply drops the near pass
-- **Given** a near pass of attempt 1, and attempt 2 for which a held step answered `accept` is found to replay; and,
-  separately, a near pass whose patch no longer applies to the red commit
+- **Given** a near pass of attempt 1, and attempt 2 for which a held step answered `accept` is found to replay (or is
+  refused, a new hold); and, separately, a near pass whose patch no longer applies to the red commit
 - **When** attempt 2 starts in each case
-- **Then** the first replays the held step with no near pass applied and records `task.near_pass_dropped{reason:
-  "replay"}`; the second records `task.near_pass_dropped` with the apply error, starts from the red commit, and its prompt
-  holds no `near pass` block
+- **Then** the first replays the held step (or holds again) with no near pass applied and records
+  `task.near_pass_dropped{reason: "replay"}`; the second records `task.near_pass_dropped` with the apply error, starts
+  from the red commit, and its prompt holds no `near pass` block
+
+#### Scenario: SCN-IMP-547 (+) A limit hands the near pass to the next profile
+- **Given** a near pass of attempt 1 (impl), and attempt 2 on it, which hits a quota limit; the fallback moves the task
+  to impl-b
+- **When** impl-b's attempt 2 starts, and, in a second case, the task halts on `max_task_attempts` after that restart
+- **Then** `task.near_pass_applied{attempt: 2, from_attempt: 1}` is recorded again and impl-b's work tree holds attempt 1's
+  changes; its previous-attempt block says the limited agent's changes were discarded and its `near pass` block names
+  attempt 1 (impl); in the second case the halt reason still names the nearest attempt and `breaker.tripped` holds
+  `near_pass`

@@ -35,7 +35,12 @@ second agent turn inside an attempt.
 In `run_green`, a near pass is the outcome where `green_failures` gave no reason, `worse_static_gates` gave a reason,
 `restore_replay(wb, "static gates")` gave none (`stuck` is None), and the final reason is that static-gate reason alone
 (`stop_on_unsafe` and `outside_links_reason` gave none). A step that was a replay (`wb.replay_question` set) is never a
-near pass: a replayed step is a person's accept, not an agent's starting point.
+near pass: a replayed step is a person's accept, not an agent's starting point. The outside-link check runs to decide it,
+so a lint-only failure with a link out of the work tree records `guard.violation{action: refused}` now too. No file of
+the patch may hold text shaped like a secret: the near pass runs `worktree_secrets(wb.git, wb.redactor, <changed
+files>)`, the scan `agent_step` gives a step (a lint command that writes a file can trip it after the step's own scan),
+and a hit is no near pass (nothing is emitted: the scan's hits are never put in an event here). A git error while taking
+the patch is no near pass either, and the changes are discarded in a `finally`.
 
 ### D2. What is kept
 
@@ -49,17 +54,25 @@ An empty patch is no near pass.
 ### D3. Where it is carried
 
 `_run_task` keeps `carry: NearPass | None`. After a failed green outcome: `carry = done.near_pass` (a new near pass
-replaces the old one; an attempt that is not a near pass leaves `carry` None after its own use, see D4). The next
-`run_green` call gets `carry=carry`, and `carry` is set to None right after the call returns (once). Escalation does
-not touch it, so a moved phase starts from it. A red step that runs again (red is None again) clears it. `run_green`
-passes it to `step_or_replay`, which passes it to `agent_step` only on the agent path: when `find_replay` finds a step to
-replay, the near pass is not applied and `task.near_pass_dropped{task, attempt, from_attempt, reason: "replay"}` is
-recorded.
+replaces the old one; an attempt that is not a near pass leaves `carry` None). The next `run_green` call gets
+`carry=carry`, so it is applied once: whatever that attempt returns replaces it. Escalation does not touch it, so a moved
+phase starts from it. `run_green` passes it to `step_or_replay`, which passes it to `agent_step` only on the agent path:
+when `find_replay` finds a step to replay, or refuses one (a new hold), the near pass is not applied and
+`task.near_pass_dropped{task, attempt, from_attempt, reason: "replay"}` is recorded.
+
+A `RoleLimit` (quota, login, a silent stop) out of `run_green` ends the `_run_task`, and the orchestrator's fallback
+(`_implement`) and the fix loop's (`fix_hook`) start the next profile's `run_task` for the same task. The red commit is
+kept, so a patch against it still applies: `_run_task` sets `exc.carry` to the near pass the limited attempt was given
+(`RoleLimit.carry`, None without one) and re-raises, both callers keep it per task and pass it as `run_task(...,
+carry=)`, and `_run_task` drops it when there is no red commit to resume (the red step runs again). The next attempt
+starts from the same changes and `task.near_pass_applied` is recorded again with the same `from_attempt`.
 
 ### D4. How it is applied
 
-In `agent_step`, after `base = wb.head()` and before the prompt is built: when `carry` is set and `carry.task ==
-task.key`, apply `carry.patch` with the same `git apply` call `replay_step` uses. On success record
+In `agent_step`, after `base = wb.head()` and `config_grant(...)` (as `replay_step` computes the grant before it applies
+a step) and inside the `try` whose `finally` runs the guards (so they run if anything after the apply raises), and before
+the prompt is built: when `carry` is set and `carry.task == task.key` (the cheap guard), apply `carry.patch` with the
+same `git apply` call `replay_step` uses. On success record
 `task.near_pass_applied{task, attempt, from_attempt, from_profile, patch_sha256, files}` (paths only, at most 50, as
 other events cap them). On a `GitError`, `wb.discard_changes()`, record `task.near_pass_dropped{..., reason: <the
 error's first line, cut at 300>}` and go on as if there were no carry. No replay guard is armed (this is not a person's
@@ -75,22 +88,29 @@ output is under the previous failure. Its changes are in the checkout as uncommi
 those gates report and keep the rest unless a fix needs it. You start in a new session, with no transcript of that
 attempt."
 
-When a carry was applied, `_escalation_block` and `_previous_attempt_block` say "Its uncommitted changes from attempt
-<n> are in the checkout (see the near pass block)" instead of "Its uncommitted changes were discarded"; without a carry
-their text is unchanged. Pass a flag (or the carry) down; do not read global state.
+`wb.previous_attempt` outlives the attempt that set it, so it can describe a profile whose changes were discarded while
+the carry came from another. The limit and silent block of `_previous_attempt_block` therefore ALWAYS says "Its
+uncommitted changes were discarded". `_escalation_block` says "Its uncommitted changes from attempt <n> are in the
+checkout (see the near pass block)" only when a carry was applied and `carried.profile == previous.profile`, else its
+original text, byte for byte (`test_escalation.py` pins it). The `near pass` block itself names the attempt and profile
+whose changes are in the checkout. Pass the carry down; do not read global state.
 
 ### D6. The halt
 
-`_run_task` keeps `nearest: dict[str, tuple[int, str]]` (phase → attempt, profile of the newest near pass in this run).
-`task.attempt_failed` gets `near_pass: True` for a near pass (absent otherwise). At the halt, when `nearest` has the
-phase, append `; nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates` to the
-reason, and add `near_pass: {"attempt": n, "profile": p}` to `breaker.tripped`.
+`task.attempt_failed` gets `near_pass: True` for a near pass (absent otherwise). At the halt, `nearest` is built from this
+run's ledger events, not from a local (a limit's fallback starts a new `_run_task`, which would lose it): the newest
+`task.attempt_failed` with `near_pass: true` of this run id, the task, the phase halted in and the workbench's fix unit
+(`attempt`, `profile`). When there is one, the reason becomes `task <k>: max_task_attempts (<n>) reached in <where>;
+nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates; last failure: <failure>`: the
+orchestrator's `_halt` cuts the reason at 300 characters, so the nearest clause comes before the last failure, which is
+what gets cut. `near_pass: {"attempt": n, "profile": p}` goes to `breaker.tripped`.
 
 ### D7. A deadline or an exception
 
-A `DeadlineReached` or any exception out of `run_green` leaves `carry` unused; the next run starts from the red commit
-(in-memory only). A patch is held in memory, never written to the repository, the ledger or the logs (the ledger holds
-its sha256 and paths).
+A `DeadlineReached` or any exception out of `run_green` other than `RoleLimit` leaves `carry` unused; the next run starts
+from the red commit, unless it restores an interrupted step's work in progress (`refs/l4/wip/...`), which holds the
+carried changes (the snapshots are of the work tree, whatever it holds). A patch is held in memory, never written to the
+repository, the ledger or the logs (the ledger holds its sha256 and paths; `NearPass.patch` is `repr=False`).
 
 ## Risks / Trade-offs
 
@@ -98,4 +118,5 @@ its sha256 and paths).
   change a fix needs.
 - The patch is taken after the static gates ran: a linter that writes files (`--fix`) has its writes in it. That tree
   was not tested, but the next attempt's test gate tests it.
-- A run that ends between the near pass and the next attempt (soft deadline) loses it.
+- A run that ends between the near pass and the next attempt (soft deadline) loses it, unless the next run restores a
+  step's work in progress that held it.

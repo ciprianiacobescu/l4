@@ -71,6 +71,7 @@ from l4.forge.pushfail import PushFailed, explain_push_failure, push_platform
 from l4.forge.urls import app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
+from l4.implementer.held_patch import NearPass
 from l4.implementer.loop import EscalationRequest, run_task, spent_constraint, used_constraint
 from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
@@ -1163,6 +1164,7 @@ class Orchestrator:
         otherwise the run's exit code."""
         wb = self._workbench()
         ledger = self.services.ledger
+        carries: dict[str, NearPass] = {}  # task -> the near pass a limit cut short, for its next profile (L4-IMP-100)
         while True:
             self._close_parents(wb)
             tasks = self.services.provider.tasks(self.services.ref)
@@ -1188,7 +1190,7 @@ class Orchestrator:
                 return None
             limited = False
             try:
-                outcome = run_task(wb, task, escalate=self._escalate)
+                outcome = run_task(wb, task, escalate=self._escalate, carry=carries.pop(task.key, None))
             except BaselineFailed as exc:
                 ledger.append("breaker.tripped", reason="baseline_failed", detail=str(exc))
                 return self._halt("baseline_failed", str(exc))
@@ -1196,6 +1198,8 @@ class Orchestrator:
                 return self._halt_planted_link(exc, task.key)
             except RoleLimit as exc:
                 limited = True  # the task starts again: a move's veto holds for it (L4-IMP-094 D1)
+                if exc.carry is not None:  # the red commit stays, so the changes the limited attempt began with do too
+                    carries[task.key] = exc.carry
                 wb = self._fall_back(exc, wb, task.key)
                 continue
             finally:

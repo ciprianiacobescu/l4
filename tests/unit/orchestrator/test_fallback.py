@@ -12,7 +12,7 @@ from l4.cli import main
 from l4.exitcodes import ExitCode
 from l4.orchestrator import Orchestrator
 
-from ..implementer.conftest import green_step, red_step, result
+from ..implementer.conftest import IMPL, green_step, red_step, result
 from .conftest import BRANCH, UNIT
 
 RESETS = datetime(2026, 1, 1, 6, 0, tzinfo=UTC)
@@ -221,3 +221,31 @@ def test_a_raised_silent_stop_tells_the_next_profile_the_raised_limit(run_l4, fa
     [idle] = run.events("agent.idle")
     assert (idle["silent"], idle["limit_s"]) == (True, 632)
     assert "went silent: no output for 10m, so L4 stopped it" in run.adapter.requests[1].prompt
+
+
+LINT_IMPL = "sh -c 'if grep -q LINTBAD src/pytdd/pricing.py; then echo E501 line too long; exit 1; fi'"
+
+
+def test_a_limit_after_a_near_pass_was_applied_starts_the_next_profile_from_the_near_pass(run_l4, fake_clock):
+    """L4-IMP-100: attempt 1 (impl) passed every test and failed only lint; attempt 2 started from it and hit a quota
+    limit. The fallback keeps the red commit, so impl-b's attempt starts from the same changes, and its prompt says what
+    happened to the limited agent's own changes."""
+    seen: list[str] = []
+
+    def watch(request) -> None:
+        seen.append((request.cwd / "src/pytdd/pricing.py").read_text())
+
+    near = Step(writes={"src/pytdd/pricing.py": IMPL + "\n# LINTBAD\n"}, structured=result("green"))
+    after = Step(writes={"src/pytdd/pricing.py": IMPL}, structured=result("green"), on_start=watch)
+    run = run_l4([red_step(), near, limited(writes={"leftover.txt": "half"}), after], lint=[LINT_IMPL], **TWO)
+    assert run.code == 0, run.outcome
+    assert [(e["attempt"], e["from_attempt"], e["from_profile"]) for e in run.events("task.near_pass_applied")] == [
+        (2, 1, "impl"),
+        (2, 1, "impl"),
+    ]
+    assert len(seen) == 1 and "LINTBAD" in seen[0]
+    prompt = run.adapter.requests[3].prompt  # red, green 1, the limited green 2, impl-b's
+    previous = prompt.split('kind="previous-attempt"', 1)[1].split("</l4:data>", 1)[0]
+    assert "usage_limit" in previous and "Its uncommitted changes were discarded" in previous
+    assert "Attempt 1 of this task (profile impl)" in prompt.split('kind="near-pass"', 1)[1]
+    assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)

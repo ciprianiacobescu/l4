@@ -32,6 +32,7 @@ from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
     GreenOutcome,
     RedOutcome,
+    RoleLimit,
     _last_checkpoint,
     _ledger_events,
     resume_red,
@@ -539,11 +540,15 @@ def _resumes_at_green(wb: Workbench, task: Task) -> bool:
     return last is not None and last[1:] == (task.key, "red")
 
 
-def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+def run_task(
+    wb: Workbench, task: Task, *, escalate: Escalate | None = None, carry: NearPass | None = None
+) -> TaskOutcome:
     """One task. With a run deadline armed, a step that does not fit raises `DeadlineReached` before it starts, and a
-    step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067)."""
+    step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067).
+    `carry`: the near pass (L4-IMP-100) that a `RoleLimit` of this task handed on (`RoleLimit.carry`), for the green
+    attempt that follows the fallback."""
     try:
-        outcome = _run_task(wb, task, escalate=escalate)
+        outcome = _run_task(wb, task, escalate=escalate, carry=carry)
     except deadline.DeadlineReached as exc:
         exc.fix_unit = exc.fix_unit or wb.event_context.get("fix_unit")  # a fix unit's stop is counted in its window
         raise
@@ -555,7 +560,25 @@ def run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> 
     return outcome
 
 
-def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) -> TaskOutcome:
+def _nearest(wb: Workbench, task: Task, phase: str) -> tuple[int, str] | None:
+    """L4-IMP-100: the (attempt, profile) of the newest near pass of `phase` of this task in this run, from the run's
+    ledger: a limit's fallback starts a new `_run_task`, so no local of one remembers the attempts of another."""
+    fix_unit = wb.event_context.get("fix_unit")
+    found: tuple[int, str] | None = None
+    for event in _ledger_events(wb):
+        data = event.data
+        if (
+            event.type == "task.attempt_failed" and event.run_id == wb.run_id and data.get("near_pass") is True
+            and data.get("task") == task.key and data.get("phase") == phase and data.get("fix_unit") == fix_unit
+            and isinstance(number := data.get("attempt"), int) and isinstance(data.get("profile"), str)
+        ):  # fmt: skip
+            found = (number, data["profile"])
+    return found
+
+
+def _run_task(
+    wb: Workbench, task: Task, *, escalate: Escalate | None = None, carry: NearPass | None = None
+) -> TaskOutcome:
     chore = chore_findings(wb.ref.path, task.title)  # a harness-tagged task of a fix unit: one phase, no test (D8)
     # failed attempts per phase and profile, in the order the profiles ran the phase (D3): each profile is held to
     # `escalate_after` when a later profile can take over, and to `max_task_attempts` otherwise. Those of earlier runs
@@ -573,11 +596,12 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     retry: str | None = (
         None  # `failure` and what the guards put back in that attempt: the next prompt's, not the ledger's
     )
-    # L4-IMP-100: the changes of a green attempt that failed only its static gates, for the next attempt of this task
-    # (a different `Workbench` after an escalation, so a local of this loop); `nearest` is the halt's note (D6)
-    carry: NearPass | None = None
-    nearest: dict[str, tuple[int, str]] = {}
     red: RedOutcome | None = None if chore else resume_red(wb, task)
+    # L4-IMP-100: the changes of a green attempt that failed only its static gates, for the next attempt of this task
+    # (a different `Workbench` after an escalation, so a local of this loop). One handed in by a limit's fallback is
+    # against the red commit that is kept: with no red commit to resume, the red step runs again and it is dropped
+    if red is None:
+        carry = None
     start = "single" if chore else "red" if red is None else "green"
     # D7b: earlier runs' failures can say to move through several profiles; the first move is asked from the profile
     # an earlier run moved the phase from, when that profile comes after this run's (L4-IMP-094 D3)
@@ -618,7 +642,6 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
                 return TaskOutcome("blocked", "single", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "single", done.reason, done.excerpt
         elif red is None:
-            carry = None
             attempts["red"] += 1
             _check_step(wb, "red", task.key, attempts["red"])
             with deadline.timed(wb.emit):
@@ -640,9 +663,12 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
         else:
             attempts["green"] += 1
             _check_step(wb, "green", task.key, attempts["green"])
-            with deadline.timed(wb.emit):
-                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
-            carry = None  # applied once, or dropped: only the attempt just run can hand on a new one
+            try:
+                with deadline.timed(wb.emit):
+                    done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
+            except RoleLimit as limit:
+                limit.carry = carry  # the fallback's next profile starts from it again (the red commit is kept)
+                raise
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -654,9 +680,7 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
                 assert done.held is not None
                 return TaskOutcome("blocked", "green", _raise_held(wb, task, done.held, attempts["green"]))
             phase, failure, excerpt = "green", done.reason, done.excerpt
-            carry = done.near_pass
-            if carry is not None:
-                nearest["green"] = (attempts["green"], wb.selected.profile_name)
+            carry = done.near_pass  # applied once, or dropped: only the attempt just run can hand on a new one
             if hung_frozen := _hung_frozen(wb, red, done):
                 # a frozen test that hangs once the code works is the owner's to edit: no attempt can change it, and
                 # a halt would name nothing (W-D1). A test that is not frozen is retried with the frame in the prompt.
@@ -688,12 +712,18 @@ def _run_task(wb: Workbench, task: Task, *, escalate: Escalate | None = None) ->
     why_no_move = ""  # a move was refused while the phase was on this profile, and a later profile exists (D4)
     if refused is not None and refused[0] == current and _has_later(wb, wb.selected.profile_name):
         why_no_move = f"; no later profile can take it ({refused[1]})"
-    reason = f"task {task.key}: max_task_attempts ({limit}) reached in {where}{why_no_move}; last failure: {failure}"
+    near = _nearest(wb, task, current)  # D6: the newest near pass of this phase in this run
+    # the orchestrator's `_halt` cuts the reason at 300 characters: the nearest attempt comes before the last failure
+    nearest = (
+        f"; nearest: attempt {near[0]} ({near[1]}) passed every test and failed only its lint or type gates"
+        if near is not None else ""
+    )  # fmt: skip
+    reason = (
+        f"task {task.key}: max_task_attempts ({limit}) reached in {where}{why_no_move}{nearest}; "
+        f"last failure: {failure}"
+    )
     if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code
         reason += REPAIR_EXHAUSTED_NOTE
-    near = nearest.get(current)
-    if near is not None:  # D6: the newest near pass of this phase in this run
-        reason += f"; nearest: attempt {near[0]} ({near[1]}) passed every test and failed only its lint or type gates"
     wb.emit(
         "breaker.tripped", reason="max_task_attempts", task=task.key, phase=current,
         attempts=sum(failures[current].values()), profiles=ran, last_failure=failure,

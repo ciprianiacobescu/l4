@@ -125,3 +125,29 @@ def test_a_raised_silent_fix_step_tells_the_next_profile_the_raised_limit(run_l4
     assert run.adapter.requests[2].stall_timeout_s == 632.0
     retried = run.adapter.requests[3].prompt
     assert 'kind="previous-attempt"' in retried and "went silent: no output for 10m" in retried
+
+
+def test_a_fix_tasks_limit_hands_the_carry_it_started_from_to_the_task_on_the_next_profile(
+    run_l4, valid_spec, fake_clock, monkeypatch
+):
+    """L4-IMP-100: the carry a limited `run_task` attaches to its `RoleLimit` is the next `run_task`'s `carry` for the
+    same task, as the orchestrator's fallback does for the unit's tasks."""
+    from l4.implementer.held_patch import NearPass
+    from l4.implementer.tdd import RoleLimit
+
+    marker = NearPass("1", 1, "impl", b"patch", "0" * 64, ("a.py",), ("lint",))
+    real, carries = fixloop.run_task, []
+
+    def planted(wb, task, **kwargs):
+        carries.append((task.key, kwargs.get("carry")))
+        try:
+            return real(wb, task, **kwargs)
+        except RoleLimit as exc:
+            exc.carry = marker
+            raise
+
+    monkeypatch.setattr(fixloop, "run_task", planted)
+    run = run_l4([red_step(), noqa_green(), limited(), chore_fix(), judge()], **TWO)
+    assert run.code == 0, run.triggers()
+    fix_calls = [carry for _, carry in carries[-2:]]
+    assert fix_calls == [None, marker]

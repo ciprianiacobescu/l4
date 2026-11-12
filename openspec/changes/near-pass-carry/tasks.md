@@ -46,7 +46,7 @@
 ## 3. The halt names the near pass (D6)
 
 - [x] 3.1 Write the test first (SCN-IMP-545): a task whose green attempt is a near pass and whose later attempts fail
-  until the profile is spent: the halt reason ends with the `nearest:` text and `breaker.tripped` holds `near_pass`; a
+  until the profile is spent: the halt reason names the `nearest:` attempt before the last failure and `breaker.tripped` holds `near_pass`; a
   task with no near pass has today's reason and no `near_pass` field. Run it and see it fail.
 - [x] 3.2 Then add `nearest`, the `near_pass` field of `task.attempt_failed` and the halt text in `_run_task`. Run
   `uv run --frozen pytest tests/unit/implementer -q -k "loop or escalat or breaker or halt"` and every test that pins the

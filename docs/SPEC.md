@@ -2687,26 +2687,38 @@ to a paid profile; which command was running at each stop is not recorded [I].]
 
 **L4-IMP-100 A green attempt that passed every test and failed only its static gates is the next attempt's start.** A
 green attempt is a near pass when its test gate gives no failure (L4-IMP-002 (b)) and it fails only because a static
-gate that passed at the step base fails now (L4-IMP-096): no replay put-back failure, no refused write and no link
-outside the work tree. A replayed step (L4-IMP-065) SHALL NOT be a near pass. Before a near pass's changes are discarded
+gate that passed at the step base fails now (L4-IMP-096): no replay put-back failure, no refused write, no link
+outside the work tree and no text shaped like a secret in the changed files (the scan an agent step gets, L4-SEC-008,
+which a lint command that writes a file can trip after the step's own scan). A replayed step (L4-IMP-065) SHALL NOT be
+a near pass, and neither SHALL a step whose changes cannot be taken (a git error) or are empty. Before a near pass's changes are discarded
 the harness SHALL keep them in memory (the work tree's diff against the red commit, binary, without the ledger, as a held
 step is captured) with the profile, the attempt and the names of the failed static gates, and `task.attempt_failed`
 SHALL carry `near_pass: true`. The next green attempt of the task in the same run SHALL start from the red commit with
 those changes applied as uncommitted changes, whatever profile runs it (an escalation included), and its prompt SHALL
 hold a `near pass` block: the attempt and profile that wrote the changes, that every test passed, which static gates
 failed (their output is the previous failure), and that it is to fix what they report and keep the rest unless a fix
-needs it. The previous-attempt and escalation blocks SHALL NOT then say that the earlier changes were discarded. The
-changes SHALL be applied once: the attempt after that SHALL start from the red commit as before, unless it was itself a
+needs it. The previous-attempt block of a limit or a silent stop SHALL always say that the limited agent's changes were
+discarded; an escalation block SHALL say that the changes of the profile it describes are in the checkout only when the
+near pass in the checkout is that profile's (`previous_attempt` outlives the attempt that set it, so a near pass of
+another profile says nothing about it), and otherwise keeps its text, which says they were discarded. The `near pass`
+block alone names the attempt and profile whose changes are in the checkout. The changes SHALL be applied once: the attempt after that SHALL start from the red commit as before, unless it was itself a
 near pass, whose changes replace them. The applied changes SHALL go through every guard and check of a green step, as an
-agent's own changes do; no replay guard SHALL be armed for them. A step to replay that `find_replay` finds SHALL come
-first, and the near pass SHALL then be dropped. The harness SHALL record `task.near_pass_applied{task, attempt,
+agent's own changes do (they are applied inside the step's guarded block, after the grant of a person's answer is
+computed, as `replay_step` does); no replay guard SHALL be armed for them. A step to replay that `find_replay` finds,
+or refuses, SHALL come first, and the near pass SHALL then be dropped. A limit (quota, login, a silent stop) of an
+attempt that started from a near pass SHALL hand it on: the task's next run in the same unit run, on the next profile,
+starts from the same changes (the fallback keeps the red commit they are against), and `task.near_pass_applied` is
+recorded again with the same `from_attempt`. The harness SHALL record `task.near_pass_applied{task, attempt,
 from_attempt, from_profile, patch_sha256, files}` when it applies them, and `task.near_pass_dropped{task, attempt,
 from_attempt, reason}` when it does not (a replay, or a patch that does not apply, after which the attempt starts from
 the red commit). The patch SHALL NOT be written to the repository, the ledger or a log. When the task halts on
-`max_task_attempts`, the reason SHALL end with `; nearest: attempt <n> (<profile>) passed every test and failed only its
-lint or type gates` for the newest near pass of the phase in this run, and `breaker.tripped` SHALL carry
-`near_pass{attempt, profile}`. A near pass SHALL be kept for the run only: a later run (a retry, a resume, the run after
-a soft deadline) starts from the red commit. A red step, a single (chore) step and a green attempt whose test gate
+`max_task_attempts`, the reason SHALL read `task <k>: max_task_attempts (<n>) reached in <where>; nearest: attempt <n>
+(<profile>) passed every test and failed only its lint or type gates; last failure: <failure>`, the nearest clause before
+the last failure because the orchestrator cuts the reason at 300 characters, for the newest near pass of the phase in
+this run (read from this run's `task.attempt_failed{near_pass: true}` of the task, phase and fix unit, so a restart after
+a limit still names it), and `breaker.tripped` SHALL carry `near_pass{attempt, profile}`. A near pass SHALL be kept for
+the run only: a later run (a retry, a resume, the run after a soft deadline) starts from the red commit, unless it
+restores an interrupted step's work in progress (`refs/l4/wip/...`), which holds the carried changes. A red step, a single (chore) step and a green attempt whose test gate
 failed, however few tests failed, SHALL NOT be near passes. [V, a consumer's TypeScript unit: green attempt 4 passed
 every test and failed `pnpm run lint` (one `no-useless-assignment`) and `pnpm run typecheck` (one TS2322); attempt 5
 started again from the red commit, redid about 20 minutes of work and reached the 30-minute step limit, and the task
@@ -6876,7 +6888,9 @@ zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check
 
 Base run scope adds `base_run.scope` (`{decided, kept, aside, more, timeout_s, unscoped}`, L4-IMP-097), once before each base run's gate: the number of tests the run decides, the files that hold them (at most 20; none when nothing is set aside), the unit's added test files removed for the run (at most 50, only files actually removed), the count left out of the two lists, the run's limit in seconds and why nothing was set aside (empty when the run is scoped); paths only, no test source.
 
-A near pass adds these records (L4-IMP-100): `near_pass: true` on `task.attempt_failed` of a green attempt that passed every test and failed only its static gates (absent otherwise), `task.near_pass_applied` (`{task, attempt, from_attempt, from_profile, patch_sha256, files}`: the near pass is applied to the work tree before the agent runs; `files` at most 50) and `task.near_pass_dropped` (`{task, attempt, from_attempt, reason}`: `reason` is `replay` or the first line of the `git apply` error, at most 300 characters), and `near_pass` (`{attempt, profile}`) on `breaker.tripped`; paths and the patch's digest only, never the patch.
+A near pass adds these records (L4-IMP-100): `near_pass: true` on `task.attempt_failed` of a green attempt that passed every test and failed only its static gates (absent otherwise), `task.near_pass_applied` (`{task, attempt, from_attempt, from_profile, patch_sha256, files}`: the near pass is applied to the work tree before the agent runs; `files` at most 50) and `task.near_pass_dropped` (`{task, attempt, from_attempt, reason}`: `reason` is `replay` or the first line of the `git apply` error, at most 300 characters), and `near_pass` (`{attempt, profile}`) on `breaker.tripped`; paths and the patch's digest only, never the patch. A
+lint-only failure with a link out of the work tree also records `guard.violation{action: refused}`: the outside-link check
+runs to decide the near pass.
 
 A repair proposal adds these records (L4-IMP-091, L4-VER-073): `repair_blobs` on `question.raised` of `kind: harness` with `check: repair` (`{path: [blob before, blob after]}` for each file the saved patch changes, from a temporary index of the step base with the patch applied, never from the work tree; the raise also carries the digests of the saved step, `patch_sha256` and `result_sha256`); `task.repaired` (`{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`: written before the commit of a replayed repair, `proved` maps each test id to how it was proved and `sha10` ties the proof to the content of its file, `question` and `patch_sha256` are the replay's); `held.replayed` for the replay of an accepted repair (the `patch_sha256` that `task.repaired` repeats and the verifier compares, after the answer of a person by position in the ledger); and `held.accept_ignored` (`{question, task, check, by?}`: once per question, also for `check: repair` when a recorded `accept` was given by an `agent` or the `delegate`, which `by` names, because only `question.answered{by: human}` applies a repair).
 
@@ -9303,7 +9317,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 127 | `base-run-scope` | the base run (L4-IMP-003) runs the step's candidate tests without the unit's other test files and within its own limit: a file that holds a test of the head report, that the unit added, and that holds none of the tests the run decides is removed for the run and put back byte for byte (sha256) with the production files, while a pre-existing test file the unit changed, support files, fixtures and files without a reported test, a file under a protected path and a file with a candidate stay as the work tree holds them, and a run whose decided test has no file, that has no head report or whose file is a link, outside the work tree, unreadable or too large sets nothing aside; the run, scoped or not, is stopped after twice the step's test gate or that time plus one test's limit, whichever is longer, at least 300 s and at most `gates.timeout`, with a reason that names the limit, and `GateResult.seconds`, `Workbench.run_gate(timeout_s=)` and `run_with_code_of(timeout_s=)` carry the time and the limit; `base_run.scope` records the scope of each run (L4-IMP-097, L4-IMP-003 amended, SCN-IMP-526…532; `other_tests_at_base` and `confirmed_by_base_run` in `implementer/base_run.py`; `openspec/changes/base-run-scope/`; test file `test_base_run_scope`). A consumer's TypeScript unit: the base run hit the 30-minute gate timeout three times because an earlier task's test file left its process running against the base code; a reproduction with the unit's other test files set aside wrote a report in about 7 minutes, and L4's classifier reads the five candidates there as proofs. Limits: a candidate test that imports another of the unit's test files errors in the scoped run and is not confirmed by it; a candidate file that itself leaves its process running still meets the limit, now after the run's own limit instead of `gates.timeout`; test ids that do not map to a file (Node's built-in junit reporter's `test::` class names, Go import paths, C# or Java class names, a class name that carries a `describe` chain) make the run unscoped, which keeps today's run with the new limit; a test file the unit changed that existed at the unit base stays as the work tree holds it; a candidate that fails at the base by the stub's own not-implemented error is still no proof; a test file under a protected path is never set aside; `discriminate_extra` (`test-extra-base`) still runs the whole suite at the base and is not changed | the unit tests of `test_base_run_scope` pass, and a unit whose earlier task left a test file that never exits against the base code has its next task confirmed by the base run within the limit |
 | 128 | `static-gates-runnable` | an implementer may run the configured lint and typecheck commands before it finishes, so a lint or type error is no longer seen only after the step. `l4.agents.base.PermissionPolicy` gains `static_commands` (the `gates.lint` then `gates.typecheck` commands, each once); `agent_step` and `l4.sim.dryrun` pass them; claude-code adds one `Bash(<command>:*)` per command in implement mode, copilot-cli one `--allow-tool=shell(<first word>:*)` per distinct first word; opencode, codex and kiro-cli are unchanged; the prompt's `# Gate command` section says the agent may run them and to check by reading when one cannot run in the sandbox (L4-IMP-098, SCN-IMP-533..536) |
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
-| 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it, with a `near pass` prompt block and no `were discarded` text in the previous-attempt and escalation blocks; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a replay comes first; a patch that does not apply); the halt reason adds `nearest: attempt <n> (<profile>) ...` and `breaker.tripped` carries `near_pass`; red, single and test-failing attempts are not near passes, and nothing is carried across runs (L4-IMP-100, SCN-IMP-541..546) |
+| 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` before the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13302,7 +13316,8 @@ scenario is a spec defect (§26).
 - **Given** two implementer profiles A and B, `escalate_after: 1`, and A's green attempt 1, a near pass
 - **When** the phase moves to B and B's attempt 2 starts
 - **Then** B's work tree holds A's changes and its escalation block says that they are in the checkout, not that they
-  were discarded
+  were discarded; when B's own attempt 2 is the near pass and attempt 3 follows, attempt 3's escalation block (still A's)
+  says A's changes were discarded, and only its `near pass` block names B's attempt 2
 
 #### SCN-IMP-543 (−) A failed test is no near pass · L4-IMP-100
 - **Given** a green attempt whose test gate fails one red test, and another whose test gate passes but whose agent wrote a
@@ -13321,17 +13336,26 @@ scenario is a spec defect (§26).
 - **Given** a task whose green attempt 4 (claude-sonnet) was a near pass and whose attempt 5 reached the step's time limit,
   after which the profile is spent
 - **When** the task halts
-- **Then** its reason ends `; last failure: the agent step reached its time limit (30m); nearest: attempt 4
-  (claude-sonnet) passed every test and failed only its lint or type gates`, and `breaker.tripped` holds `near_pass:
-  {attempt: 4, profile: claude-sonnet}`
+- **Then** its reason reads `task 1.1: max_task_attempts (5) reached in green; nearest: attempt 4 (claude-sonnet) passed
+  every test and failed only its lint or type gates; last failure: the agent step reached its time limit (30m)`, and
+  `breaker.tripped` holds `near_pass: {attempt: 4, profile: claude-sonnet}`
 
 #### SCN-IMP-546 (−) A replay or a patch that does not apply drops the near pass · L4-IMP-100, L4-IMP-065
-- **Given** a near pass of attempt 1, and attempt 2 for which a held step answered `accept` is found to replay; and,
-  separately, a near pass whose patch no longer applies to the red commit
+- **Given** a near pass of attempt 1, and attempt 2 for which a held step answered `accept` is found to replay (or is
+  refused, a new hold); and, separately, a near pass whose patch no longer applies to the red commit
 - **When** attempt 2 starts in each case
-- **Then** the first replays the held step with no near pass applied and records `task.near_pass_dropped{reason:
-  "replay"}`; the second records `task.near_pass_dropped` with the apply error, starts from the red commit, and its prompt
-  holds no `near pass` block
+- **Then** the first replays the held step (or holds again) with no near pass applied and records
+  `task.near_pass_dropped{reason: "replay"}`; the second records `task.near_pass_dropped` with the apply error, starts
+  from the red commit, and its prompt holds no `near pass` block
+
+#### SCN-IMP-547 (+) A limit hands the near pass to the next profile · L4-IMP-100, L4-IMP-017
+- **Given** a near pass of attempt 1 (impl), and attempt 2 on it, which hits a quota limit; the fallback moves the task
+  to impl-b
+- **When** impl-b's attempt 2 starts, and, in a second case, the task halts on `max_task_attempts` after that restart
+- **Then** `task.near_pass_applied{attempt: 2, from_attempt: 1}` is recorded again and impl-b's work tree holds attempt 1's
+  changes; its previous-attempt block says the limited agent's changes were discarded and its `near pass` block names
+  attempt 1 (impl); in the second case the halt reason still names the nearest attempt and `breaker.tripped` holds
+  `near_pass`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
