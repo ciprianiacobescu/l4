@@ -591,3 +591,12 @@ def test_scn_imp_535_the_prompt_names_the_static_commands_the_agent_may_run(role
         assert "and rejects the task while they fail" in gate
     plain = render_prompt(role, ctx()).text
     assert "You may run" not in plain and "by reading the code" not in plain
+
+
+def test_scn_imp_535_the_prompt_lists_each_static_command_once():
+    commands = ("pnpm run lint", "pnpm run typecheck", "pnpm run lint", "  ", " pnpm run typecheck ")
+    text = render_prompt("green", ctx(static_gate_commands=commands)).text
+    gate = text[text.index("# Gate command") : text.index("# Output")]
+    assert "You may run `pnpm run lint`, `pnpm run typecheck` yourself before you finish" in gate
+    assert "``" not in gate and "`  `" not in gate
+    assert "You may run" not in render_prompt("green", ctx(static_gate_commands=("  ",))).text

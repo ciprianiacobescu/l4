@@ -13,7 +13,9 @@ say that a command that cannot run in the sandbox (it needs the network, or a ca
 reading instead; it SHALL still say that the harness runs them after the step and rejects the attempt while they fail.
 The harness's own static gate runs and their judgement against the step base (L4-IMP-002, L4-IMP-096) SHALL be
 unchanged. These are the repository owner's configured gate commands, which the harness already runs on the same work
-tree: the rule SHALL add no command the configuration does not name.
+tree. On claude-code the rule SHALL add no command the configuration does not name; copilot-cli's rule matches a
+command's first word only, as for the test gate, so a lint command `sh <script>` or `uv run ...` allows any `sh` or `uv`
+command there, and the sandbox stays the boundary (L4-FAC-016).
 
 #### Scenario: SCN-IMP-533 (+) A claude-code implementer may run each lint and typecheck command
 - **Given** `gates.test.command: pnpm run test`, `gates.lint: [pnpm run lint]` and

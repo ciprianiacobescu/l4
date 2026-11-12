@@ -17,7 +17,8 @@ per-run `XDG_CACHE_HOME` whose `copilot/pkg` links to the harness's warm package
 mode flags: a judge `--available-tools=l4_no_tools` (an unknown name in the allow-list leaves the model no tool at
 all [V]; an EMPTY `--available-tools` is ignored and leaves every tool [V], so it is never used); the delegate's
 read-only run `--available-tools=view,grep,glob` (reads inside the cwd are approved without a prompt [V]); an
-implementer `--allow-tool=write`, `--allow-tool=shell(<gate binary>:*)` and `--add-dir <step dir>` (`write`
+implementer `--allow-tool=write`, one `--allow-tool=shell(<first word>:*)` per distinct first word of the test,
+lint and typecheck gate commands (L4-IMP-098) and `--add-dir <step dir>` (`write`
 approved `create` in the cwd, and `--add-dir` admitted the result file outside it, which was denied without it
 [V]). The shell rule matches on the command's first word only (`shell(./.venv/bin/python:*)` ran
 `./.venv/bin/python -m pytest` [V]; `shell(./.venv/bin/python -m pytest:*)` matched nothing [V]), so it is coarser

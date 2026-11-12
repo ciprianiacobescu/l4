@@ -17,6 +17,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
 
+from l4.agents.base import shell_commands
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.implementer.result import FILE_RESULT_SCHEMA, RESULT_SCHEMA, TraceRules, trace_rules
 from l4.implementer.unit_context import (
@@ -356,8 +357,8 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             "the ANSI codes before comparing (for example `click.unstyle`), or turn the command's colour off inside "
             "the test."
         )
-    if ctx.static_gate_commands:
-        listed = ", ".join(f"`{c}`" for c in ctx.static_gate_commands)
+    if static := shell_commands(None, ctx.static_gate_commands):  # each once, as the shell rule allows them
+        listed = ", ".join(f"`{c}`" for c in static)
         gate += f"\nYou may run {listed} yourself before you finish; the harness also runs them after your step"
         if role == "red":
             gate += (
