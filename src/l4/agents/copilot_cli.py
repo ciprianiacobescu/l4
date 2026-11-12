@@ -17,7 +17,8 @@ per-run `XDG_CACHE_HOME` whose `copilot/pkg` links to the harness's warm package
 mode flags: a judge `--available-tools=l4_no_tools` (an unknown name in the allow-list leaves the model no tool at
 all [V]; an EMPTY `--available-tools` is ignored and leaves every tool [V], so it is never used); the delegate's
 read-only run `--available-tools=view,grep,glob` (reads inside the cwd are approved without a prompt [V]); an
-implementer `--allow-tool=write`, `--allow-tool=shell(<gate binary>:*)` and `--add-dir <step dir>` (`write`
+implementer `--allow-tool=write`, one `--allow-tool=shell(<first word>:*)` per distinct first word of the test,
+lint and typecheck gate commands (L4-IMP-098) and `--add-dir <step dir>` (`write`
 approved `create` in the cwd, and `--add-dir` admitted the result file outside it, which was denied without it
 [V]). The shell rule matches on the command's first word only (`shell(./.venv/bin/python:*)` ran
 `./.venv/bin/python -m pytest` [V]; `shell(./.venv/bin/python -m pytest:*)` matched nothing [V]), so it is coarser
@@ -62,6 +63,7 @@ from l4.agents.base import (
     Usage,
     judge_workdir,
     read_result_file,
+    shell_commands,
     wrap_command,
 )
 from l4.agents.contract import attach_file_result, attach_judge_reply, attach_read_only_reply
@@ -118,11 +120,12 @@ def write_home(home: Path) -> Path:
     return home
 
 
-def gate_rule(gate_prefix: str | None) -> list[str]:
-    """`--allow-tool=shell(<first word>:*)` for the gate command, or nothing: the rule language matches the command's
-    first word (with `:*` for any arguments), so the whole prefix cannot be pinned."""
-    words = (gate_prefix or "").split()
-    return [f"--allow-tool=shell({words[0]}:*)"] if words else []
+def gate_rules(gate_prefix: str | None, static_commands: Sequence[str] = ()) -> list[str]:
+    """`--allow-tool=shell(<first word>:*)` for the test gate's command, then each lint and typecheck command, one
+    per distinct first word: the rule language matches the command's first word (with `:*` for any arguments), so
+    the whole command cannot be pinned."""
+    words = dict.fromkeys(command.split()[0] for command in shell_commands(gate_prefix, static_commands))
+    return [f"--allow-tool=shell({word}:*)" for word in words]
 
 
 def effective_model(profile: Profile) -> str:
@@ -158,7 +161,8 @@ def build_command(
         return [*argv, f"--available-tools={NO_TOOLS}"]
     if mode == "read_only":
         return [*argv, f"--available-tools={','.join(READ_TOOLS)}"]
-    argv += ["--allow-tool=write", *gate_rule(req.permission_policy.gate_prefix)]
+    policy = req.permission_policy
+    argv += ["--allow-tool=write", *gate_rules(policy.gate_prefix, policy.static_commands)]
     argv += ["--add-dir", str(req.result_path.parent)]
     if mcp_config is not None and req.mcp_servers:
         argv += ["--additional-mcp-config", f"@{mcp_config}"]

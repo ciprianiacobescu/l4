@@ -2652,7 +2652,9 @@ commands the agent may run before it finishes, and SHALL say that a command that
 network, or a cache it cannot write) is checked by reading instead; it SHALL still say that the harness runs them after
 the step and rejects the attempt while they fail. The harness's own static gate runs and their judgement against the
 step base (L4-IMP-002, L4-IMP-096) SHALL be unchanged. These are the repository owner's configured gate commands, which
-the harness already runs on the same work tree: the rule SHALL add no command the configuration does not name. [V, a
+the harness already runs on the same work tree. On claude-code the rule SHALL add no command the configuration does
+not name; copilot-cli's rule matches a command's first word only, as for the test gate, so a lint command `sh <script>`
+or `uv run ...` allows any `sh` or `uv` command there, and the sandbox stays the boundary (L4-FAC-016). [V, a
 consumer's TypeScript unit: a green attempt passed every test and failed `pnpm run lint` (one `no-useless-assignment`)
 and `pnpm run typecheck` (one TS2322), two one-line errors the agent could not see because its shell allowed only
 `pnpm run test`; the owner then wrote in the repository's AGENTS.md that `tsc` and `eslint` are refused and that types
@@ -4792,8 +4794,9 @@ tool whose name is not `view`, `grep`, `rg` or `glob` SHALL end as `error` with 
 called a tool outside the read set (<sorted names>)` and no structured result. Otherwise the reply SHALL be the
 assistant text after the last tool call, else the last assistant text, read by the shared read-only helper.
 
-**L4-FAC-016 A Copilot implementer edits the worktree, runs only the gate binary and writes its result.** In implement mode the adapter SHALL add, in this order, `--allow-tool=write`, `--allow-tool=shell(<first word of the
-gate prefix>:*)` when the policy has a gate prefix, and `--add-dir <step private dir>`, and SHALL run in the worktree.
+**L4-FAC-016 A Copilot implementer edits the worktree, runs only the gate binaries and writes its result.** In implement mode the adapter SHALL add, in this order, `--allow-tool=write`, one `--allow-tool=shell(<word>:*)` for
+each distinct first word of the gate prefix and of the policy's lint and typecheck commands (L4-IMP-098), none when
+there is none, and `--add-dir <step private dir>`, and SHALL run in the worktree.
 With MCP servers in the request it SHALL write `<step>/copilot-mcp.json` = `{"mcpServers": {<name>: <server
 entry>}}` and add `--additional-mcp-config @<that path>` and one `--allow-tool=<name>` per server. With
 `memory.serena` on, the Serena server of a copilot-cli implementer SHALL start with `--context copilot-cli`, a context

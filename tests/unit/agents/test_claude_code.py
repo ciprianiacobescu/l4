@@ -50,6 +50,25 @@ def test_subscription_command_matches_the_confirmed_implementer_invocation(tmp_p
     assert json.loads(value(argv, "--json-schema")) == SCHEMA
 
 
+def bash_rules(argv: list[str]) -> list[str]:
+    return [rule for rule in value(argv, "--allowedTools").split(",") if rule.startswith("Bash(")]
+
+
+def test_scn_imp_533_an_implementer_may_run_each_lint_and_typecheck_command_once_in_order(tmp_path):
+    policy = PermissionPolicy(
+        "implement", gate_prefix="pnpm run test",
+        static_commands=("pnpm run lint", "pnpm run typecheck", "pnpm run lint", "  ", "pnpm run test"),
+    )  # fmt: skip
+    argv = command(tmp_path, permission_policy=policy)
+    assert bash_rules(argv) == ["Bash(pnpm run test:*)", "Bash(pnpm run lint:*)", "Bash(pnpm run typecheck:*)"]
+    judge = command(tmp_path, permission_policy=PermissionPolicy("judge", static_commands=("pnpm run lint",)))
+    assert "--allowedTools" not in judge
+    read_only = command(tmp_path, permission_policy=PermissionPolicy("read_only", static_commands=("pnpm run lint",)))
+    assert bash_rules(read_only) == []
+    lint_only = command(tmp_path, permission_policy=PermissionPolicy("implement", static_commands=("pnpm run lint",)))
+    assert bash_rules(lint_only) == ["Bash(pnpm run lint:*)"]
+
+
 def test_api_key_command_has_bare_and_subscription_does_not(tmp_path):
     api = command(tmp_path, auth="api_key")
     sub = command(tmp_path, auth="subscription")

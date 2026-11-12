@@ -150,10 +150,9 @@ class ClaudeCodeAdapter:
             argv += ["--allowedTools", ",".join([READ_TOOLS, *tools])]
         else:
             # Edit is scoped to the worktree and the private result dir: a bare `Edit`/`Write` rule would match paths
-            # outside the cwd (spikes/01), and `Bash` is limited to the gate command.
+            # outside the cwd (spikes/01), and `Bash` is limited to the test, lint and typecheck gate commands.
             rules = ["Read", "Glob", "Grep", "Edit(./**)", f"Edit(/{req.result_path.parent}/**)"]
-            if req.permission_policy.gate_prefix:
-                rules.append(f"Bash({req.permission_policy.gate_prefix}:*)")
+            rules += [f"Bash({command}:*)" for command in req.permission_policy.shell_commands()]
             argv += ["--permission-mode", "dontAsk", *isolation, *servers, "--strict-mcp-config"]
             argv += ["--tools", IMPLEMENT_TOOLS]
             argv += ["--allowedTools", ",".join([*rules, *tools])]

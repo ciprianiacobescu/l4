@@ -1,5 +1,6 @@
 """`l4 run --dry-run` changes nothing (SCN-DRY-01) and probes only when asked (SCN-DRY-02)."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -90,6 +91,19 @@ def test_the_output_names_the_command_the_gates_and_the_env_names_but_no_value(t
     assert lines[-1] == "would exit 0"
     assert any(line.startswith("UNIT") and "ACTION" in line for line in lines)  # the decision table
     assert any("openspec:add-discount-codes" in line and "implement" in line and "1.1" in line for line in lines)
+
+
+def test_scn_imp_536_the_shown_command_holds_the_lint_and_typecheck_rules(tdd_repo, capsys):
+    config = {
+        "profiles": {"impl": {"adapter": "claude-code", "vendor": "anthropic"}},
+        "lint": ["pnpm run lint"], "typecheck": ["pnpm run typecheck", "pnpm run lint"],
+    }  # fmt: skip
+    code, out, _ = dry_run(tdd_repo, capsys, config=config)
+    assert code == 0
+    line = next(line for line in out.splitlines() if line.strip().startswith("command: claude"))
+    allowed = shlex.split(line.split("command:", 1)[1])
+    rules = [r for r in allowed[allowed.index("--allowedTools") + 1].split(",") if r.startswith("Bash(")]
+    assert "pytest" in rules[0] and rules[1:] == ["Bash(pnpm run lint:*)", "Bash(pnpm run typecheck:*)"]
 
 
 def test_no_probe_unless_asked_and_uncached_profiles_are_unknown(tdd_repo, capsys, monkeypatch):

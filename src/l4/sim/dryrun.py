@@ -126,7 +126,9 @@ def _implementer_command(cfg: L4Config, profile: Profile) -> str | None:
         profile=profile, role="implementer", cwd=Path("<worktree>"), prompt="",
         result_path=Path("<agent-tmp>/result.json"), raw_events_path=Path("<agent-raw>/events.jsonl"), env={},
         result_schema=RESULT_SCHEMA,
-        permission_policy=PermissionPolicy("implement", gate_prefix=cfg.gates.test.command),
+        permission_policy=PermissionPolicy(
+            "implement", gate_prefix=cfg.gates.test.command, static_commands=(*cfg.gates.lint, *cfg.gates.typecheck)
+        ),
     )  # fmt: skip
     if profile.adapter == "claude-code":
         return shlex.join(ClaudeCodeAdapter().build_command(request, exe="claude"))

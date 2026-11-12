@@ -430,3 +430,12 @@ def test_a_command_profile_shows_the_elapsed_time_and_no_count(make_bench, caplo
     assert beats and all(b.startswith(f"{bench.wb.ref.id} task 1.1 red attempt 1: {profile} working ") for b in beats)
     assert not any("tool call" in b or "last activity" in b for b in beats)
     assert all(re.search(r"working \d+s$", b) for b in beats)
+
+
+def test_the_request_policy_carries_the_lint_and_typecheck_commands(make_bench):
+    """SCN-IMP-533 at the request: L4-IMP-098."""
+    bench = make_bench([red_step()], lint=["pnpm run lint"], typecheck=["pnpm run typecheck", "pnpm run lint"])
+    run_red(bench.wb, TASK, attempt=1)
+    policy = _first_request(bench).permission_policy
+    assert policy.mode == "implement" and policy.gate_prefix == bench.wb.cfg.gates.test.command
+    assert policy.static_commands == ("pnpm run lint", "pnpm run typecheck", "pnpm run lint")

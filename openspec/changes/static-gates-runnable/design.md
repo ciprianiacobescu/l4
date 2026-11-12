@@ -79,7 +79,12 @@ through every guard (the freeze puts a frozen test file back as before).
 - A configured lint or typecheck command that is itself a shell line (`sh -c '...'`) is allowed with any appended
   arguments, as the test gate's command is today. That is the owner's configuration and the same trust the test gate
   rule already gives.
-- copilot-cli's first-word rule is wider than claude-code's (`pnpm:*` allows any `pnpm` command); this is the
-  existing limit of that CLI's rule language, already named for the test gate.
+- copilot-cli's first-word rule is wider than claude-code's: `pnpm:*` allows any `pnpm` command, and a lint command
+  `sh .l4/gates/lint-go.sh` or `uv run ...` gives `sh:*` or `uv:*`, any command of that program. This is the existing
+  limit of that CLI's rule language, already named for the test gate; the shell rule was never the code-execution
+  boundary (the test gate already runs code the agent writes), the sandbox is.
+- A `(` or `)` inside a configured command splits its claude-code rule into dead pieces (claude's `--allowedTools`
+  parser does not nest parentheses): the command is then refused, never widened. The test gate's rule has the same
+  limit.
 - A command may fail in the agent's sandbox for a reason that is not the agent's (`uv run` with no writable cache, no
   network): the prompt says to read instead.
