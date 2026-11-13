@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## Unreleased
+## 0.4.58 (2026-11-13)
 
 ### Fixed
 - An implementer may now run the configured lint and typecheck commands before it finishes. In a consumer's TypeScript unit a green attempt passed every test and failed `pnpm run lint` (one `no-useless-assignment`) and `pnpm run typecheck` (one TS2322), two one-line errors the agent could not see: a claude-code implementer's shell allowed only the test gate's command. Now claude-code also gets one `Bash(<command>:*)` rule for each `gates.lint` and `gates.typecheck` command, copilot-cli one `--allow-tool=shell(<first word>:*)` rule for each distinct first word of the test, lint and typecheck commands, and the dry run shows the same rules; opencode, codex and kiro-cli, whose implement mode does not filter shell commands, are unchanged. The prompt's `# Gate command` section names the commands, says the harness still runs them after the step, and says to check by reading when one cannot run in the sandbox (no network, or a cache it cannot write). On claude-code no other command is allowed; copilot-cli's rule matches a command's first word only, as for the test gate, so there the sandbox stays the boundary. A judge, reader or delegate call gets no such rule (L4-IMP-098, L4-FAC-016).
