@@ -158,6 +158,7 @@ def test_scn_imp_541_the_next_attempt_starts_from_a_near_pass(make_bench):
     prompt = bench.adapter.requests[2].prompt  # red, green 1, green 2
     block = prompt.split('<l4:data kind="near-pass"', 1)[1].split("</l4:data>", 1)[0]
     assert "Attempt 1" in block and "profile impl" in block and "lint" in block
+    assert "their output is under the previous failure" in block and "E501 line too long" in prompt
     assert "were discarded" not in prompt
     assert "near-pass" not in bench.adapter.requests[1].prompt  # attempt 1 had no carry
 
@@ -542,6 +543,27 @@ def test_a_limit_hands_the_carry_it_started_from_to_the_next_run_of_the_task(mak
     assert "LINTBAD" in seen[0]  # the next profile's attempt starts from attempt 1's changes
     applied = bench.events("task.near_pass_applied")
     assert [(e["attempt"], e["from_attempt"], e["from_profile"]) for e in applied] == [(2, 1, "impl")] * 2
+    # the new `_run_task` has no previous failure to show: the block says to run the gates instead
+    block = bench.adapter.requests[3].prompt.split('<l4:data kind="near-pass"', 1)[1].split("</l4:data>", 1)[0]
+    assert "this prompt does not hold their output: run them to read what they report" in block
+    assert "under the previous failure" not in block
+
+
+def test_a_limit_after_a_patch_that_did_not_apply_hands_on_no_carry(make_bench, monkeypatch):
+    """The limited attempt did not start from the near pass: the next profile is not handed it to drop again."""
+    bench = make_bench([red_step(), lint_bad(), quota()], lint=[LINT_IMPL])
+    real = bench.wb.git.run_input_bytes
+
+    def refuse(*args, **kwargs):
+        if "apply" in args:
+            raise GitError(["git", "apply"], 1, "error: patch failed: src/pytdd/pricing.py:1")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(bench.wb.git, "run_input_bytes", refuse)
+    with pytest.raises(RoleLimit) as caught:
+        run_task(bench.wb, TASK)
+    assert caught.value.carry is None
+    assert len(bench.events("task.near_pass_dropped")) == 1
 
 
 def test_a_limit_with_no_carry_hands_on_none(make_bench):

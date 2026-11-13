@@ -62,8 +62,9 @@ when `find_replay` finds a step to replay, or refuses one (a new hold), the near
 
 A `RoleLimit` (quota, login, a silent stop) out of `run_green` ends the `_run_task`, and the orchestrator's fallback
 (`_implement`) and the fix loop's (`fix_hook`) start the next profile's `run_task` for the same task. The red commit is
-kept, so a patch against it still applies: `_run_task` sets `exc.carry` to the near pass the limited attempt was given
-(`RoleLimit.carry`, None without one) and re-raises, both callers keep it per task and pass it as `run_task(...,
+kept, so a patch against it still applies: `agent_step` raises the limit with the near pass it applied (`RoleLimit(run,
+carried)`; `RoleLimit.carry` is None for a step that applied none, a red step's or a verifier's, and for a carry whose
+patch did not apply), both callers keep it per task and pass it as `run_task(...,
 carry=)`, and `_run_task` drops it when there is no red commit to resume (the red step runs again). The next attempt
 starts from the same changes and `task.near_pass_applied` is recorded again with the same `from_attempt`.
 
@@ -86,7 +87,9 @@ blocks; text defused like `_previous_attempt_block`'s):
 "Attempt <n> of this task (profile <p>) passed every test of the test gate, and its <gate list> gate(s) failed; their
 output is under the previous failure. Its changes are in the checkout as uncommitted changes on the red commit. Fix what
 those gates report and keep the rest unless a fix needs it. You start in a new session, with no transcript of that
-attempt."
+attempt." A prompt with no previous failure (the first attempt after a limit's fallback: a new `_run_task` starts with
+none, and the attempt before was the limited one) says "this prompt does not hold their output: run them to read what
+they report" instead of "their output is under the previous failure" (the agent may run them, L4-IMP-098).
 
 `wb.previous_attempt` outlives the attempt that set it, so it can describe a profile whose changes were discarded while
 the carry came from another. The limit and silent block of `_previous_attempt_block` therefore ALWAYS says "Its
@@ -102,7 +105,8 @@ run's ledger events, not from a local (a limit's fallback starts a new `_run_tas
 `task.attempt_failed` with `near_pass: true` of this run id, the task, the phase halted in and the workbench's fix unit
 (`attempt`, `profile`). When there is one, the reason becomes `task <k>: max_task_attempts (<n>) reached in <where>;
 nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates; last failure: <failure>`: the
-orchestrator's `_halt` cuts the reason at 300 characters, so the nearest clause comes before the last failure, which is
+orchestrator's `_halt` cuts the reason at 300 characters, so the nearest clause comes right after `<where>`, before a
+refused move's clause (`; no later profile can take it (...)`, whose reasons can be long) and the last failure, which is
 what gets cut. `near_pass: {"attempt": n, "profile": p}` goes to `breaker.tripped`.
 
 ### D7. A deadline or an exception

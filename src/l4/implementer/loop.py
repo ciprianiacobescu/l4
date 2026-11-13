@@ -32,7 +32,6 @@ from l4.implementer.tdd import (
     HANG_FRAME_CHARS,
     GreenOutcome,
     RedOutcome,
-    RoleLimit,
     _last_checkpoint,
     _ledger_events,
     resume_red,
@@ -545,8 +544,8 @@ def run_task(
 ) -> TaskOutcome:
     """One task. With a run deadline armed, a step that does not fit raises `DeadlineReached` before it starts, and a
     step that ran is timed (`step.timed`); the exception passes through, with the step's mark kept (L4-IMP-067).
-    `carry`: the near pass (L4-IMP-100) that a `RoleLimit` of this task handed on (`RoleLimit.carry`), for the green
-    attempt that follows the fallback."""
+    `carry`: the near pass (L4-IMP-100) that a `RoleLimit` of this task handed on (`RoleLimit.carry`, set by
+    `agent_step` when it had applied one), for the green attempt that follows the fallback."""
     try:
         outcome = _run_task(wb, task, escalate=escalate, carry=carry)
     except deadline.DeadlineReached as exc:
@@ -663,12 +662,8 @@ def _run_task(
         else:
             attempts["green"] += 1
             _check_step(wb, "green", task.key, attempts["green"])
-            try:
-                with deadline.timed(wb.emit):
-                    done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
-            except RoleLimit as limit:
-                limit.carry = carry  # the fallback's next profile starts from it again (the red commit is kept)
-                raise
+            with deadline.timed(wb.emit):  # a `RoleLimit` carries the near pass its step applied (`agent_step`)
+                done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
             if done.status == "ok":
                 return TaskOutcome("done")
             if done.status == "blocked":
@@ -713,13 +708,14 @@ def _run_task(
     if refused is not None and refused[0] == current and _has_later(wb, wb.selected.profile_name):
         why_no_move = f"; no later profile can take it ({refused[1]})"
     near = _nearest(wb, task, current)  # D6: the newest near pass of this phase in this run
-    # the orchestrator's `_halt` cuts the reason at 300 characters: the nearest attempt comes before the last failure
+    # the orchestrator's `_halt` cuts the reason at 300 characters: the nearest attempt comes before the refused move,
+    # whose reasons can be long, and the last failure
     nearest = (
         f"; nearest: attempt {near[0]} ({near[1]}) passed every test and failed only its lint or type gates"
         if near is not None else ""
     )  # fmt: skip
     reason = (
-        f"task {task.key}: max_task_attempts ({limit}) reached in {where}{why_no_move}{nearest}; "
+        f"task {task.key}: max_task_attempts ({limit}) reached in {where}{nearest}{why_no_move}; "
         f"last failure: {failure}"
     )
     if chore and chore_kind(wb.ref.path, task.title) == "repair":  # L4-IMP-091: the finding may be about the code

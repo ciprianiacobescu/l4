@@ -13,7 +13,8 @@ ledger, as a held step is captured) with the profile, the attempt and the names 
 The next green attempt of the task in the same run SHALL start from the red commit with those changes applied as
 uncommitted changes, whatever profile runs it (an escalation included), and its prompt SHALL hold a `near pass` block:
 the attempt and profile that wrote the changes, that every test passed, which static gates failed (their output is the
-previous failure), and that it is to fix what they report and keep the rest unless a fix needs it. The previous-attempt
+previous failure; a prompt that holds none, after a limit's fallback, says to run them to read it), and that it is to
+fix what they report and keep the rest unless a fix needs it. The previous-attempt
 block of a limit or a silent stop SHALL always say that the limited agent's changes were discarded; an escalation block
 SHALL say that the changes of the profile it describes are in the checkout only when the near pass in the checkout is that
 profile's (`previous_attempt` outlives the attempt that set it), and otherwise keeps its text, which says they were
@@ -23,7 +24,8 @@ attempt after that SHALL start from the red commit as before, unless it was itse
 them. The applied changes SHALL go through every guard and check of a green step, as an agent's own changes do; no replay
 guard SHALL be armed for them, and they are applied inside the step's guarded block, after the grant of a person's answer
 is computed. A step to replay that `find_replay` finds, or refuses, SHALL come first, and the near pass SHALL then be
-dropped. A limit (quota, login, a silent stop) of an attempt that started from a near pass SHALL hand it on: the task's
+dropped. A limit (quota, login, a silent stop) of an attempt that started from a near pass (it was applied) SHALL hand
+it on: the task's
 next run in the same unit run, on the next profile, starts from the same changes (the fallback keeps the red commit they
 are against), and `task.near_pass_applied` is recorded again with the same `from_attempt`. The harness SHALL record `task.near_pass_applied{task, attempt, from_attempt, from_profile, patch_sha256,
 files}` when it applies them, and `task.near_pass_dropped{task, attempt, from_attempt, reason}` when it does not (a
@@ -32,7 +34,8 @@ written to the repository, the ledger or a log.
 
 When the task halts on `max_task_attempts`, the reason SHALL read `task <k>: max_task_attempts (<n>) reached in <where>;
 nearest: attempt <n> (<profile>) passed every test and failed only its lint or type gates; last failure: <failure>`, the
-nearest clause before the last failure because the orchestrator cuts the reason at 300 characters, for the newest near
+nearest clause right after `<where>`, before a refused move's clause (`; no later profile can take it (...)`,
+L4-IMP-094) and the last failure, because the orchestrator cuts the reason at 300 characters, for the newest near
 pass of the phase in this run (read from this run's `task.attempt_failed{near_pass: true}` of the task, phase and fix
 unit, so a restart after a limit still names it), and `breaker.tripped` SHALL carry `near_pass{attempt, profile}`. A near
 pass SHALL be kept for the run only: a later run (a retry, a resume, the run after a soft deadline) starts from the red
