@@ -60,7 +60,7 @@ class CommandAdapter:
         self._proc = runner or ProcRunner()
 
     def capabilities(self) -> AgentCaps:
-        return AgentCaps("prompt_contract", False, False, False, False, False, False, True)
+        return AgentCaps("prompt_contract", False, False, False, False, False, False, True, open_calls=False)
 
     def probe(self, profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> ProbeResult:
         argv = profile.options.get("argv")

@@ -12,6 +12,7 @@ checkout of the red commit for green (a).
 
 import hashlib
 import logging
+import math
 import re
 import shlex
 import shutil
@@ -102,16 +103,20 @@ from l4.implementer.held import (
     text_lines,
 )
 from l4.implementer.held_patch import (
+    NearPass,
     Refused,
     accepted_tests_block,
+    apply_near_pass,
     arm_replay_guard,
     capture,
     close_replay_guard,
+    drop_near_pass,
     find_replay,
     release_replay,
     repair_blobs,
     replay_step,
     restore_replay,
+    step_patch,
 )
 from l4.implementer.named_tests import NamedTests, language_of, named_tests, test_id
 from l4.implementer.normalize import StepFacts, find_result, normalize
@@ -233,9 +238,12 @@ def outside_links_reason(wb: Workbench, base: str, phase: str) -> str:
 class RoleLimit(Exception):
     """The agent reported a usage limit or lost its login mid-run: the role is unavailable (exit 12)."""
 
-    def __init__(self, result: RunResult) -> None:
+    def __init__(self, result: RunResult, carry: NearPass | None = None) -> None:
         super().__init__(result.detail or result.status)
         self.result = result
+        # L4-IMP-100: the near pass the limited green step started from (applied, not only handed in), for the
+        # fallback's next profile; None for every other limit (a red step's, a verifier's)
+        self.carry = carry
 
 
 Excerpter = Callable[[TestReport, Sequence[str]], str]  # (report, test ids) -> the bounded, redacted failure text
@@ -304,6 +312,7 @@ class GreenOutcome:
     excerpt: str = ""  # the failure text behind `reason`, for the next prompt
     hung: tuple[HungTest, ...] = ()  # tests of the gate run that hit the per-test limit (SPEC L4-GAT-004)
     held: HeldCheck | None = None  # status "held": the test-at-red run could not decide (L4-IMP-063)
+    near_pass: NearPass | None = None  # status "failed": every test passed, only a static gate failed (L4-IMP-100)
 
 
 def gate_hung(gate: GateResult) -> list[HungTest]:
@@ -767,14 +776,24 @@ def _answers(wb: Workbench, task: Task) -> RenderedAnswers:
 MAX_REASON = 1000  # one failure headline of an escalation block, cut (escalate-and-note D9)
 
 
-def _escalation_block(previous: PreviousAttempt) -> tuple[tuple[str, str], ...]:
+def _changes_note(previous: PreviousAttempt, carried: NearPass | None) -> str:
+    """What became of the uncommitted changes of the agent an escalation block describes: gone, unless the near pass
+    (L4-IMP-100) in the checkout is that agent's. `previous_attempt` outlives the attempt that set it, so a near pass
+    of another profile says nothing about these changes. A limit or silent block never has the carry: the limited
+    agent's changes were discarded, whatever the checkout holds."""
+    if carried is not None and carried.profile == previous.profile:
+        return f"Its uncommitted changes from attempt {carried.attempt} are in the checkout (see the near pass block)"
+    return "Its uncommitted changes were discarded"
+
+
+def _escalation_block(previous: PreviousAttempt, carried: NearPass | None = None) -> tuple[tuple[str, str], ...]:
     """The block for the profile that an escalation gave the step to: who failed, how often, and why, oldest first."""
     clean = (re.sub(r"[^A-Za-z0-9._-]", "_", v) for v in (previous.profile, previous.phase or ""))
     who, phase = clean
     lines = [
         f"The agent before you (profile {previous.profile}) failed the {previous.phase} step of this task "
-        f"{len(previous.failures)} times, so the harness gave the step to you. Its uncommitted changes were "
-        "discarded; the commits already on the branch are kept. You start from the checkout as it is now, in a new "
+        f"{len(previous.failures)} times, so the harness gave the step to you. {_changes_note(previous, carried)}; the "
+        "commits already on the branch are kept. You start from the checkout as it is now, in a new "
         "session, with no transcript of those attempts. The harness rejected them for these reasons, oldest first:",
         *(f"{n}. ({profile}) {reason[:MAX_REASON]}" for n, (profile, reason) in enumerate(previous.failures, 1)),
     ]
@@ -782,7 +801,9 @@ def _escalation_block(previous: PreviousAttempt) -> tuple[tuple[str, str], ...]:
     return (("previous attempt", f"<l4:data {attrs}>\n{defuse(chr(10).join(lines))}\n</l4:data>"),)
 
 
-def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None) -> tuple[tuple[str, str], ...]:
+def _previous_attempt_block(
+    wb: Workbench, task: Task, phase: str | None = None, carried: NearPass | None = None
+) -> tuple[tuple[str, str], ...]:
     """After a mid-run fallback, the task's next step starts in a fresh session: say who ran before and why it
     stopped (implementer-tdd-loop 2.25, reduced: no transcript). After an escalation, only the steps of the phase
     that failed are told (escalate-and-note D9)."""
@@ -790,11 +811,11 @@ def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None)
     if previous is None or previous.task != task.key:
         return ()
     if previous.why == "escalation":
-        return _escalation_block(previous) if previous.phase == phase else ()
+        return _escalation_block(previous, carried) if previous.phase == phase else ()
     stopped = f"stopped on a {previous.limit_kind} limit while working on this task"
     if previous.limit_kind == "silent":  # L4-IMP-087: it did nothing for the whole idle time
-        idle = wb.cfg.implementer.idle_timeout
-        stopped = f"went silent: no output for {idle}, so L4 stopped it, while working on this task"
+        quiet = previous.detail or f"no output for {wb.cfg.implementer.idle_timeout}"  # the raised limit, if it was
+        stopped = f"went silent: {quiet}, so L4 stopped it, while working on this task"
     text = (
         f"The agent before you (profile {previous.profile}) {stopped}. "
         "Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
@@ -803,6 +824,27 @@ def _previous_attempt_block(wb: Workbench, task: Task, phase: str | None = None)
     who, why = (re.sub(r"[^A-Za-z0-9._-]", "_", v) for v in (previous.profile, previous.limit_kind))
     block = f'<l4:data kind="previous-attempt" profile="{who}" limit="{why}">\n{defuse(text)}\n</l4:data>'
     return (("previous attempt", block),)
+
+
+def _near_pass_block(carried: NearPass, shown: bool = True) -> tuple[tuple[str, str], ...]:
+    """L4-IMP-100: the attempt whose changes are in the checkout passed every test and failed only its static gates.
+    `shown`: the prompt holds the previous failure, which is those gates' output. After a limit's fallback it holds
+    none (the attempt before was the limited one), and the agent runs the gates to read what they report
+    (L4-IMP-098)."""
+    who = re.sub(r"[^A-Za-z0-9._-]", "_", carried.profile)
+    gates = " and ".join(carried.gates)
+    output = (
+        "their output is under the previous failure" if shown
+        else "this prompt does not hold their output: run them to read what they report"
+    )  # fmt: skip
+    text = (
+        f"Attempt {carried.attempt} of this task (profile {carried.profile}) passed every test of the test gate, and "
+        f"its {gates} gate{'s' * (len(carried.gates) > 1)} failed; {output}. Its "
+        "changes are in the checkout as uncommitted changes on the red commit. Fix what those gates report and keep "
+        "the rest unless a fix needs it. You start in a new session, with no transcript of that attempt."
+    )
+    attrs = f'kind="near-pass" attempt="{carried.attempt}" profile="{who}"'
+    return (("near pass", f"<l4:data {attrs}>\n{defuse(text)}\n</l4:data>"),)
 
 
 ACCEPTED_RULE = (
@@ -876,6 +918,7 @@ def _prompt(
     ci_job: str | None = None,
     named: NamedTests | None = None,
     repair: Sequence[str] = (),
+    carried: NearPass | None = None,
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -914,7 +957,8 @@ def _prompt(
             *((("lessons", lessons.block),) if lessons.block else ()),
             *_accepted(wb),
             *accepted_tests_block(wb, role, task),
-            *_previous_attempt_block(wb, task, role),
+            *_previous_attempt_block(wb, task, role, carried),
+            *(_near_pass_block(carried, previous_failure is not None) if carried is not None else ()),
             *((note_block(note, redact=redact),) if note is not None else ()),
         ),
     )  # fmt: skip
@@ -943,6 +987,25 @@ def _prompt(
 
 SILENT_AGAIN = "silent: already once for this task"
 
+# L4-IMP-099: the agent's own run of a gate command, in its sandbox and under the runner's load, can take longer than
+# the harness's, so the idle limit of an adapter that cannot show an open call is the longest gate run times this, plus
+# this
+IDLE_FLOOR_FACTOR = 1.5
+IDLE_FLOOR_MARGIN_S = 60
+
+
+def idle_limit(wb: Workbench, idle_s: int, step_limit_s: int) -> tuple[int, tuple[str, int] | None]:
+    """L4-IMP-099: (the idle limit of an implementer step in seconds, the gate that raised it and its whole seconds).
+    `implementer.idle_timeout` unless the adapter's stream reader cannot show an open tool call and a gate run of this
+    unit run was measured: then the larger of it and the longest run's floor, the floor capped at the step's
+    wall-clock limit (the cap never lowers the limit below `implementer.idle_timeout`)."""
+    if not idle_s or wb.impl.capabilities().open_calls or wb.gate_peak is None:
+        return idle_s, None
+    name, seconds = wb.gate_peak
+    floor = math.ceil(IDLE_FLOOR_FACTOR * seconds) + IDLE_FLOOR_MARGIN_S
+    limit_s = max(idle_s, min(floor, step_limit_s))
+    return limit_s, (name, round(seconds)) if limit_s > idle_s else None
+
 
 def _silent_before(wb: Workbench, task: Task) -> bool:
     """Has this task already had a silent stop (L4-IMP-087) in its window: any profile, any run of the unit? The window
@@ -960,9 +1023,11 @@ def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
+    carry: NearPass | None = None,
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
-    `RoleLimit` when the agent says it is out of quota or logged out."""
+    `RoleLimit` when the agent says it is out of quota or logged out. `carry`: a near pass (L4-IMP-100) whose changes
+    the agent starts from, as uncommitted changes."""
     base = wb.head()  # the revert resets to this commit: it must be taken before the agent runs
     wrong_encoding: list[EncodingChange] = []
     granted = config_grant(wb, task, role)  # what a person's answer opens, before the agent runs
@@ -976,32 +1041,42 @@ def agent_step(
         again += 1  # the task ran again in this run (a clarifier answered): keep the earlier step's files too
         stem = f"{key}-{role}-{attempt}-r{again}"
     raw_events, published = wb.agent_log_paths(stem)
-    prompt = _prompt(wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named, repair)
-    wb.publish_prompt(published, prompt)
-    # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
-    prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
-    env = build_agent_env(wb.host_env, spec, extra=extra)
-    impl_cfg = wb.cfg.implementer
-    fix_unit = wb.event_context.get("fix_unit")
-    tag = f"[{fix_unit}] " if isinstance(fix_unit, str) and fix_unit else ""
-    profile = wb.selected.profile_name
-
-    def on_beat(beat: Beat) -> None:  # L4-IMP-023: a console and log line, never a ledger event
-        beat_log.info(
-            "%s %stask %s %s attempt %s: %s %s", wb.ref.id, tag, task.key, role, attempt, profile, beat_text(beat)
-        )
-
-    idle_s = duration_seconds(impl_cfg.idle_timeout)
-    watch = ActivityWatch(duration_seconds(impl_cfg.heartbeat), on_beat)  # clock: time.monotonic, the runner's
-    request = RunRequest(
-        profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
-        prompt=prompt, result_path=tmp / "result.json", raw_events_path=raw_events,
-        env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
-        permission_policy=PermissionPolicy("implement", gate_prefix=wb.cfg.gates.test.command),
-        wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
-        stall_timeout_s=float(idle_s) if idle_s else None, watch=watch, host_env=wb.host_env,
-    )  # fmt: skip
     try:
+        # inside the guarded block: whatever raises after the carry is applied still runs the guards below. After the
+        # grant, which `replay_step` computes before it applies a step too
+        carried = apply_near_pass(wb, task.key, attempt, carry)  # no replay guard: the agent edits on top of it
+        prompt = _prompt(
+            wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named, repair, carried
+        )
+        wb.publish_prompt(published, prompt)
+        # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
+        prompt_contract = wb.impl.capabilities().schema_mode == "prompt_contract"
+        env = build_agent_env(wb.host_env, spec, extra=extra)
+        impl_cfg = wb.cfg.implementer
+        fix_unit = wb.event_context.get("fix_unit")
+        tag = f"[{fix_unit}] " if isinstance(fix_unit, str) and fix_unit else ""
+        profile = wb.selected.profile_name
+
+        def on_beat(beat: Beat) -> None:  # L4-IMP-023: a console and log line, never a ledger event
+            beat_log.info(
+                "%s %stask %s %s attempt %s: %s %s", wb.ref.id, tag, task.key, role, attempt, profile, beat_text(beat)
+            )
+
+        idle_s = duration_seconds(impl_cfg.idle_timeout)
+        watch = ActivityWatch(duration_seconds(impl_cfg.heartbeat), on_beat)  # clock: time.monotonic, the runner's
+        request = RunRequest(
+            profile=wb.selected.profile, role="implementer", cwd=wb.worktree,
+            prompt=prompt, result_path=tmp / "result.json", raw_events_path=raw_events,
+            env=env, result_schema=None if prompt_contract else RESULT_SCHEMA, mcp_servers=wb.mcp_servers(env),
+            permission_policy=PermissionPolicy(
+                "implement", gate_prefix=wb.cfg.gates.test.command,
+                static_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck),
+            ),
+            wrap=lambda argv, env, cwd=None: wb.sandbox.wrap(argv, spec, env, cwd),
+            watch=watch, host_env=wb.host_env,
+        )  # fmt: skip
+        limit_s, raised_by = idle_limit(wb, idle_s, request.timeout_s)  # L4-IMP-099: the step's limit is the request's
+        request.stall_timeout_s = float(limit_s) if limit_s else None
         resultalias.link(wb.worktree, tmp)  # the short path a prompt-contract adapter writes its result to (MAG)
         with wb.wip_snapshots(task.key, role, attempt) as box:
             run = wb.impl.run(request)
@@ -1036,7 +1111,8 @@ def agent_step(
         silent = silent and not again
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
-            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent,
+            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent, limit_s=limit_s,
+            **({"raised_by": {"gate": raised_by[0], "seconds": raised_by[1]}} if raised_by else {}),
             **({"reason": SILENT_AGAIN} if again else {}),
         )  # fmt: skip
     wb.emit(
@@ -1059,21 +1135,26 @@ def agent_step(
     if stopped:  # after the cleanup, `agent.finished` and the reported cost: `run_unit` hands the step back (D5)
         raise deadline.DeadlineReached("during", during="agent")
     if run.status in LIMIT_STATUSES:
-        raise RoleLimit(run)
+        raise RoleLimit(run, carried)
     if silent:  # a limit of kind `silent`: the limit path cools the profile and moves on, no failed attempt
-        quiet = f"no output for {impl_cfg.idle_timeout}"
+        quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
         signal = LimitSignal(
             wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
         )
-        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet))
+        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet), carried)
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":
-            reason = (
-                f"the agent showed no activity for {impl_cfg.idle_timeout} (implementer.idle_timeout), so L4 stopped it"
-                if watch.stopped_idle_s is not None
-                else f"the agent step reached its time limit ({ago(request.timeout_s)})"
-            )
+            reason = f"the agent step reached its time limit ({ago(request.timeout_s)})"
+            if watch.stopped_idle_s is not None:
+                shown = f"{impl_cfg.idle_timeout} (implementer.idle_timeout)"
+                if raised_by:  # L4-IMP-099
+                    adapter = wb.selected.profile.adapter or "unknown"
+                    shown = (
+                        f"{ago(limit_s)} (implementer.idle_timeout {impl_cfg.idle_timeout}, raised to the longest "
+                        f"gate run of this run plus a margin, because {adapter} shows no open tool call)"
+                    )
+                reason = f"the agent showed no activity for {shown}, so L4 stopped it"
         # a prompt-contract adapter validated the result file (`agents/contract.py`): its detail names the paths
         invalid = run.status != "timeout" and (run.detail or "").startswith("result invalid")
         return StepOutcome("failed", reason=reason, excerpt=result_values_line(RESULT_SCHEMA, role) if invalid else "")
@@ -1121,9 +1202,11 @@ def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
+    carry: NearPass | None = None,
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
-    replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question."""
+    replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question. A
+    replay comes before a near pass `carry`, which is then dropped (L4-IMP-100)."""
     wb.commit_agent = None
     wb.replay_question = None  # an accept of a saved step takes effect only in its replay
     wb.replay_patch_sha256 = None
@@ -1144,7 +1227,9 @@ def step_or_replay(
             ci_job=ci_job,
             named=named,
             repair=repair,
+            carry=carry,
         )
+    drop_near_pass(wb, task.key, attempt, carry, "replay")  # a found step to replay, refused or not, comes first
     if isinstance(found, Refused):
         return StepOutcome("held", held=found.held)
     return replay_step(wb, role, task, attempt, found)
@@ -2056,8 +2141,9 @@ def fix_gate_env(wb: Workbench) -> dict[str, str] | None:
 
 
 def run_green(
-    wb: Workbench, task: Task, red: RedOutcome, *, attempt: int, previous_failure: str | None = None
-) -> GreenOutcome:
+    wb: Workbench, task: Task, red: RedOutcome, *, attempt: int, previous_failure: str | None = None,
+    carry: NearPass | None = None,
+) -> GreenOutcome:  # fmt: skip
     assert red.manifest is not None and red.base_report is not None
     base = wb.head()
     run_setup(wb)
@@ -2089,7 +2175,7 @@ def run_green(
             "task.unfrozen", task=task.key, paths=list(named.paths), reason="named_by_task", source=source,
             red_sha=red.manifest.red_sha, kept=[{"path": p, "why": why} for p, why in named.kept],
         )  # fmt: skip
-    step = step_or_replay(wb, "green", task, attempt, previous_failure, unfreeze)
+    step = step_or_replay(wb, "green", task, attempt, previous_failure, unfreeze, carry=carry)
     if step.kind != "ok":
         wb.discard_changes()  # back to the red commit: it stays, the work of this attempt does not
         if step.kind == "held":
@@ -2118,8 +2204,9 @@ def run_green(
         excerpt = hang_excerpt(hung) or excerpt
         wb.emit("gate.hung", task=task.key, tests=[h.id for h in hung], attempt=attempt)
     held: HeldCheck | None = None
+    static = ""  # the reason when only a static gate failed: a near pass, unless something below says otherwise
     if not reason:
-        reason = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run and any at_red accept
+        reason = static = worse_static_gates(wb, base, "green")  # L4-IMP-096: before the test-at-red run, any accept
         stuck = stuck or restore_replay(wb, "static gates")  # a linter that writes files: before the test-at-red run
     if not reason and not stuck:  # no test-at-red run, hold or accept on a tree the replay could not put back
         reason, held = _undiscriminating(wb, red, unfreeze, gate.report, task)
@@ -2138,8 +2225,17 @@ def run_green(
     reason = reason or stuck or restore_replay(wb, "before the green commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
-        wb.discard_changes()
-        return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung))
+        near = None
+        try:
+            # L4-IMP-100: every test passed and only a static gate is worse: the next attempt starts from this one
+            alone = static and reason == static and not stuck and wb.replay_question is None
+            if alone and not outside_links_reason(wb, base, "green"):
+                near = _near_pass(wb, task, attempt, static)
+        except GitError as exc:  # the patch could not be taken: no near pass, and the changes go as ever
+            log.warning("%s: no near pass for task %s attempt %d: %s", wb.ref.id, task.key, attempt, exc)
+        finally:
+            wb.discard_changes()
+        return GreenOutcome("failed", reason, excerpt=excerpt, hung=tuple(hung), near_pass=near)
     wb.provider.set_marker(wb.ref, task.key, Marker.DONE)
     parents = tick_completed_parents(wb.provider, wb.ref)
     assert step.result is not None
@@ -2155,6 +2251,26 @@ def run_green(
     wb.emit("task.green_committed", task=task.key, base=base, sha=sha)  # contract C22
     wb.push()
     return GreenOutcome("ok", sha=sha)
+
+
+_FAILED_GATE = re.compile(r"^(lint|typecheck) gate `", re.MULTILINE)
+
+
+def _near_pass(wb: Workbench, task: Task, attempt: int, static: str) -> NearPass | None:
+    """The changes of a green attempt that failed only `static` (the text of `worse_static_gates`), taken before they
+    are discarded; None when there are none or no gate can be named."""
+    gates = tuple(dict.fromkeys(_FAILED_GATE.findall(static)))
+    if not gates:
+        return None
+    files = tuple(sorted(p for p in wb.changed_files() if p != wb.ledger_rel))
+    if worktree_secrets(wb.git, wb.redactor, files):  # as `agent_step` reads a step: a gate may have written them
+        return None  # nothing is kept and nothing is said of the value
+    patch = step_patch(wb)
+    if not patch:
+        return None
+    return NearPass(
+        task.key, attempt, wb.selected.profile_name, patch, hashlib.sha256(patch).hexdigest(), files, gates
+    )  # fmt: skip
 
 
 def freeze_test_paths(wb: Workbench, task: Task, base: str, *, keep: Collection[str] = (), phase: str) -> list[str]:
