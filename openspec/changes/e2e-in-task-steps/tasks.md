@@ -23,12 +23,16 @@ has text (extend the stub with an optional `details` mapping if needed).
     where red changes a module-level constant `test_a` reads: `test_a` too (the closure);
   - `after=None` reads the work tree (an uncommitted new browser test is found).
   Run the file and see the tests fail (the name does not exist).
+  Superseded by 7.2: the closure rule above (a changed constant makes `test_a` the task's too) is gone; only a test whose
+  own definition the red commit added or changed is the task's, and only what pytest would collect.
 - [x] 1.2 Add `task_browser_tests` to `src/l4/implementer/tdd.py` (D1): `git diff --name-only --no-renames before after`
   (or against the work tree), the paths under `e2e_test_dir(wb.cfg.gates.e2e, wb.worktree)`, `.py`, not `conftest.py`
   or `__init__.py`, matching no `tdd.test_support_globs` glob, no link on the way (`linked_component`), then
   `tamper.facts_of` of the file at `before` (`git show before:path`, empty when absent) and at `after` (`git show` or the
   work-tree file, read with `read_inside`), keeping the names whose `Facts.test` is true at `after` and whose
   `(parts, closure)` differ or that are absent at `before`. Run the tests.
+  Superseded by 7.2: the `closure` half of that comparison is not used any more (the own definition, `parts`, decides),
+  and `collectable_tests` of `browser_tests.py` filters what pytest would not collect.
 
 ## 2. Green runs them last (D3, D4, D5, D6)
 
@@ -123,3 +127,22 @@ has text (extend the stub with an optional `details` mapping if needed).
   `src/l4/implementer/browser_tests.py`, tests in `test_browser_tests.py` and `test_e2e_task_steps.py`.
 - [x] 7.3 The prompts say what is true (D7); pins of surviving mutants (a person's unfreeze after the e2e run, the
   counted server-not-ready attempt, the next red attempt after an already-satisfied failure).
+
+## 8. Round-2 review fixes (the second review of 4f397f3d)
+
+- [x] 8.1 A module that `file_of_test` resolves keeps the class after it: `e2e/Layout_test.py` is a module, not the
+  class `Layout_test` of `e2e.py`; a report id of an e2e run prefers a file inside the e2e directory to an exact match
+  outside it (`browser_tests._locate`, with `directory` passed by `_task_e2e_run` to `match_task_tests` and
+  `module_files`). Tests first, seen failing: `test_browser_tests.py` and `test_e2e_task_steps.py`.
+- [x] 8.2 Pins of the false-refusal side and of the trailing `/`: a collection error of an e2e module that is not the
+  task's does not refuse green (kills `if file in task_files` -> `if file is not None`); a sibling directory with the
+  same prefix (`e2e_utils`) is not shared with the unit gate (kills the dropped `/` of `shared_with_unit_gate`).
+- [x] 8.3 The green prompt says the browser tests are frozen only when `tdd.test_globs` covers the e2e directory
+  (`PromptContext.e2e_frozen`), else that they are not frozen; the `cap_s` docstring says what its `e2e` argument means.
+  Tasks 1.1 and 1.2 are marked as superseded by 7.2.
+- [x] 8.4 Surviving mutants recorded as equivalent or near-equivalent, not pinned:
+  - M12 (`_task_e2e_reason(..., freeze_phase="green")` -> `None` in `run_green`): near-equivalent (inferred). The step's own freeze
+    has run before the e2e run, and an e2e command does not rewrite a frozen test file; the repeat is defence in depth
+    (the person's unfreeze after the e2e run is pinned by `test_a_persons_unfreeze_survives_the_e2e_run...`).
+  - M15 (`--no-renames` dropped from the diff of `_changed_between`): near-equivalent (inferred). With rename detection `--name-only`
+    still lists the new path, which is the only one read at `after`; the old path of a rename has no test at `after`.

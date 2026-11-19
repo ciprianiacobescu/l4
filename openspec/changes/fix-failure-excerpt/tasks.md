@@ -112,3 +112,13 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 - [x] 7.3 Pins of surviving mutants: the ladder passes `collection_excerpt=` (`test_ui_flow.py`), the inner redaction of
   `collection_case_excerpt`, the cut at 300, the forbidden-path and clause questions get the notes, only a fix chore's
   questions get the failure block.
+- [x] 7.4 Surviving mutants recorded as equivalent or near-equivalent, not pinned (round 2):
+  - F2 (`case_excerpt`: no `_redact_keys` after `_clean`): near-equivalent. The body is redacted whole before any line
+    is dropped, and making a path relative does not build a secret the redactor matches; the second pass is defence in
+    depth after the paths are rewritten.
+  - F3 (`case_excerpt`: the outer `lines[:MAX_TEST_LINES]` -> `MAX_TEST_LINES + 1`, `excerpt.py` line 172): equivalent.
+    Every list that reaches it is already at most 8 lines (`_test_lines` ends with `out[:MAX_TEST_LINES]`, the other
+    branches slice `[:MAX_TEST_LINES]` or `[:2]`).
+  - F20 (the fix chore's question notes also for a `repair` chore, `loop.py` `== "fix"`): near-equivalent (inferred, not
+    proved). A repair chore's step (`_run_repair`) ends in a held question or a rejected attempt, which carry the failure
+    of its recorded tests themselves; the block would repeat it.
