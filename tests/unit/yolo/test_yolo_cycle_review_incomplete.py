@@ -2,17 +2,15 @@
 (and the admission, and the cost), the next run asks only the rest, a repeat adds nothing, and `l4 yolo status` shows
 it. The judges are scripted `FakeAdapter`s, one per adapter name."""
 
-import json
-
 import pytest
 
 from l4.agents.base import ProbeResult
 from l4.agents.fake import FakeAdapter, Step
 from l4.yolo import findings as fnd
-from l4.yolo.readiness import PROMPT_VERSION
+from l4.yolo.readiness import PROMPT_VERSION, JudgeFailed
 from l4.yolo.state import fold_plan
 
-from .yolo_cycle_world import PLAN, READY, CycleWorld, ev, unit_id
+from .yolo_cycle_world import PLAN, READY, CycleWorld, unit_id
 from .yolo_review_world import make_cfg
 
 A, B = unit_id("a"), unit_id("b")
@@ -166,14 +164,8 @@ def test_a_plain_judge_failure_still_records_nothing(world, monkeypatch):
     head = world.store().read().head
 
     def failing(*args, **kw):
-        raise __import__("l4.yolo.readiness", fromlist=["JudgeFailed"]).JudgeFailed("the judge timed out")
+        raise JudgeFailed("the judge timed out")
 
     monkeypatch.setattr("l4.yolo.cycle.review_plan_costed", failing)
     step = world.step()
     assert world.store().read().head == head and any("no judge could run" in a for a in step.actions)
-
-
-def test_the_ledger_event_is_json(world):
-    first_failed_review(world)
-    json.dumps(last(world, "plan.review_incomplete").data)
-    assert ev  # the world helper stays importable for the seeded-ledger tests

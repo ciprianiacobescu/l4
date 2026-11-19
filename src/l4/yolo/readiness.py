@@ -476,8 +476,8 @@ def _batch_part(
 
     def text(listed: Mapping[str, str]) -> str:
         if unit is None:
-            names = "\n".join(f"- {d}" for d, _ in deps)
-            before = [data_block("batch prerequisites outside it", _label(names))] if deps else []
+            names = "\n".join(f"- {_label(d)}" for d, _ in deps)
+            before = [data_block("batch prerequisites outside it", names)] if deps else []
         else:
             before = _prerequisites(plan, deps)
         values = {
@@ -505,6 +505,20 @@ def _batch_part(
         "batch", batch.id, text(delivered), folders[unit.id].left_out, folders[unit.id].binary,
         _cut_of(deps, dep_budget), groups_only, text({}), part=unit.id,
     )  # fmt: skip
+
+
+def _batch_summary(
+    plan: Plan,
+    batch: PlanBatch,
+    folders: Mapping[str, FolderText],
+    siblings: Mapping[str, FolderText],
+    deps: Sequence[tuple[str, FolderText | None]],
+    delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    dep_budget: int = MAX_DEPENDENCY_CHARS,
+    skip: Collection[str] = (),
+) -> Subject:
+    """The summary part of a batch reviewed in parts: every unit read in part, no folder in full (design D6)."""
+    return _batch_part(plan, batch, None, folders, siblings, deps, delivered, dep_budget, skip)
 
 
 _WORST = {"BLOCKED": 2, "NEEDS_REVISION": 1, "READY": 0}
@@ -855,7 +869,7 @@ class _Walk:
         that stopped the whole batch, at the front."""
         bad = set(self.failed_before.get(call.key, ()))
         names = [n for n in self.chain if n not in bad] + [n for n in self.chain if n in bad]
-        if first in names:
+        if first in names and first not in bad:  # a judge that failed this material stays behind the others
             names.remove(first)
             names.insert(0, first)
         return names
@@ -1117,7 +1131,7 @@ def review_plan_costed(
             )
             for u in shown
         ]  # fmt: skip
-        built.append(_batch_part(plan, batch, None, folders, read, batch_deps, delivered, limits.dependency, done))
+        built.append(_batch_summary(plan, batch, folders, read, batch_deps, delivered, limits.dependency, done))
         return [(part, material_key("batch-part", part.key_text)) for part in built]
 
     def kept_part(whole: Subject, part: Subject, key: str) -> Mapping[str, Any] | None:
@@ -1140,7 +1154,9 @@ def review_plan_costed(
                 )
             elif prior:
                 parts = parts_of(subject)
-                if any(kept_part(subject, part, k) is not None for part, k in parts):
+                whole = prior.get(key)  # `--fresh` on a batch an earlier run judged in parts asks every part again
+                redo = subject.name in fresh and whole is not None and bool(whole.get("parts"))
+                if redo or any(kept_part(subject, part, k) is not None for part, k in parts):
                     cause = "an earlier review run answered a part of it"
         if cause is None:
             outcome = walk.ask(call, splittable=shown >= 2)

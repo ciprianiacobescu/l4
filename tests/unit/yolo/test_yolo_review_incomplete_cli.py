@@ -7,11 +7,9 @@ import yaml
 
 from l4.agents.base import ProbeResult
 from l4.agents.fake import FakeAdapter, Step
-from l4.yolo.digest import plan_digest
-from l4.yolo.model import PlanEvent
-from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
+from l4.yolo.readiness import review_plan_costed
 
-from .test_yolo_review_worktree import cache_lines, edit_spec, push_edit, ready_world
+from .test_yolo_review_worktree import cache_lines, push_edit, ready_world
 from .yolo_cmd_world import A, B, forge, world  # noqa: F401
 
 READY = {"verdict": "READY", "findings": [], "assumptions": [], "missing": []}
@@ -150,4 +148,3 @@ def test_record_writes_judge_and_sandbox_per_entry_from_the_judge_that_answered_
     assert data["judges"] == ["j1", "j2"] and data["judge"] == "j1"
     assert all(e["sandbox"] == "none" for e in (data["units"][A], data["units"][B], data["batches"]["b1"]))
     assert [(f["profile"], f["subject"], f["kind"]) for f in data["failures"]] == [("j1", B, "error")]
-    assert edit_spec and plan_digest and PlanEvent and PROMPT_VERSION  # the helpers stay imported

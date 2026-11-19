@@ -11,10 +11,14 @@ from l4.agents.fake import FakeAdapter, Step
 from l4.availability.cooldown import AvailabilityStore, cooldown_key
 from l4.availability.errors import RoleUnavailable
 from l4.config.defaults import cache_root
+from l4.config.schema import Profile
 from l4.yolo.model import UnitInfo
 from l4.yolo.readiness import (
     JudgeFailed,
     ReviewIncomplete,
+    Subject,
+    _Call,
+    _Walk,
     material_key,
     review_chain,
     review_plan_costed,
@@ -28,6 +32,7 @@ PROFILES = {
     "j1": {"adapter": "claude-code", "vendor": "anthropic"},
     "j2": {"adapter": "codex", "vendor": "openai"},
 }
+PROFILES_OF = {name: Profile(**profile) for name, profile in PROFILES.items()}
 
 
 @pytest.fixture
@@ -157,9 +162,6 @@ def test_scn_yolo_267_a_usage_limit_cools_the_judge_and_the_next_judge_answers(w
     assert cooling is not None and abs(cooling.until - resets) < timedelta(seconds=2)
 
 
-PROFILES_OF = {name: __import__("l4.config.schema", fromlist=["Profile"]).Profile(**p) for name, p in PROFILES.items()}
-
-
 def test_scn_yolo_268_a_judge_that_failed_a_material_is_asked_it_last(world):
     first, _ = review(world, SEPARATE, FakeAdapter([ok(), ok()]), FakeAdapter([]))
     key_a = first.units[A].material
@@ -235,3 +237,14 @@ def test_every_judge_unusable_is_an_incomplete_review_with_no_answers(world):
         ("j1", "", "unusable"),
         ("j2", "", "unusable"),
     ]
+
+
+def test_the_judge_that_split_a_batch_does_not_come_first_again_for_a_part_it_failed(world):
+    """j1 stopped the whole batch at the limit, then timed out on a part: the next run asks that part of j2 first."""
+    walk = _Walk(
+        world.app, cfg_of(), world.git, BATCH, adapters=None, sandbox=None, sandbox_for=None, timeout_s=900,
+        time_left=None, failed_before={"k": ["j1"]},
+    )  # fmt: skip
+    call = _Call("batch:b1/summary", Subject("batch", "b1", ""), None, "k")
+    assert walk.order(call, first="j1") == ["j2", "j1"]
+    assert walk.order(_Call("other", Subject("batch", "b1", ""), None, "k2"), first="j2") == ["j2", "j1"]

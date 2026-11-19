@@ -222,13 +222,16 @@ def test_scn_yolo_275_a_batch_without_a_profile_whose_only_finding_is_batch_acce
 
 
 def _entry(v):
-    return {
+    entry = {
         "verdict": v.verdict,
         "findings": list(v.findings),
         "assumptions": [],
         "missing": [],
         "material": v.material,
     }
+    if v.parts:
+        entry["parts"] = [{"part": name, **_entry(part)} for name, part in v.parts]
+    return entry
 
 
 def _first_review(world):
@@ -272,3 +275,26 @@ def test_a_part_key_is_the_key_of_its_own_text(world):
     first = _first_review(world)
     keys = [v.material for _, v in first.batches["b1"].parts]
     assert len(set(keys)) == 4 and material_key("batch", "x") not in keys
+
+
+def test_fresh_on_a_batch_judged_in_parts_asks_every_part_again_even_under_the_bound(world):
+    first = _first_review(world)
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    prior[first.batches["b1"].material] = _entry(first.batches["b1"])
+    fake = FakeAdapter([ok() for _ in range(4)])
+    review(world, THREE, fake, prior=prior, fresh=("batch:b1",))  # the default bound: the batch itself is small enough
+    assert len(fake.requests) == 4 and all("read in part" in r.prompt for r in fake.requests)
+
+
+def test_the_summary_part_names_every_prerequisite_outside_the_batch_on_its_own_line(world):
+    plan = plan_of({A: ["openspec:x"], B: ["openspec:y"]})
+    world.units = {
+        **world.units,
+        "openspec:x": UnitInfo("openspec:x", f"{ROOT}/c"),
+        "openspec:y": UnitInfo("openspec:y", f"{ROOT}/c"),
+    }
+    fake = FakeAdapter([ok() for _ in range(5)])
+    review(world, plan, fake, cfg=cfg_of(1000))
+    summary = fake.requests[-1].prompt
+    assert '<l4:data source="batch prerequisites outside it">\n- openspec:x\n- openspec:y\n</l4:data>' in summary

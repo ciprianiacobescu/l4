@@ -326,10 +326,10 @@ Rules for every task:
 
 ## 7. Checks
 
-- [ ] 7.1 `uv run --frozen python scripts/check_spec.py docs/SPEC.md` and `openspec validate readiness-judge-chain
+- [x] 7.1 `uv run --frozen python scripts/check_spec.py docs/SPEC.md` and `openspec validate readiness-judge-chain
   --strict`.
-- [ ] 7.2 Check the code against L4-YOLO-095..100 and SCN-YOLO-261..282 in `docs/SPEC.md`. Fix the code, or report to
+- [x] 7.2 Check the code against L4-YOLO-095..100 and SCN-YOLO-261..282 in `docs/SPEC.md`. Fix the code, or report to
   the orchestrator where they differ. Do not change the requirements yourself.
-- [ ] 7.3 `uv run --frozen ruff check .` and `uv run --frozen ruff format --check` on the files you changed. Run
+- [x] 7.3 `uv run --frozen ruff check .` and `uv run --frozen ruff format --check` on the files you changed. Run
   `uv run --frozen mypy` on `src/l4/yolo src/l4/agents/factory.py src/l4/config` if the repository's CI runs mypy
   (`grep -n mypy .github/workflows/*.yml pyproject.toml`).
