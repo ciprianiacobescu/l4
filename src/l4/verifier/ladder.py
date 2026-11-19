@@ -62,6 +62,7 @@ from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
 from l4.gates.junit import TestReport, fold_subtest_id
 from l4.implementer.discrimination import discriminate_extra, file_of_test, worktree_files
+from l4.implementer.excerpt import case_excerpt, collection_case_excerpt
 from l4.implementer.repaircheck import function_source
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.test_locate import file_of_id, window
@@ -801,7 +802,14 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             gate_ok, browser_report = browser.ok, browser.report
             result.e2e_tests = sorted(browser.report.tests) if browser.report is not None else []
             seen = _merged(out.report, browser.report)  # a new e2e test file ran in the e2e gate, not in this one
-        result.failures, result.failures_dropped = failure_records(out.report, browser_report, wb.redactor.redact_text)
+        redact, tmp_root = wb.redactor.redact_text, wb.unit_cache / "gate-tmp"  # as `tdd.excerpter` (L4-VER-078)
+        result.failures, result.failures_dropped = failure_records(
+            out.report, browser_report, redact,
+            excerpt=lambda case: case_excerpt(case, worktree=wb.worktree, tmp_root=tmp_root, redact=redact),
+            collection_excerpt=lambda detail: collection_case_excerpt(
+                detail, worktree=wb.worktree, tmp_root=tmp_root, redact=redact
+            ),
+        )  # fmt: skip
         blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)
         return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers)])
 

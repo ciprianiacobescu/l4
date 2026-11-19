@@ -449,6 +449,19 @@ def _requests(findings: Sequence[Finding]) -> str:
     return "\n\n".join(blocks) + "\n\n" if blocks else ""
 
 
+FAILING_LEAD = "Failing tests as the verifier recorded them:"
+
+
+def _failing_block(finding: Finding) -> str:
+    """L4-IMP-102: the failure block of a finding, as a paragraph of its list item: every line indented by four spaces
+    (empty lines stay empty), so no line of it can open a heading, a list or a fence, or close one. Never in
+    `tasks.md`, whose checkboxes the OpenSpec CLI counts."""
+    if not finding.failures.strip():
+        return ""
+    lines = (f"    {line}" if line.strip() else "" for line in (FAILING_LEAD, *finding.failures.splitlines()))
+    return "\n\n" + "\n".join(lines)
+
+
 def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding], *, follow_up: bool = False) -> str:
     if follow_up:
         cites = "\n".join(f"- {', '.join(f.ids)}: {_plain(f.title)}" for f in findings)
@@ -461,6 +474,7 @@ def _proposal(parent: UnitRef, round: int, findings: Sequence[Finding], *, follo
     cites = "\n".join(
         f"- {', '.join(f.ids)} ({f.severity}): {_plain(f.title)}"
         + (f": {_plain(f.detail, MAX_DETAIL_CHARS + MAX_DECISION_CHARS + 400)}" if f.detail else "")
+        + _failing_block(f)
         for f in findings
     )
     return (

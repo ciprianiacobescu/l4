@@ -102,6 +102,9 @@ class PromptContext:
     gate_env_ci: tuple[str, ...] = ()
     ci_job: str | None = None
     browser_tests: tuple[str, ...] = ()  # green only (L4-IMP-101): `path::name` of the browser tests the harness runs
+    # single only (L4-IMP-102): the failure block of the tests a fix chore's findings name, from the round that spawned
+    # the fix unit; empty: no block. It is not cut with the unit context: the budget does not govern it
+    failing_tests: str = ""
 
 
 @dataclass(frozen=True)
@@ -310,6 +313,12 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
         after.append(
             "# Your previous attempt was rejected\nThe harness rejected it for the reason below; do not repeat it.\n"
             + data_block("previous attempt", ctx.previous_failure)
+        )
+    if role == "single" and ctx.failing_tests and not repairing:
+        after.append(
+            "# Failures of this task's tests\nThe verifier recorded these failures for the tests this task's findings "
+            "name; paths are relative to the repository. They are what this task must fix.\n"
+            + data_block("failing tests", ctx.failing_tests)
         )
     if role == "green" and ctx.unfrozen:
         by = ", ".join(sorted({q for _, q in ctx.unfrozen}))

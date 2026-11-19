@@ -670,6 +670,12 @@ def _fix_design(parent: UnitRef, round: int, findings: Sequence[Finding], *, fol
         )
         if finding.detail:
             parts.append("\n" + _line(finding.detail, MAX_ITEM_CHARS))
+        if finding.failures.strip():  # L4-IMP-102: an indented block, as `code` below; never in tasks.md
+            quoted = (
+                f"    {line}" if line.strip() else ""
+                for line in ("Failing tests as the verifier recorded them:", *finding.failures.splitlines())
+            )
+            parts.append("\n" + "\n".join(quoted))
         if finding.request:
             parts.append("\n" + _line(finding.request, MAX_REQUEST_LINE))
             if finding.code.strip():  # an indented block: no line of it can open a heading or a fence

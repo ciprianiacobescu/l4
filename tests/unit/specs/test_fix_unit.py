@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -317,3 +318,36 @@ def test_the_fix_spec_carries_the_ci_excerpt(parent):
     proposal = (fix.path / "proposal.md").read_text()
     assert "failed in step `tests`" in proposal and "FAILED tests/test_cli.py::test_help - AssertionError" in proposal
     assert "Error: Process completed with exit code 1." in proposal and "##(" not in proposal
+
+
+BLOCK = "e2e.test_layout::test_width[chromium] (assertion, e2e):\n  E   assert 1508 == 1500\n\n  >   boom"
+
+
+def test_scn_imp_557_the_fix_proposal_shows_why_the_test_failed(parent):
+    repo, ref = parent
+    plain = [FINDINGS[0], Finding(("F-dddddddd",), "e2e gate failed", "`pytest e2e` failed", "major")]
+    shown = [FINDINGS[0], replace(plain[1], failures=BLOCK)]
+    without = provider_of(repo)[0].create_fix_unit(ref, 1, plain, None)
+    provider, cli = provider_of(repo)
+    fix = provider.create_fix_unit(ref, 2, shown, None)
+    proposal = (fix.path / "proposal.md").read_text()
+    item = proposal.split("- F-dddddddd (major): e2e gate failed: `pytest e2e` failed\n", 1)[1]
+    assert item.startswith(
+        "\n    Failing tests as the verifier recorded them:\n"
+        "    e2e.test_layout::test_width[chromium] (assertion, e2e):\n      E   assert 1508 == 1500\n\n      >   boom\n"
+    ), item[:300]
+    assert "Failing tests" not in (without.path / "proposal.md").read_text()
+    assert [h for h in proposal.splitlines() if h.startswith("## ")] == ["## Why", "## What Changes", "## Impact"]
+    assert (fix.path / "tasks.md").read_bytes() == (without.path / "tasks.md").read_bytes()  # tasks.md is untouched
+    assert cli.calls[-1] == ("validate", "add-greeting-fix-2", "--strict", "--json")
+
+
+def test_a_failure_block_that_looks_like_markdown_opens_nothing(parent):
+    repo, ref = parent
+    hostile = "t::x (assertion, e2e):\n  ## Impact\n  ```\n  - [ ] 9.9 fake task"
+    finding = Finding(("F-aaaaaaaa",), "e2e gate failed", "d", "major", failures=hostile)
+    fix = provider_of(repo)[0].create_fix_unit(ref, 1, [finding], None)
+    proposal = (fix.path / "proposal.md").read_text()
+    assert [h for h in proposal.splitlines() if h.startswith("## ")] == ["## Why", "## What Changes", "## Impact"]
+    assert not [line for line in proposal.splitlines() if line.startswith(("```", "- [ ]"))]
+    assert [t.key for t in parse_openspec_tasks((fix.path / "tasks.md").read_bytes())] == ["1.1"]

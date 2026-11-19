@@ -5,7 +5,7 @@ import json
 from l4.gates.junit import TestCase, TestReport, failure_kind
 from l4.redact import Redactor
 from l4.verifier.evidence import VERDICT_SCHEMA_ID, read_verdict, restore_round
-from l4.verifier.gates import MAX_FAILURE_CHARS, MAX_TEST_FAILURES, failure_records
+from l4.verifier.gates import MAX_EXCERPT_RECORDS, MAX_FAILURE_CHARS, MAX_TEST_FAILURES, failure_records
 from l4.verifier.report import verdict_json
 from l4.verifier.types import Verdict, VerifyResult
 
@@ -81,7 +81,7 @@ def test_a_verdict_without_failures_is_still_read(tmp_path):
 
 
 def test_a_reused_round_keeps_the_failures_and_an_old_one_has_none():
-    failures = {E2E_ID: {"gate": "e2e", "kind": "other", "message": "TypeError: x"}}
+    failures = {E2E_ID: {"gate": "e2e", "kind": "other", "message": "TypeError: x", "excerpt": "E   TypeError: x"}}
     stored = json.loads(
         json.dumps(verdict_json(VerifyResult("openspec:x", 1, Verdict.FAIL, BASE, HEAD, failures=failures)))
     )
@@ -150,3 +150,62 @@ def test_the_deepest_repository_frame_of_the_traceback_is_recorded_as_the_locati
         records[E2E_ID]["frames"] == "e2e/test_a.py" and records[UNIT_ID]["frames"] == "tests/test_b.py\nsrc/app/x.py"
     )
     assert "frames" not in records["tests.test_c::t"]
+
+
+# L4-VER-078: the first 20 failing tests of each gate carry an excerpt
+
+
+def with_body(test_id: str, body: str, message: str = "assert 1508 == 1500") -> TestCase:
+    return TestCase(test_id, "failed", message, failure_kind=failure_kind("failed", message), detail=body)
+
+
+def shown(case_: TestCase) -> str:
+    return "\n".join(line for line in case_.detail.splitlines() if line.startswith(("E", ">")))
+
+
+def test_scn_ver_308_a_failing_browser_test_records_its_excerpt_and_keeps_its_old_keys():
+    body = ">       assert width == 1500\nE       assert 1508 == 1500\n"
+    browser = TestReport({E2E_ID: with_body(E2E_ID, body)})
+    records, _ = failure_records(None, browser, str, excerpt=shown)
+    assert records[E2E_ID] == {
+        "gate": "e2e", "kind": "assertion", "message": "assert 1508 == 1500", "excerpt": body.strip()
+    }  # fmt: skip
+    plain, _ = failure_records(None, browser, str)  # without `excerpt=` the records are as before
+    assert plain[E2E_ID] == {"gate": "e2e", "kind": "assertion", "message": "assert 1508 == 1500"}
+
+
+def test_scn_ver_310_the_excerpts_are_bounded_per_gate():
+    unit = {f"tests.t::t{n:02}": with_body(f"tests.t::t{n:02}", "E   boom") for n in range(30)}
+    browser = {f"e2e.t::t{n}": with_body(f"e2e.t::t{n}", "E   boom") for n in range(2)}
+    records, _ = failure_records(TestReport(unit), TestReport(browser), str, excerpt=shown)
+    assert MAX_EXCERPT_RECORDS == 20
+    with_excerpt = sorted(i for i, r in records.items() if "excerpt" in r)
+    assert with_excerpt == [*sorted(browser), *sorted(unit)[:20]]
+    assert all("excerpt" not in records[i] and records[i]["message"] for i in sorted(unit)[20:])
+
+
+def test_a_case_with_nothing_to_show_has_no_excerpt_key():
+    records, _ = failure_records(TestReport({"a::b": TestCase("a::b", "failed", "x")}), None, str, excerpt=lambda c: "")
+    assert "excerpt" not in records["a::b"]
+
+
+def test_a_collection_record_gets_the_e_lines_of_its_error_among_the_first_20_by_id():
+    report = TestReport(
+        {f"tests.m::t{n:02}": with_body(f"tests.m::t{n:02}", "E   boom") for n in range(19)},
+        collection_errors=["tests.a_broken", "tests.z_broken"],
+        collection_details={"tests.a_broken": "E   ImportError: no", "tests.z_broken": "E   ImportError: no"},
+    )
+    records, _ = failure_records(
+        report, None, str, excerpt=shown, collection_excerpt=lambda detail: "C " + detail.strip()
+    )
+    assert records["tests.a_broken"]["excerpt"] == "C E   ImportError: no"  # sorts first: among the 20
+    assert "excerpt" not in records["tests.z_broken"]  # sorts last of 21: not among the 20
+
+
+def test_the_excerpt_is_in_the_verdict_and_a_reused_round_keeps_it():
+    failures = {E2E_ID: {"gate": "e2e", "kind": "assertion", "message": "x", "excerpt": "E   assert 1508 == 1500"}}
+    body = json.loads(
+        json.dumps(verdict_json(VerifyResult("openspec:x", 1, Verdict.FAIL, BASE, HEAD, failures=failures)))
+    )
+    assert body["failures"][E2E_ID]["excerpt"] == "E   assert 1508 == 1500"
+    assert restore_round(body, "openspec:x", 2).failures == failures

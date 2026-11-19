@@ -35,6 +35,7 @@ from l4.implementer.tdd import (
     RedOutcome,
     _last_checkpoint,
     _ledger_events,
+    fix_failure_text,
     resume_red,
     run_green,
     run_red,
@@ -82,19 +83,25 @@ def _questions(
     forbidden: Sequence[str] = (),
     exists: Callable[[str], bool] = lambda path: True,
     clauses: Sequence[ClauseAsk] = (),
+    notes: Sequence[str] = (),
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted), then one question for each new `unasserted` entry (`clauses`, L4-IMP-095). A blocked step without any
     question still has to reach a human, so one is made from its summary.
     `red` is set for a green step: a technical question then ends with the harness's note on how a frozen test or
-    support file is unfrozen (W-C3, D7)."""
+    support file is unfrozen (W-C3, D7). `notes` (L4-IMP-102): harness notes that go into every question's Context after
+    the agent's own text and before the note of the case (the fix chore's, the unfreeze note), which stays last."""
+
+    def joined(text: str) -> str:
+        return "\n\n".join(part for part in (text, *notes) if part)
+
     if not questions and not clauses:
         return [
             NewQuestion(
                 title=f"Task {task.key} is blocked",
                 kind=QuestionKind.AMBIGUOUS,
                 blocking_tasks=(task.key,),
-                context=summary or "The implementer reported blocked without a question.",
+                context=joined(summary or "The implementer reported blocked without a question."),
                 asked=asked,
             )  # fmt: skip
         ]
@@ -103,7 +110,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists, joined(q.context)),
             asked=asked,
             options=tuple(q.options),
         )  # fmt: skip
@@ -114,7 +121,7 @@ def _questions(
             title=c.question.title,
             kind=QuestionKind.AMBIGUOUS,
             blocking_tasks=(task.key,),
-            context=c.question.context,
+            context=joined(c.question.context),
             asked=asked,
             criteria=(c.known,) if c.known is not None else (),
         )  # fmt: skip
@@ -173,22 +180,26 @@ def _with_note(
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
     exists: Callable[[str], bool] = lambda path: True,
+    context: str | None = None,
 ) -> str:
+    """The question's Context: its own text (`context` when the caller added harness notes to it) and the note of the
+    case, last."""
+    text_of = question.context if context is None else context
     frozen = [*_frozen_paths(red), *_frozen_ignore(red)] if red is not None else []
     if question.kind == QuestionKind.TECHNICAL.value and (
         found := forbidden_found(question, guard_notes, forbidden, exists, frozen)
     ):
         note = forbidden_note(found, unit=unit)  # no answer lifts the guard: not the unfreeze note, nor the fix chore's
-        return f"{question.context}\n\n{note}" if question.context else note
+        return f"{text_of}\n\n{note}" if text_of else note
     if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
         note = chore_question_note(chore_unit)
-        return f"{question.context}\n\n{note}" if question.context else note
+        return f"{text_of}\n\n{note}" if text_of else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
-        return question.context
+        return text_of
     suggested = bool(question.options) and _edit_of(question.options[0]) is not None
     text = "\n".join((question.title, question.context, *question.options))
     note = unfreeze_note(text, _frozen_paths(red), ignore=_frozen_ignore(red), suggested=suggested, unit=unit)
-    return f"{question.context}\n\n{note}" if question.context else note
+    return f"{text_of}\n\n{note}" if text_of else note
 
 
 def _edit_of(option: str) -> str | None:
@@ -220,13 +231,13 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
     red: RedOutcome | None = None, chore_unit: str | None = None, clauses: Sequence[ClauseAsk] = (),
-    phase: str = "",
+    phase: str = "", notes: Sequence[str] = (),
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
     batch = _questions(
         task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden,
-        lambda path: os.path.lexists(wb.worktree / path), clauses,
+        lambda path: os.path.lexists(wb.worktree / path), clauses, notes,
     )  # fmt: skip
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
@@ -350,6 +361,24 @@ def _ledger_text(wb: Workbench, excerpt: str) -> str:
     """The bounded form of a failure excerpt for the committed ledger: redacted whole, then cut (L4-IMP-064)."""
     redact = wb.redactor.redact_text
     return redact(ledger_excerpt(redact(excerpt)))
+
+
+def _question_notes(wb: Workbench, failure: str | None, excerpt: str, chore: Sequence[str] | None = None) -> list[str]:
+    """The harness notes of a question, in the order they are read (L4-IMP-102): the failure block of the tests a fix
+    chore's findings name (`chore`: its findings, None for any other step), then why the previous attempt of the task
+    and phase was rejected (its reason, 300 characters at most, and its ledger excerpt). The note of the case, which
+    the question ends with, comes after them (`_with_note`)."""
+    notes: list[str] = []
+    if chore is not None and (block := fix_failure_text(wb, chore)):
+        notes.append(
+            f"Harness note: the verifier recorded these failures for the tests of this task's findings:\n{block}"
+        )
+    if failure:
+        note = f"Harness note: the previous attempt of this task was rejected: {failure[:300]}"
+        if shown := _ledger_text(wb, excerpt) if excerpt else "":
+            note += f"\n{shown}"
+        notes.append(note)
+    return notes
 
 
 def _retry_reason(failure: str | None, wb: Workbench, excerpt: str = "") -> str | None:
@@ -636,6 +665,9 @@ def _run_task(
                 ids = _raise_blocked(
                     wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id,
                     clauses=done.clauses, phase="single",
+                    notes=_question_notes(
+                        wb, failure, excerpt, chore if (chore_kind(wb.ref.path, task.title) or "fix") == "fix" else None
+                    ),
                 )  # fmt: skip
                 return TaskOutcome("blocked", "single", ids)
             if done.status == "held":  # the discrimination check of a test chore could not decide (L4-IMP-063)
@@ -649,7 +681,8 @@ def _run_task(
                 outcome = run_red(wb, task, attempt=attempts["red"], previous_failure=retry)
             if outcome.status == "blocked":
                 ids = _raise_blocked(
-                    wb, task, outcome.questions, outcome.summary, attempts["red"], clauses=outcome.clauses, phase="red"
+                    wb, task, outcome.questions, outcome.summary, attempts["red"], clauses=outcome.clauses, phase="red",
+                    notes=_question_notes(wb, failure, excerpt),
                 )  # fmt: skip
                 return TaskOutcome("blocked", "red", ids)
             if outcome.status == "held":  # a check L4 could not decide: no attempt counted, no escalation (D7)
@@ -670,7 +703,8 @@ def _run_task(
                 return TaskOutcome("done")
             if done.status == "blocked":
                 ids = _raise_blocked(
-                    wb, task, done.questions, done.summary, attempts["green"], red, clauses=done.clauses, phase="green"
+                    wb, task, done.questions, done.summary, attempts["green"], red, clauses=done.clauses, phase="green",
+                    notes=_question_notes(wb, failure, excerpt),
                 )  # fmt: skip
                 return TaskOutcome("blocked", "green", ids)
             if done.status == "held":  # the test-at-red run could not decide: the red commit stays

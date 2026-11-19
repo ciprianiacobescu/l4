@@ -13,8 +13,8 @@ import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from l4.gates.collection import LOCATION, in_repository
-from l4.gates.junit import TestReport
+from l4.gates.collection import LOCATION, error_lines, in_repository
+from l4.gates.junit import TestCase, TestReport
 
 MAX_E_LINES = 6
 MAX_TEST_LINES = 8
@@ -22,6 +22,7 @@ MAX_LINES = 40
 MAX_CHARS = 3000
 MAX_TESTS = 8  # tests with a block of their own; the rest are counted
 LINT_HEAD_LINES = 36
+MAX_RECORD_EXCERPT_CHARS = 600  # a round's per-test excerpt (L4-VER-078): the bound of the ledger's `ledger_excerpt`
 _E_LINE = re.compile(r"^E\s+\S")
 _PYTEST_TMP = re.compile(r"/(?:private/)?(?:var/folders/[^\s'\"]+?/T|tmp)/pytest-of-[^/\s'\"]+/pytest-\d+")
 _TRUNCATED = "... (truncated)"
@@ -121,6 +122,45 @@ def failure_excerpt(
         out.append(f"... and {len(blocks) - MAX_TESTS} more failing tests")
     text = redact(_clean("\n".join(out), worktree, tmp_root))
     return _fit(text.splitlines())
+
+
+def case_excerpt(
+    case: TestCase,
+    *,
+    worktree: Path,
+    tmp_root: Path | None,
+    redact: Callable[[str], str],
+    limit: int = MAX_RECORD_EXCERPT_CHARS,
+) -> str:
+    """The lines `failure_excerpt` keeps for one failed test, at most 8 lines and `limit` characters (L4-VER-078): its
+    `E` lines and deepest repository frame, or the first lines of its message when the report holds no body. The body is
+    redacted whole before any line is dropped, the result again after the paths are made relative, so a secret cut by
+    the bound is never shown in part. Cut at the last line end before `limit` (one line longer than `limit` is cut at
+    `limit`); empty when there is nothing to show. The name does not start with `test`: a test module that imports it
+    would collect it."""
+    body = redact(case.detail or case.message)
+    lines = _test_lines(body) if case.detail else body.splitlines()[:MAX_TEST_LINES]
+    lines = [line for line in lines if line.strip()] or [line for line in body.splitlines() if line.strip()][:2]
+    text = redact(_clean("\n".join(lines[:MAX_TEST_LINES]), worktree, tmp_root))
+    if len(text) <= limit:
+        return text
+    kept = text[:limit]
+    if text[limit] != "\n" and "\n" in kept:
+        kept = kept.rsplit("\n", 1)[0]
+    return kept
+
+
+def collection_case_excerpt(
+    detail: str,
+    *,
+    worktree: Path,
+    tmp_root: Path | None,
+    redact: Callable[[str], str],
+    limit: int = MAX_RECORD_EXCERPT_CHARS,
+) -> str:
+    """The `E` lines of a collection error's traceback end (L4-VER-078), redacted before and after the cut, paths made
+    relative, at most `limit` characters."""
+    return redact(_clean(error_lines(redact(detail), limit), worktree, tmp_root))
 
 
 def lint_excerpt(text: str) -> str:

@@ -28,7 +28,15 @@ from dataclasses import dataclass, field
 from l4.memory.curate import UI_GAP_TITLE
 from l4.specs.base import MAX_DECISION_CHARS, Criterion, DeltaRequirement, DeltaScenario, Finding, SpecDelta
 from l4.specs.feedback import FeedbackItem
-from l4.verifier.failures import GATE_FINDING_GATES, TESTS_RAN_TITLES, failing_ids, finding_test_ids, named_known_ids
+from l4.verifier.failures import (
+    GATE_FINDING_GATES,
+    TESTS_RAN_TITLES,
+    failing_ids,
+    failure_block,
+    finding_test_ids,
+    named_known_ids,
+    shown_failure_ids,
+)
 from l4.verifier.feedback import FeedbackScan, feedback_findings
 from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, VerifyResult
 from l4.verifier.types import Finding as VerifierFinding
@@ -90,6 +98,7 @@ class _Candidate:
     feedback: FeedbackRef | None = None  # the task answers this item, and no other finding
     repair: bool = False  # every finding of the task fails only on tests that qualify for a repair (L4-IMP-091)
     repair_ids: set[str] = field(default_factory=set)  # the test ids those findings fail on
+    failing: set[str] = field(default_factory=set)  # the tests the findings name, for the failure block (L4-IMP-102)
 
 
 def _joined_to_gate(picked: Sequence[tuple[VerifierFinding, bool]], result: VerifyResult) -> dict[str, str]:
@@ -288,6 +297,7 @@ def _candidates(
         elif f.id not in cand.ids:
             cand.detail = f"{cand.detail} | {f.title}: {detail}" if detail else cand.detail
         cand.tests = cand.tests or is_coverage_hold_finding(f)
+        cand.failing.update(shown_failure_ids(result.failures, f.title, f.detail))
         own_ids = _repair_ids(f, result, repairable) if not verdicts and not scenario else None
         cand.repair = cand.repair and own_ids is not None
         cand.repair_ids |= own_ids or set()
@@ -441,7 +451,7 @@ def plan_fix_unit(
             Finding(
                 tuple(cand.ids), _flat(title, MAX_TITLE_CHARS), detail, cand.severity.value,
                 (cand.criterion,) if cand.criterion else (), chore=chore, tests=cand.tests or cand.only_tests,
-                repair=repair,
+                repair=repair, failures=failure_block(result.failures, cand.failing),
             )
         )  # fmt: skip
         consumed += [q for q in cand.consumed if q not in consumed]
@@ -467,7 +477,12 @@ def redact_plan(plan: FixPlan, redact: Callable[[str], str]) -> FixPlan:
     """The plan with model- and human-written text redacted: the fix unit's files are committed and pushed."""
     groups = [
         dataclasses.replace(
-            g, title=redact(g.title), detail=redact(g.detail), request=redact(g.request), code=redact(g.code)
+            g,
+            title=redact(g.title),
+            detail=redact(g.detail),
+            request=redact(g.request),
+            code=redact(g.code),
+            failures=redact(g.failures),
         )
         for g in plan.groups
     ]

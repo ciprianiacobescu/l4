@@ -163,7 +163,7 @@ from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.failures import e2e_ids_of, finding_test_ids
+from l4.verifier.failures import e2e_ids_of, failure_block, finding_test_ids, shown_failure_ids
 from l4.verifier.gates import judge_e2e, run_build_only
 from l4.verifier.repairs import RepairTest, repair_candidates
 from l4.verifier.scan import has_human_tag
@@ -922,6 +922,7 @@ def _prompt(
     carried: NearPass | None = None,
     *,
     browser_tests: Sequence[str] = (),
+    failing: str = "",
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -950,6 +951,7 @@ def _prompt(
         if unfreeze
         else (),
         adds_tests=adds_tests, repair_tests=tuple(repair), browser_tests=tuple(browser_tests),
+        failing_tests=failing if role == "single" else "",
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
@@ -1026,7 +1028,7 @@ def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None, browser_tests: Sequence[str] = (),
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (), failing: str = "",
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out. `carry`: a near pass (L4-IMP-100) whose changes
@@ -1062,6 +1064,7 @@ def agent_step(
             repair,
             carried,
             browser_tests=browser_tests,
+            failing=failing,
         )
         wb.publish_prompt(published, prompt)
         # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
@@ -1217,7 +1220,7 @@ def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None, browser_tests: Sequence[str] = (),
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (), failing: str = "",
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question. A
@@ -1244,6 +1247,7 @@ def step_or_replay(
             repair=repair,
             carry=carry,
             browser_tests=browser_tests,
+            failing=failing,
         )
     drop_near_pass(wb, task.key, attempt, carry, "replay")  # a found step to replay, refused or not, comes first
     if isinstance(found, Refused):
@@ -2767,6 +2771,21 @@ def _parent_verdict(wb: Workbench) -> dict[str, Any] | None:
     return read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no)
 
 
+def fix_failure_text(wb: Workbench, findings: Sequence[str]) -> str:
+    """L4-IMP-102: the failure block (`failure_block`) of the tests that the stored findings `findings` of the round
+    that spawned this fix unit name, for a fix chore's prompt and questions. Empty when the round is not on record (a
+    recovered fix unit) or its verdict has no `failures` (an older harness)."""
+    verdict = _parent_verdict(wb)
+    failures = (verdict or {}).get("failures")
+    if not isinstance(failures, dict):
+        return ""
+    ids: set[str] = set()
+    for stored in (verdict or {}).get("findings") or []:
+        if isinstance(stored, dict) and stored.get("id") in findings:
+            ids.update(shown_failure_ids(failures, str(stored.get("title") or ""), str(stored.get("detail") or "")))
+    return failure_block(failures, ids)
+
+
 def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     """The e2e duty of a fix chore, or None when the gate is not configured or no finding of the task is about it. The
     round is `fix.spawned.verify_round` of this fix unit in the parent's ledger, its verdict is read from the parent's
@@ -3494,7 +3513,10 @@ def run_single(
     ci_job = chore_ci_job(_ledger_events(wb), findings)
     e2e_scope = _e2e_chore_scope(wb, findings) if kind == "fix" else None
     guard_notes_before = len(wb.guard_notes)
-    step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job)
+    failing = fix_failure_text(wb, findings) if kind == "fix" else ""  # L4-IMP-102: read once, before the step
+    step = step_or_replay(
+        wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job, failing=failing
+    )
     if step.kind != "ok":
         wb.discard_changes()
         if step.kind == "held":

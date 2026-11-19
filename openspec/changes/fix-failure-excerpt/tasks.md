@@ -6,7 +6,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 1. The round records an excerpt (L4-VER-078, D1)
 
-- [ ] 1.1 Write the tests first:
+- [x] 1.1 Write the tests first:
   - in `tests/unit/implementer/test_excerpt.py`: `case_excerpt(TestCase(..., detail=<a pytest body with an absolute
     worktree path, a `>` line and `E` lines>), worktree=..., tmp_root=None, redact=Redactor({}).redact_text)` holds the
     `>` and `E` lines, the path relative, at most 8 lines and 600 characters; a 2,000-character `E` line is cut at 600; a
@@ -19,7 +19,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
     detail through `collection_excerpt`; `verdict_json` writes `excerpt`, and `restore_round` keeps it (extend
     `test_a_reused_round_keeps_the_failures_and_an_old_one_has_none`).
   Run both files and see the new tests fail.
-- [ ] 1.2 Then add `MAX_RECORD_EXCERPT_CHARS = 600` and `case_excerpt` to `src/l4/implementer/excerpt.py` (reuse
+- [x] 1.2 Then add `MAX_RECORD_EXCERPT_CHARS = 600` and `case_excerpt` to `src/l4/implementer/excerpt.py` (reuse
   `_test_lines` and `_clean`; never name it `test_...`), the keywords `excerpt` and `collection_excerpt` and
   `MAX_EXCERPT_RECORDS = 20` to `failure_records` (`src/l4/verifier/gates.py`), and pass both from `tests()` in
   `src/l4/verifier/ladder.py` (`worktree=wb.worktree`, `tmp_root=wb.unit_cache / "gate-tmp"`,
@@ -29,7 +29,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 2. The fix unit's files (L4-IMP-102, D2, D3, D4)
 
-- [ ] 2.1 Write the tests first:
+- [x] 2.1 Write the tests first:
   - in a new `tests/unit/verifier/test_failures_block.py`: `shown_failure_ids` for each title of D2 (a gate finding takes
     every record of its gate, collection records included; `new tests failed` the named ids, also from a cut list; any
     other title none); `failure_block` formats `<id> (<kind>, <gate>):` and the excerpt lines indented by two spaces,
@@ -45,7 +45,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
   - in `tests/unit/specs/test_kiro_fix_unit.py`: the Kiro `design.md` holds the same lead line and indented block after
     the finding's detail, and `tasks.md` is unchanged.
   Run the files and see the new tests fail.
-- [ ] 2.2 Then add `shown_failure_ids`, `failure_block`, `MAX_SHOWN_FAILURES = 8` and `MAX_FAILURE_BLOCK_CHARS = 6000`
+- [x] 2.2 Then add `shown_failure_ids`, `failure_block`, `MAX_SHOWN_FAILURES = 8` and `MAX_FAILURE_BLOCK_CHARS = 6000`
   to `src/l4/verifier/failures.py` (no harness import); `failures: str = ""` as the last field of `Finding`
   (`src/l4/specs/base.py`); in `src/l4/verifier/fixunit.py`, `_Candidate.failing: set[str]` filled in `_candidates`
   from `shown_failure_ids(result.failures, f.title, f.detail)` for every finding it groups, `Finding(...,
@@ -57,7 +57,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 3. The fix chore's prompt (D5)
 
-- [ ] 3.1 Write the tests first in a new `tests/unit/implementer/test_fix_failure_excerpt.py`, with the bench and
+- [x] 3.1 Write the tests first in a new `tests/unit/implementer/test_fix_failure_excerpt.py`, with the bench and
   `seed_round` of `tests/unit/implementer/test_fix_chore_e2e.py` (import them, or copy them): a stored round whose
   `failures` record of `TEST_X` has `"excerpt": "E       assert 1508 == 1500"`; `run_single(bench.wb, TASK,
   [E2E_FINDING], attempt=1)` with a blocked step (no e2e stub is reached): the first prompt
@@ -65,7 +65,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
   (SCN-IMP-558; set the profile's `context_budget_tokens` low, or monkeypatch the planner, so that `proposal.md` is cut
   and the block is still there); with no `fix.spawned` (`seed_round(spawned=False)`) and with `failures=None` the
   prompt holds no such block (SCN-IMP-561); a `repair` chore's prompt holds none. Run and see them fail.
-- [ ] 3.2 Then add `PromptContext.failing_tests` and the block in `render_prompt` (`src/l4/implementer/prompt.py`,
+- [x] 3.2 Then add `PromptContext.failing_tests` and the block in `render_prompt` (`src/l4/implementer/prompt.py`,
   role `single`, not a repair), `fix_failure_text(wb, findings)` in `src/l4/implementer/tdd.py` (`_parent_verdict`, D2,
   D3), and thread `failing` through `run_single` (kind `fix`) -> `step_or_replay` -> `agent_step` -> `_prompt`. No
   template file changes. Run the new file, `tests/unit/implementer/test_fix_chore_e2e.py`,
@@ -73,7 +73,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 4. The questions (D6)
 
-- [ ] 4.1 Write the tests first in `test_fix_failure_excerpt.py`:
+- [x] 4.1 Write the tests first in `test_fix_failure_excerpt.py`:
   - SCN-IMP-559: as `test_a_chore_question_cannot_unfreeze_a_file` in `tests/unit/implementer/test_loop.py` does
     (monkeypatch `loop.chore_findings`), with a stored round as in 3.1: `questions.md` holds the agent's context, then
     `Harness note: the verifier recorded these failures for the tests of this task's findings:` and the excerpt line,
@@ -87,7 +87,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
     is unchanged;
   - a token in the excerpt does not reach `questions.md`.
   Run and see them fail.
-- [ ] 4.2 Then add `notes` to `_questions` and `_raise_blocked` (the notes go between the agent's text and the note
+- [x] 4.2 Then add `notes` to `_questions` and `_raise_blocked` (the notes go between the agent's text and the note
   `_with_note` adds: give `_with_note` the joined text instead of `question.context`), and pass the two notes from
   `_run_task` (`src/l4/implementer/loop.py`) as D6 says. Run the new file, `tests/unit/implementer/test_loop.py`,
   `tests/unit/implementer/test_unasserted_clauses.py`, `tests/unit/implementer/test_suggested_edit.py` and
@@ -95,7 +95,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561 and change-table row 134.
+- [x] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561 and change-table row 134.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
