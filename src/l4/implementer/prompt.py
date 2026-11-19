@@ -68,6 +68,7 @@ class PromptContext:
     static_gate_commands: tuple[str, ...] = ()  # lint and typecheck: a step that makes them fail is rejected
     run_ledger: str | None = None  # the run's ledger, repo-relative: it shows as modified in `git status` (expected)
     e2e_dir: str | None = None  # where the browser tests of `gates.e2e` live; None when the project has no e2e gate
+    e2e_frozen: bool = False  # `tdd.test_globs` covers `e2e_dir`: the browser tests are frozen after red (L4-IMP-101)
     e2e_base_url_env: str = "L4_E2E_BASE_URL"
     unfrozen: tuple[tuple[str, str], ...] = ()  # green only: (frozen test path, question id) that a human answer freed
     named: tuple[str, ...] = ()  # green only: support files the task's own text opened
@@ -338,9 +339,10 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     if role == "green" and ctx.browser_tests:
         after.append(
             "# Browser tests of this task\nAfter your step the harness builds the app, serves it and runs the e2e "
-            "gate; this task is green only when these browser tests, which its red step wrote, pass there. You "
-            "cannot run them in this sandbox. They are frozen like the other red tests: if one is wrong, report "
-            "status blocked with one technical question whose first option is the exact edit.\n"
+            "gate; this task is not green while one of these browser tests, which its red step wrote, fails there "
+            "(one the report does not show is not judged here: it is run at verification). You cannot run them in "
+            "this sandbox. They are frozen like the other red tests: if one is wrong, report status blocked with one "
+            "technical question whose first option is the exact edit.\n"
             + data_block(
                 "browser tests of this task",
                 "\n".join(f"- {one_line(t, MAX_REPAIR_LINE_CHARS)}" for t in ctx.browser_tests),
@@ -399,10 +401,11 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             f"\nBrowser (Playwright) tests are not run by that command: put each one in `{ctx.e2e_dir}/` (for example "
             f"`{ctx.e2e_dir}/test_<name>.py`), {elsewhere}, where the unit gate would run it without a "
             f"server and reject the attempt. The harness serves the app for `gates.e2e` and gives its address in "
-            f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other. The green step of this task "
-            "runs them with the app served, and they are frozen after this step, so check what each one expects "
-            "against the spec: a page a test builds itself (`page.set_content`) has the browser's default styles, not "
-            "the app's."
+            f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other. The step that completes "
+            "this task runs them with the app served"
+            + (" and they are frozen after this step" if ctx.e2e_frozen else "")
+            + ", so check what each one expects against the spec: a page a test builds itself "
+            "(`page.set_content`) has the browser's default styles, not the app's."
         )
     after.append(gate)
     version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"

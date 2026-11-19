@@ -12,7 +12,7 @@ and same-error detection, 1.24 (iteration cap), the "state your blocking questio
 import contextlib
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
@@ -21,7 +21,6 @@ from l4 import deadline
 from l4.availability.fallback import Constraint
 from l4.config.schema import Profile, duration_seconds
 from l4.gates.collection import ledger_excerpt
-from l4.gates.e2e import e2e_configured
 from l4.implementer.clauses import ClauseAsk
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import GuardNote, guard_note_text
@@ -40,6 +39,7 @@ from l4.implementer.tdd import (
     run_green,
     run_red,
     run_single,
+    task_runs_e2e,
 )
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, NOTE_PREFIX, forbidden_note, unfreeze_note
 from l4.implementer.workbench import Workbench
@@ -553,13 +553,18 @@ def _escalate_while_due(
     return wb, refusal
 
 
-def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
+def _check_step(
+    wb: Workbench, phase: str, task: str, attempt: int, *, red: tuple[str, Collection[str]] | None = None
+) -> None:
     """The run deadline's check before a step (L4-IMP-067): a no-op without a deadline. Raises `DeadlineReached`. A
-    step stopped at the last deadline starts only as the first step of a run (`stopped_last`, D7)."""
+    step stopped at the last deadline starts only as the first step of a run (`stopped_last`, D7). `red`: for a green
+    step, the red commit and the ids of the unit gate's report before it; the higher cap of a green step that runs the
+    build and the e2e gate (L4-IMP-101) applies only when the task has browser tests that will run."""
+    e2e = bool(phase == "green" and red is not None and deadline.current() is not None and task_runs_e2e(wb, *red))
     deadline.check(
         phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
         gates_timeout_s=duration_seconds(wb.cfg.gates.timeout), fix_unit=wb.event_context.get("fix_unit"),
-        e2e=e2e_configured(wb.cfg),
+        e2e=e2e,
     )  # fmt: skip
 
 
@@ -616,7 +621,11 @@ def _run_task(
     failures, reasons, attempts = (seeded := seed_attempts(wb, task)).failures, seeded.reasons, seeded.attempts
     if deadline.current() is not None:  # the task's first step: before the red checkpoint is resumed (D3)
         first = "single" if chore else "green" if _resumes_at_green(wb, task) else "red"
-        _check_step(wb, first, task.key, attempts["red" if first == "red" else "green"] + 1)
+        resumed = _last_checkpoint(wb) if first == "green" else None  # the red commit that this green step follows
+        _check_step(
+            wb, first, task.key, attempts["red" if first == "red" else "green"] + 1,
+            red=(resumed[0], ()) if resumed is not None else None,
+        )  # fmt: skip
     wb.emit("task.started", task=task.key, title=task.title)
     wb.served_model = None  # a model that served an earlier task's step did not ask this task's question
     limit = wb.cfg.implementer.max_task_attempts
@@ -696,7 +705,11 @@ def _run_task(
             phase, failure, excerpt = "red", outcome.reason, outcome.excerpt
         else:
             attempts["green"] += 1
-            _check_step(wb, "green", task.key, attempts["green"])
+            assert red.manifest is not None and red.base_report is not None
+            _check_step(
+                wb, "green", task.key, attempts["green"],
+                red=(red.manifest.red_sha, [*red.base_report.tests, *red.new_ids]),
+            )  # fmt: skip
             with deadline.timed(wb.emit):  # a `RoleLimit` carries the near pass its step applied (`agent_step`)
                 done = run_green(wb, task, red, attempt=attempts["green"], previous_failure=retry, carry=carry)
             if done.status == "ok":

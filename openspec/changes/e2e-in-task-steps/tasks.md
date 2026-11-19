@@ -47,9 +47,9 @@ has text (extend the stub with an optional `details` mapping if needed).
     without `serve`): the stub is never called;
   - SCN-IMP-551: the stub raises `ServerNotReady` with a log `Error: listen EADDRINUSE`: failed, the reason starts with
     `the e2e server was not ready (see`, the excerpt holds `EADDRINUSE`;
-  - SCN-IMP-552: two browser tests, the report holds only `test_a`, or holds `test_b[chromium]` as `skipped`: failed
-    naming `test_b`; a report that also holds another failing e2e test that is not the task's and the task's test
-    passed: done;
+  - SCN-IMP-552: two browser tests, the report holds only `test_a`, or holds `test_b[chromium]` as `skipped`: done, with
+    `e2e.task_tests_unseen` naming `test_b` (fail-safe, see section 7); a report that also holds another failing e2e
+    test that is not the task's and the task's test passed: done;
   - SCN-IMP-553: a green step that breaks a unit test: the stub is not called; a green step whose lint fails (the lint
     command of `tests/unit/implementer/test_static_gates_first.py`): the stub is not called and
     `GreenOutcome.near_pass` is set;
@@ -110,3 +110,16 @@ has text (extend the stub with an optional `details` mapping if needed).
   them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md` or
   `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 6.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 7. Review fixes (the orchestrator's review of 9b4ff383)
+
+- [x] 7.1 The check is fail-safe (D4): only a task test that the report shows as failed or errored, a timed-out gate, no
+  readable report, a collection error of a mapped task module, a failed build or a server that is not ready refuse the
+  attempt; a test the report does not show is `e2e.task_tests_unseen`. Tests first: the SCN-IMP-552 tests of
+  `test_e2e_task_steps.py` were flipped and failed before the change.
+- [x] 7.2 `task_browser_tests` keeps what pytest would collect and only a changed own definition (D1); report ids are
+  matched by module suffix and class (D4); the run is skipped for a selecting command or a shared directory (D10); the
+  deadline cap applies only to a green step that runs the gate (D8); a git error is a ledger note. New module
+  `src/l4/implementer/browser_tests.py`, tests in `test_browser_tests.py` and `test_e2e_task_steps.py`.
+- [x] 7.3 The prompts say what is true (D7); pins of surviving mutants (a person's unfreeze after the e2e run, the
+  counted server-not-ready attempt, the next red attempt after an already-satisfied failure).
