@@ -101,7 +101,7 @@ Rules for every task:
 
 ## 3. The walk of the chain (D2, D3, D4, D5; L4-YOLO-095, -096, -097)
 
-- [ ] 3.1 Write the tests first, in a new `tests/unit/yolo/test_yolo_readiness_chain.py`. Call `review_plan_costed`
+- [x] 3.1 Write the tests first, in a new `tests/unit/yolo/test_yolo_readiness_chain.py`. Call `review_plan_costed`
   directly, as `test_yolo_readiness_review.py` does:
   - SCN-YOLO-261: `roles.judges: [j-unit]` and `roles.plan_judges: [j-plan]`, with separate fakes. Only the fake of
     `j-plan` is asked, and the verdict's `judge == "j-plan"`. Also check that `review_chain(cfg)` gives `("judges",
@@ -137,13 +137,13 @@ Rules for every task:
     `test_no_judge_profile_is_role_unavailable` covers this.
 
   Run them and see them fail.
-- [ ] 3.2 Then change `src/l4/yolo/model.py`:
+- [x] 3.2 Then change `src/l4/yolo/model.py`:
   - `Verdict.judge: str | None = None`;
   - `Verdict.parts: tuple[tuple[str, "Verdict"], ...] = ()`;
   - `ReviewResult.failures: tuple[JudgeFailure, ...] = ()`;
   - the frozen dataclass `JudgeFailure(profile: str, subject: str, kind: str, detail: str, material: str | None =
     None)`.
-- [ ] 3.3 Then change `src/l4/yolo/readiness.py`:
+- [x] 3.3 Then change `src/l4/yolo/readiness.py`:
   - `review_chain(cfg)`;
   - `ReviewIncomplete(JudgeFailed)`, with its attributes and message (D7);
   - the walk of D2: `opened`, `unusable`, `out`, the per-call `avoid` and `order(call)`, using `Factory.for_profile`

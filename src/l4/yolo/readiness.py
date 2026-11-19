@@ -4,19 +4,21 @@ The judge role reviews each unit of a plan (its folder at a revision, its plan e
 batch with more than one unit (all its units' folders together). The prompt is `prompts/readiness.md`, the answer must
 satisfy `schemas/readiness.schema.json`, and `review_plan` returns one `Verdict` per unit and per batch.
 
-The call goes through the same machinery as the verifier's judge: the first usable profile of `roles.judges`
-(`Factory.for_role`, probes, cool-downs, the login gate), an `AgentJudge`, and the judge's permission policy, which
-allows no tool at all (stricter than read-only): everything the judge may see is in the prompt, inside `<l4:data>`
-blocks, and the process runs in an empty scratch folder outside the repository, in the agent sandbox. There is no
-implementer to be independent of, so the independence rule of the verifier does not apply.
+The call goes through the same machinery as the verifier's judge: the first usable profile of the review's chain
+(`roles.plan_judges`, else `roles.judges`; `Factory.for_profile`, probes, cool-downs, the login gate), an
+`AgentJudge`, and the judge's permission policy, which allows no tool at all (stricter than read-only): everything the
+judge may see is in the prompt, inside `<l4:data>` blocks, and the process runs in an empty scratch folder outside the
+repository, in the agent sandbox. There is no implementer to be independent of, so the independence rule of the
+verifier does not apply.
 
 Rules decide the verdict whatever the model says: an empty, unparsable or schema-invalid answer is BLOCKED with a
 finding `{criterion: "schema", severity: "blocking", text: "schema_invalid: ..."}`, a blocking finding makes the
 verdict at least NEEDS_REVISION, and material the size limits cut makes it at least NEEDS_REVISION with a finding that
 names what was left out (R9), because the digest freezes content the judge never saw. Structural validity alone never
-makes a verdict READY. A usage limit, a timeout and an error of the judge are not verdicts: `RoleLimit` or
-`JudgeFailed` is raised (and `RoleUnavailable` when no judge profile can serve), so the caller can wait and nothing is
-recorded for a review that did not happen (R9).
+makes a verdict READY. A usage limit, a timeout and an error of the judge are not verdicts (R9): the review moves the
+call to the next judge of its chain (L4-YOLO-096), and a review with a call no judge answered raises `ReviewIncomplete`
+(a `JudgeFailed`, so a `RoleUnavailable`), which carries what was answered so that the caller records it and the next
+run asks only the rest (L4-YOLO-099). `RoleUnavailable` is raised plain when the chain is empty.
 
 A unit is read on the revision its digest is taken on (`digest.current_unit_ref`, R3): its branch on `origin` when it
 has one, else the target. File names, unit ids, batch ids and the plan's own words reach the prompt only inside
@@ -24,10 +26,11 @@ has one, else the target. File names, unit ids, batch ids and the plan's own wor
 """
 
 import hashlib
+import itertools
 import json
 import re
 import shutil
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path, PurePosixPath
@@ -39,13 +42,13 @@ from l4.agents.factory import Factory, Selected
 from l4.availability.cooldown import AvailabilityStore, SystemClock
 from l4.availability.errors import RoleUnavailable
 from l4.config.defaults import cache_root
-from l4.config.schema import L4Config
+from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
+from l4.exitcodes import L4Exit
 from l4.implementer.prompt import data_block, defuse
-from l4.implementer.tdd import RoleLimit
 from l4.llm.agent_judge import JUDGE_ADAPTERS, AgentJudge, Msg, StructuredResult
 from l4.proc import run_process
-from l4.sandbox.base import Sandbox, SandboxSpec, expand_credential_paths, runner_tmp_paths
+from l4.sandbox.base import Sandbox, SandboxSpec, SandboxUnavailable, expand_credential_paths, runner_tmp_paths
 from l4.sandbox.env import build_agent_env
 from l4.sandbox.home import spec_paths
 from l4.sandbox.select import select_sandbox
@@ -53,7 +56,17 @@ from l4.schemacheck import validate
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES
 from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
-from l4.yolo.model import PROFILE_NONE, Plan, PlanBatch, PlanUnit, ReviewResult, UnitInfo, Verdict, VerdictValue
+from l4.yolo.model import (
+    PROFILE_NONE,
+    JudgeFailure,
+    Plan,
+    PlanBatch,
+    PlanUnit,
+    ReviewResult,
+    UnitInfo,
+    Verdict,
+    VerdictValue,
+)
 
 SCHEMA_ID = "l4/yolo-readiness@1"
 # 2: the material changed (tasks.md shown with the digest's normalisation and the note on check marks, prerequisite
@@ -69,6 +82,7 @@ MAX_FILE_CHARS = 20_000
 MAX_FOLDER_CHARS = 80_000
 MAX_DEPENDENCY_CHARS = 20_000
 MAX_PROBLEM_CHARS = 800
+FAILURE_CHARS = 300  # a failure's detail in the record: its first line, cut here (L4-YOLO-096)
 MATERIAL_MARK = "<!-- material -->"
 ROLE = "judges"
 SCRATCH = "yolo"
@@ -506,10 +520,32 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
 # --- the judge call ------------------------------------------------------------------------------------------------
 
 
+@dataclass
+class _Reply:
+    """What one `_Calls.ask` came to: a verdict (`status` ok), or why there is none. `length_stop` is an `error` whose
+    reply stopped at the model's output limit; `run` is the run that reported a usage limit."""
+
+    status: str
+    cost: float
+    verdict: Verdict | None = None
+    detail: str = ""
+    length_stop: bool = False
+    run: Any = None
+
+
 class _Calls:
     """One judge, opened once for the whole review: its request factory writes under the plan's scratch folder."""
 
-    def __init__(self, app: AppContext, cfg: L4Config, git: Git, plan_id: str, selected: Selected, sandbox: Sandbox):
+    def __init__(
+        self,
+        app: AppContext,
+        cfg: L4Config,
+        git: Git,
+        plan_id: str,
+        selected: Selected,
+        sandbox: Sandbox,
+        counter: Iterator[int] | None = None,
+    ):
         self.app, self.cfg, self.selected, self.sandbox = app, cfg, selected, sandbox
         self.root = cache_root(app.environ, repo=app.repo) / SCRATCH / plan_id / "review"
         self.cwd, self.tmp = self.root / "cwd", self.root / "tmp"
@@ -526,15 +562,14 @@ class _Calls:
             adapter=selected.profile.adapter, network=True, runner_tmp=runner_tmp_paths(app.environ),
             cache_root=cache, tool_paths=tools, hide_own_homes=no_stored_login(selected.profile),  # L4-OCV-018
         )  # fmt: skip
-        self.count = 0
+        self.counter = counter if counter is not None else itertools.count(1)  # shared: one raw log per call
         self.judge = AgentJudge(selected.impl, self._request, role=ROLE, profile=selected.profile_name)
 
     def _request(self, prompt: str, schema: dict[str, Any], timeout_s: int) -> RunRequest:
         for folder in (self.cwd, self.tmp):
             shutil.rmtree(folder, ignore_errors=True)
             folder.mkdir(parents=True)
-        self.count += 1
-        raw = self.root / "agent-raw" / self.app.run_id / f"readiness-{self.count}.jsonl"
+        raw = self.root / "agent-raw" / self.app.run_id / f"readiness-{next(self.counter)}.jsonl"
         extra = dict(getattr(self.selected.impl, "extra_env", {}))
         return RunRequest(
             profile=self.selected.profile, role="judge", cwd=self.cwd, prompt=prompt,
@@ -544,8 +579,9 @@ class _Calls:
             wrap=lambda argv, env, cwd=None: self.sandbox.wrap(argv, self.spec, env, cwd), host_env=self.app.environ,
         )  # fmt: skip
 
-    def ask(self, subject: Subject, *, timeout_s: int, digest: str | None) -> tuple[Verdict, float]:
-        """At most two calls: a break of the schema gets one repair prompt. Returns the verdict and the cost."""
+    def ask(self, subject: Subject, *, timeout_s: int, digest: str | None) -> _Reply:
+        """At most two calls: a break of the schema gets one repair prompt. The reply says what came of it and what it
+        cost; the review decides what a failure means (L4-YOLO-096)."""
         first = [Msg("user", self.app.redactor.redact_text(subject.user))]
         messages = first
         system = _fill(SYSTEM_TEMPLATE, {"SUBJECT_KIND": subject.kind})
@@ -556,13 +592,13 @@ class _Calls:
                 system, messages, READINESS_SCHEMA, effort=None, max_tokens=0, timeout_s=timeout_s
             )
             cost += result.usage.cost_usd or 0.0
-            if result.status == "limit":
-                assert result.run is not None
-                raise RoleLimit(result.run)
-            if result.status in ("timeout", "error"):
-                raise JudgeFailed(result.detail or result.status)  # R9: not a verdict, nothing is recorded
             if result.status == "ok":
-                return verdict_of(result.parsed, digest=digest), cost
+                return _Reply("ok", cost, verdict_of(result.parsed, digest=None))
+            if result.status != "schema_invalid":  # limit, timeout or error: not a verdict (R9)
+                return _Reply(
+                    result.status, cost, detail=result.detail or result.status, length_stop=result.length_stop,
+                    run=result.run,
+                )  # fmt: skip
             detail = result.detail  # schema_invalid: the paths, never the values
             problem = detail if len(detail) <= MAX_PROBLEM_CHARS else detail[: MAX_PROBLEM_CHARS - 1] + "…"
             rejected = result.raw
@@ -574,7 +610,203 @@ class _Calls:
                     "user", f"Your reply did not satisfy the schema ({problem}). Reply again with the JSON object only."
                 ),
             ]
-        return _with_digest(blocked(f"schema_invalid: {detail or 'no valid answer'}"), digest), cost
+        return _Reply("schema_invalid", cost, detail=detail or "no valid answer")
+
+
+# --- the walk of the chain -----------------------------------------------------------------------------------------
+
+
+def review_chain(cfg: L4Config) -> tuple[str, list[str]]:
+    """The role and the profiles that review a plan (L4-YOLO-095): `roles.plan_judges` when it is not empty, else
+    `roles.judges`. The two lists are never joined."""
+    if cfg.roles.plan_judges:
+        return "plan_judges", list(cfg.roles.plan_judges)
+    return ROLE, list(cfg.roles.judges)
+
+
+class ReviewIncomplete(JudgeFailed):
+    """A review with a call that has no answer (L4-YOLO-099): no judge was left for it (`no_judge`), a call timed out
+    (`timeout`) or the CI job had no time for the next call (`job_time`). `answered` holds what this run judged (parts
+    included; reuses and verdicts with a harness finding are left out), so the caller can keep it. A `JudgeFailed`, so a
+    caller that only knows `RoleUnavailable` keeps working."""
+
+    def __init__(
+        self,
+        reason: str,
+        answered: Mapping[str, Verdict],
+        left: Sequence[str],
+        failures: Sequence[JudgeFailure],
+        cost: float,
+    ) -> None:
+        self.reason = reason
+        self.answered = dict(answered)
+        self.left = tuple(left)
+        self.failures = tuple(failures)
+        self.cost = cost
+        why = "; ".join(f"{f.profile}: {f.subject or 'selection'}: {f.kind}: {f.detail}" for f in self.failures)
+        head = f"the review is incomplete ({reason}): {len(self.answered)} answered, {len(self.left)} left"
+        super().__init__(f"{head}; {why}" if why else head)
+
+
+@dataclass
+class _Call:
+    """One call of the review: a unit, a batch asked whole, or (L4-YOLO-098) a part of a batch."""
+
+    name: str
+    subject: Subject
+    digest: str | None
+    key: str
+
+
+@dataclass
+class _Outcome:
+    kind: str  # "answered" | "none"
+    verdict: Verdict | None = None
+    judge: str | None = None
+
+
+def _failure_text(app: AppContext, detail: str) -> str:
+    first = (app.redactor.redact_text(detail).strip().splitlines() or [""])[0]
+    return first[:FAILURE_CHARS]
+
+
+class _Walk:
+    """The judges of one review (design D2): which are opened, which are out, and what each call has been through."""
+
+    def __init__(
+        self,
+        app: AppContext,
+        cfg: L4Config,
+        git: Git,
+        plan: Plan,
+        *,
+        adapters: Mapping[str, AgentAdapter] | None,
+        sandbox: Sandbox | None,
+        sandbox_for: Callable[[str, str], Sandbox] | None,
+        timeout_s: int,
+        time_left: Callable[[], float | None] | None,
+        failed_before: Mapping[str, Sequence[str]],
+    ) -> None:
+        self.app, self.cfg, self.git, self.plan = app, cfg, git, plan
+        self.adapters, self.sandbox, self.sandbox_for = adapters, sandbox, sandbox_for
+        self.timeout_s, self.time_left, self.failed_before = timeout_s, time_left, failed_before
+        self.role, chain = review_chain(cfg)
+        self.chain = list(dict.fromkeys(chain))
+        self.opened: dict[str, _Calls] = {}
+        self.unusable: set[str] = set()
+        self.out: set[str] = set()  # discarded for the rest of the review (error, limit)
+        self.failures: list[JudgeFailure] = []
+        self.sandbox_errors: list[L4Exit] = []
+        self.cost = 0.0
+        self.stop: str | None = None  # "timeout" | "job_time": no further call is asked in this run
+        self._factory: Factory | None = None
+        self._counter = itertools.count(1)
+
+    def factory(self) -> Factory:
+        if self._factory is None:
+            app = self.app
+            self._factory = Factory(
+                self.cfg,
+                ProbeCtx(app.environ, cache_root(app.environ, repo=app.repo), run_process, forbid=(app.repo,)),
+                adapters=self.adapters,
+                availability=AvailabilityStore(cache_root(app.environ, repo=app.repo)),
+                clock=SystemClock(),
+            )
+        return self._factory
+
+    def fail(self, profile: str, call: _Call | None, kind: str, detail: str) -> None:
+        self.failures.append(
+            JudgeFailure(
+                profile, call.name if call else "", kind, _failure_text(self.app, detail), call.key if call else None
+            )
+        )
+
+    def _open(self, name: str) -> bool:
+        """Select the profile alone and make its sandbox; a failure puts it out of the review, named (kind `unusable`
+        with the selection's reason, or `sandbox`)."""
+        try:
+            selected = self.factory().for_profile(self.role, f"plan:{self.plan.plan_id}", name, serves=JUDGE_ADAPTERS)
+        except RoleUnavailable as exc:
+            self.unusable.add(name)
+            self.fail(name, None, "unusable", str(exc))
+            return False
+        try:
+            if self.sandbox_for is not None:
+                chosen = self.sandbox_for(selected.profile.adapter, selected.profile_name)
+            else:
+                chosen = self.sandbox or select_sandbox(self.cfg.sandbox, self.app.environ, repo=self.app.repo)
+        except SandboxUnavailable as exc:
+            self.unusable.add(name)
+            self.sandbox_errors.append(exc)
+            self.fail(name, None, "sandbox", str(exc))
+            return False
+        self.opened[name] = _Calls(self.app, self.cfg, self.git, self.plan.plan_id, selected, chosen, self._counter)
+        return True
+
+    def order(self, call: _Call, first: str | None = None) -> list[str]:
+        """The chain with the judges that failed this material in an earlier run at the end (D5), and `first`, the judge
+        that stopped the whole batch, at the front."""
+        bad = set(self.failed_before.get(call.key, ()))
+        names = [n for n in self.chain if n not in bad] + [n for n in self.chain if n in bad]
+        if first in names:
+            names.remove(first)
+            names.insert(0, first)
+        return names
+
+    def _pick(self, call: _Call, avoid: Collection[str], first: str | None) -> str | None:
+        for name in self.order(call, first):
+            if name in self.unusable or name in self.out or name in avoid:
+                continue
+            if name in self.opened or self._open(name):
+                return name
+        return None
+
+    def _no_time(self) -> bool:
+        left = self.time_left() if self.time_left is not None else None
+        if left is not None and left < self.timeout_s:
+            self.stop = "job_time"
+            return True
+        return False
+
+    def ask(self, call: _Call, *, first: str | None = None) -> _Outcome:
+        """The first judge of the chain that is not discarded for this call, and the next after each failure (D2). The
+        verdict is the judge's as `verdict_of` made it: the caller amends it."""
+        avoid: set[str] = set()
+        schema: tuple[str, str] | None = None  # the last judge that broke the schema on this call, and the paths
+        while True:
+            name = self._pick(call, avoid, first)
+            if name is None:
+                break
+            if self._no_time():
+                return _Outcome("none")
+            calls = self.opened[name]
+            reply = calls.ask(call.subject, timeout_s=self.timeout_s, digest=call.digest)
+            self.cost += reply.cost
+            if reply.verdict is not None:
+                return _Outcome("answered", replace(reply.verdict, digest=call.digest), name)
+            if reply.status == "schema_invalid":
+                schema = (name, reply.detail)
+                avoid.add(name)
+                self.fail(name, call, "schema_invalid", reply.detail)
+            elif reply.status == "limit":
+                assert reply.run is not None
+                self.factory().cool_limited(calls.selected, reply.run)
+                self.out.add(name)
+                self.fail(name, call, "limit", reply.detail)
+            elif reply.status == "timeout":
+                self.fail(name, call, "timeout", reply.detail)
+                self.stop = "timeout"
+                return _Outcome("none")
+            elif reply.length_stop:
+                avoid.add(name)
+                self.fail(name, call, "length", reply.detail)
+            else:
+                self.out.add(name)
+                self.fail(name, call, "error", reply.detail)
+        if schema is not None:  # a judge answered off the schema and none is left: BLOCKED, as with one judge
+            blocked_verdict = _with_digest(blocked(f"schema_invalid: {schema[1]}"), call.digest)
+            return _Outcome("answered", blocked_verdict, schema[0])
+        return _Outcome("none")
 
 
 # --- the public functions ------------------------------------------------------------------------------------------
@@ -612,6 +844,7 @@ def _reused(entry: Mapping[str, Any], key: str, digest: str | None) -> Verdict:
         digest,
         key,
         entry.get("at") or entry.get("reused_from"),
+        entry.get("judge"),
     )
 
 
@@ -626,7 +859,7 @@ def review_plan_costed(
     adapters: Mapping[str, AgentAdapter] | None = None,
     digest_of: DigestOf | None = None,
     sandbox: Sandbox | None = None,
-    timeout_s: int = DEFAULT_TIMEOUT_S,
+    timeout_s: int | None = None,
     done: Collection[str] = (),
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
     prior: Mapping[str, Mapping[str, Any]] = {},  # noqa: B006 - read only
@@ -635,22 +868,32 @@ def review_plan_costed(
     budgets: Budgets | None = None,
     sandbox_for: Callable[[str, str], Sandbox] | None = None,
     refuse_fresh_of_prior: bool = False,
+    time_left: Callable[[], float | None] | None = None,
+    failed_before: Mapping[str, Sequence[str]] = {},  # noqa: B006 - read only
 ) -> tuple[ReviewResult, float]:
-    """`review_plan` and the cost in dollars the judge reported (what the plan step charges to the plan). `done` names
+    """`review_plan` and the cost in dollars the judges reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
     not asked about them (they are READY, with their digest when their folder is there) and a batch is reviewed on its
     other units. A batch of done units only is READY. `delivered` (`delivered_on_target`) names the units already
     finished on the target; the judge is told a dependency on one of them is satisfied.
 
-    `prior` maps a material key to a recorded entry (`plan.reviewed`): a subject whose key is there and whose name
-    (`Subject.name`) is not in `fresh` gets that verdict again (`reused_from`), with no judge call and no cost, unless
-    the entry is no review (a harness `schema`, `unit_missing` or `completeness` finding). `revs` replaces the revision
-    every unit and prerequisite is read on (the working-tree snapshot). The judge and its sandbox are created only when
-    a subject is judged; `sandbox_for(adapter, profile)` then replaces `sandbox` and `select_sandbox`. With
-    `refuse_fresh_of_prior`, a subject named in `fresh` whose material is already in `prior` raises `FreshRefused`
-    before any judge call (a recorded review is not re-rolled)."""
+    `prior` maps a material key to a recorded entry (`plan.reviewed`, `plan.review_incomplete`): a subject whose key is
+    there and whose name (`Subject.name`) is not in `fresh` gets that verdict again (`reused_from`), with no judge call
+    and no cost, unless the entry is no review (a harness `schema`, `unit_missing` or `completeness` finding). `revs`
+    replaces the revision every unit and prerequisite is read on (the working-tree snapshot).
+
+    The review walks the chain of `review_chain` for each call (L4-YOLO-096): a judge is opened, with its sandbox,
+    when a call first reaches it (`sandbox_for(adapter, profile)` replaces `sandbox` and `select_sandbox`), and a
+    call a judge cannot answer goes to the next one. `timeout_s` bounds each call (default `yolo.review.timeout`);
+    `time_left` is the seconds a CI job has left, and a call starts only when it is at least `timeout_s`;
+    `failed_before` maps a material key to the judges that failed it in an earlier run, asked last. A review with
+    a call no judge answered raises `ReviewIncomplete` (L4-YOLO-099). With `refuse_fresh_of_prior`, a subject
+    named in `fresh` whose material is already in `prior` raises `FreshRefused` before any judge call (a recorded
+    review is not re-rolled)."""
     revs = _unit_revs(git, cfg, plan, units, rev) if revs is None else _given_revs(plan, units, revs, rev)
     limits = budgets or Budgets.of(cfg)
+    if timeout_s is None:
+        timeout_s = duration_seconds(cfg.yolo.review.timeout)
     digest_fn = digest_of or unit_digest  # on the revision a unit is read on: `current_unit_digest` of that unit (R3)
     folders: dict[str, FolderText] = {}
     for unit in plan.units():
@@ -712,7 +955,6 @@ def review_plan_costed(
             subjects.append(
                 (_batch_subject(plan, batch, folders, done, batch_deps, delivered, limits.dependency), None)
             )
-    cost = 0.0
     asked: list[tuple[Subject, str | None, str]] = []
     refused: list[str] = []
     for subject, digest in subjects:
@@ -726,30 +968,37 @@ def review_plan_costed(
             asked.append((subject, digest, key))
     if refused:
         raise FreshRefused(tuple(refused))
-    if asked:
-        factory = Factory(
-            cfg,
-            ProbeCtx(app.environ, cache_root(app.environ, repo=app.repo), run_process, forbid=(app.repo,)),
-            adapters=adapters,
-            availability=AvailabilityStore(cache_root(app.environ, repo=app.repo)),
-            clock=SystemClock(),
-        )
-        selected = factory.for_role(ROLE, f"plan:{plan.plan_id}", serves=JUDGE_ADAPTERS)
-        if sandbox_for is not None:
-            chosen = sandbox_for(selected.profile.adapter, selected.profile_name)
-        else:
-            chosen = sandbox or select_sandbox(cfg.sandbox, app.environ, repo=app.repo)
-        calls = _Calls(app, cfg, git, plan.plan_id, selected, chosen)
-        for subject, digest, key in asked:
-            verdict, spent = calls.ask(subject, timeout_s=timeout_s, digest=digest)
-            cost += spent
-            verdict = replace(_amend(verdict, subject), material=key)
-            (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
+    walk = _Walk(
+        app, cfg, git, plan, adapters=adapters, sandbox=sandbox, sandbox_for=sandbox_for, timeout_s=timeout_s,
+        time_left=time_left, failed_before=failed_before,
+    )  # fmt: skip
+    if asked and not walk.chain:
+        raise RoleUnavailable(walk.role, "no profile is configured for it under roles")
+    answered: dict[str, Verdict] = {}  # what this run judged, for a review that does not finish (L4-YOLO-099)
+    left_over: list[str] = []
+    for subject, digest, key in asked:
+        call = _Call(subject.name, subject, digest, key)
+        if walk.stop is not None:
+            left_over.append(call.name)
+            continue
+        outcome = walk.ask(call)
+        if outcome.kind != "answered" or outcome.verdict is None:
+            left_over.append(call.name)
+            continue
+        verdict = replace(_amend(outcome.verdict, subject), material=key, judge=outcome.judge)
+        (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
+        if _reusable({"findings": verdict.findings}):
+            answered[call.name] = verdict
+    if left_over:
+        if walk.sandbox_errors and not answered and all(f.kind == "sandbox" for f in walk.failures):
+            raise walk.sandbox_errors[0]  # every judge was refused its sandbox: exit 3, as with one judge (SCN-YOLO-61)
+        reason = walk.stop or "no_judge"
+        raise ReviewIncomplete(reason, answered, left_over, walk.failures, walk.cost)
     for batch in plan.batches:  # a batch with a unit that cannot be reviewed is not reviewed as a whole either
         if len(batch.units) > 1 and batch.id not in result_batches:
             result_batches[batch.id] = blocked("unit_missing: a unit of the batch has no folder to review")
     ordered = {u.id: result_units[u.id] for u in plan.units()}
-    return ReviewResult(ordered, result_batches), cost
+    return ReviewResult(ordered, result_batches, tuple(walk.failures)), walk.cost
 
 
 def review_plan(
@@ -784,10 +1033,12 @@ __all__ = [
     "FreshRefused",
     "JudgeFailed",
     "Omission",
+    "ReviewIncomplete",
     "Subject",
     "delivered_on_target",
     "material_key",
     "read_folder",
+    "review_chain",
     "review_plan",
     "review_plan_costed",
     "verdict_of",

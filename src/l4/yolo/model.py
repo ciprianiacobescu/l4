@@ -256,12 +256,29 @@ class Verdict:
     digest: str | None = None  # the unit digest (units) the review was for
     material: str | None = None  # the material key of the judgement (readiness.material_key)
     reused_from: str | None = None  # the `at` of the event whose judgement was reused (no judge call)
+    judge: str | None = None  # the profile that answered; for a batch in parts, the distinct profiles of its parts
+    parts: tuple[tuple[str, "Verdict"], ...] = ()  # a batch reviewed in parts: (part name, the part's raw verdict)
+
+
+@dataclass(frozen=True)
+class JudgeFailure:
+    """A judge discarded or skipped in a readiness review (L4-YOLO-096): `subject` is empty for a skip at selection,
+    `kind` is `unusable`, `sandbox`, `error`, `length`, `schema_invalid`, `limit` or `timeout`, `detail` is redacted and
+    cut to its first line and 300 characters, `material` is the key of the call (the next run asks it of the other
+    judges first)."""
+
+    profile: str
+    subject: str
+    kind: str
+    detail: str
+    material: str | None = None
 
 
 @dataclass(frozen=True)
 class ReviewResult:
     units: dict[str, Verdict]
     batches: dict[str, Verdict]  # batch id -> verdict, only batches with more than one unit
+    failures: tuple[JudgeFailure, ...] = ()  # the judges discarded or skipped on the way (L4-YOLO-096)
 
 
 # --- D8, D9: merge and post-merge ----------------------------------------------------------------------------------
