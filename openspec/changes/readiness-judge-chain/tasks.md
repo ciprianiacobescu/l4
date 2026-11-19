@@ -216,7 +216,7 @@ Rules for every task:
 
 ## 5. The record of a review that does not finish, and its readers (D7; L4-YOLO-099, L4-YOLO-022)
 
-- [ ] 5.1 Write the pure tests first, in a new `tests/unit/yolo/test_yolo_findings_incomplete.py`, with `PlanEvent`s
+- [x] 5.1 Write the pure tests first, in a new `tests/unit/yolo/test_yolo_findings_incomplete.py`, with `PlanEvent`s
   built by hand (see `tests/unit/yolo/yolo_review_events.py`):
   - `prior_entries` reads the `answered` entries of a `plan.review_incomplete`, with `at` = the event's `at`. It also
     reads the `parts` rows of a `plan.reviewed` batch entry. It skips a harness `schema` entry and another prompt
