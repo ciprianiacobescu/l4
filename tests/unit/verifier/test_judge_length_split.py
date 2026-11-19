@@ -318,6 +318,22 @@ def test_scn_ver_266_with_no_judge_left_the_round_has_no_capacity_and_names_the_
         one_prompt.ask(Limited(0))
 
 
+def test_scn_ver_266_the_stored_detail_of_a_length_stop_keeps_the_key_the_hint_names(one_prompt):
+    """The detail is the batch prefix, the stop and the adapter's hint: the cut must not end before the key's name."""
+    from l4.agents.opencode import _HINT_LENGTH_V1
+
+    world = one_prompt
+    hinted = f"{LENGTH}; {_HINT_LENGTH_V1}"
+
+    def serve(call, n):
+        return StructuredResult("error", detail=hinted, length_stop=True, usage=Usage(cost_usd=0.01))
+
+    second, next_judge, _ = backup()
+    world.ask(Limited(0, serve=serve), next_judge=next_judge)
+    (error,) = world.data("availability.judge_error")
+    assert error["detail"].startswith("batch of ") and "options.max_output_tokens" in error["detail"]
+
+
 def test_scn_ver_266_a_batch_that_errors_for_another_reason_discards_the_judge_too(one_prompt):
     world = one_prompt
 

@@ -67,5 +67,5 @@ Non-goals: the repair chore's prompt (it has its own `Tests to repair` block); t
   `src/l4/specs/openspec.py` (`_proposal`), `src/l4/specs/kiro.py` (`_fix_design`), `src/l4/implementer/prompt.py`
   (`PromptContext.failing_tests`), `src/l4/implementer/tdd.py` (`run_single`, `step_or_replay`, `agent_step`,
   `_prompt`), `src/l4/implementer/loop.py` (`_raise_blocked`, `_questions`, `_run_task`).
-- `docs/SPEC.md` (L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561, change-table row 134), `CHANGELOG.md`.
+- `docs/SPEC.md` (L4-VER-078, L4-IMP-102, SCN-VER-308..311, SCN-IMP-557..561 and 565, change-table row 134), `CHANGELOG.md`.
 - `verdict.json` grows by at most 2 x 20 x 600 characters of excerpt (the keys, ids and JSON around them are not counted); no new ledger event; no configuration key.

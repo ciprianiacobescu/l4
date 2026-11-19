@@ -106,7 +106,9 @@ Before the person reviews the plan, run the same review yourself and fix what it
 3. `l4 yolo findings <id> --worktree --json` (the dry run records nothing, so without `--worktree` it is empty). For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
    wording. A batch with a minor finding of criterion `parts` was reviewed in parts (no judge saw two units' full text
-   together): it is a note, not work, and a READY batch with it needs nothing.
+   together): it is a note, not work, and a READY batch with it needs nothing. If the batch was split because an opencode
+   judge stopped at its output limit, set `options.max_output_tokens` on that judge's profile to the model's maximum
+   output and the batch can often be judged whole (runbook 10.10).
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
 5. When every subject is READY, commit and push, then run `l4 yolo review <id> --worktree --record` (it refuses while
    HEAD is not `origin/<base>`; anything not already on the ledger is judged again, and that verdict is the one

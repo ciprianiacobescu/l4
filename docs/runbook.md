@@ -1295,7 +1295,47 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > ready (`the e2e server was not ready (see <log>)`, with the end of the log). The files that the build and the browser
 > run write are not committed. A browser test that errors before any check (kind `error` under the gate `e2e`) cannot be
 > repaired by a fix task, because a fix task may not change tests: its attempts fail, and the unit halts on
-> `max_task_attempts`. A person corrects the test on `<branch>`, then retries ([8](#8-how-to-retry-something)).
+> `max_task_attempts`. A person corrects the test on `<branch>`, then retries ([8](#8-how-to-retry-something)). From
+> 0.4.59 such a test is usually met earlier, in the green step of the task that wrote it, where the task can still be
+> unfrozen (see the NOTE on browser tests of a task below).
+
+> **NOTE:** From 0.4.59, the green step of a task whose red commit added browser tests (or changed their definition) runs
+> them, so a wrong browser test is met where the task can still be unfrozen and fixed, not first at verification.
+> The browser tests of a task are the Python tests under the e2e test directory that the red commit added, read from git,
+> so a red that a later run resumes counts the same. When `gates.e2e` is configured and the task has such tests, its green
+> step runs `gates.build` (when configured) and then the e2e gate (`e2e-task`), last: after the test gate, the static
+> gates and any held check, and before the commit. A red step that commits a red never runs it; a red step that finishes
+> a task as already satisfied runs it before its commit.
+>
+> - **What refuses the attempt.** Only a failure that the e2e run itself shows: one of the task's browser tests failed
+>   or errored (`the task's browser tests do not pass: <ids>`, with their failure text in the next prompt), a module of
+>   the task that pytest could not collect, a gate that timed out or left no readable report, a failed build
+>   (`gates.build failed before the e2e gate: …`) or a server that is not ready. The other tests of the e2e report and the
+>   gate's exit code are not judged at the step; verification step 3 judges the whole gate.
+> - **Tests the report does not show** (not collected, a name that cannot be mapped, a skipped test, a test that a
+>   person's answer removed) do not block the step. The ledger records `e2e.task_tests_unseen` and the run log says so;
+>   verification step 3 runs them as before.
+> - **A skipped run.** The run is skipped, and no build or e2e run is paid for, when the e2e gate cannot tell the task's
+>   browser tests from the rest of its directory: the e2e command selects tests with `-m` or `-k`, or the e2e directory is
+>   shared with the unit gate's tests. The ledger records `e2e.task_run_skipped` with the reason; step 3 runs them.
+> - **A git read failure** while the harness reads the task's browser tests gives no tests for that step, the ledger event
+>   `e2e.task_tests_unread` and a warning. It does not fail the step.
+> - **The deadline.** The cap of the run's deadline for a green step grows by 3 × `gates.timeout` only for a step that
+>   runs this check. A green attempt of such a task costs one build and one e2e run, each bounded by `gates.timeout`; a
+>   task without browser tests costs nothing more.
+> - **Frozen or not.** When `tdd.test_globs` covers the e2e directory, the browser tests are frozen like the other red
+>   tests: a wrong one is a technical question whose first option is the edit. Otherwise the green prompt says they are
+>   not frozen and a wrong one may be corrected.
+
+> **NOTE:** From 0.4.59, a fix task carries the failure text of the tests it is about. Verification records, for the
+> first 20 failing tests of each gate, a redacted `excerpt` (at most 8 lines and 600 characters) in the `failures` map of
+> `verdict.json`. A fix task whose findings name failing tests gets a block of them (8 tests and 6,000 characters at
+> most, the rest counted) in the fix unit's `proposal.md` (OpenSpec) or `design.md` (Kiro), never in `tasks.md`, in
+> the first prompt of its chore, and in the questions of the chore. A question that the harness raises for a fix chore, or
+> after a failed attempt, keeps these harness notes in a `### Harness notes` subsection between `### Options` and
+> `### Answer`. The subsection is not part of the Context or the Options, so an answer cannot use what it says to unfreeze
+> a file: what a question names is judged against its title, Context and Options only. An answer text that holds the
+> heading is refused as structure.
 
 > **NOTE:** A fix chore whose only edit was put back by a guard fails its attempt with `nothing changed: the guard put back
 > every edit (<paths>)` (from 0.4.45). Before, it was ticked done in a commit of `tasks.md` and the ledger alone. Any guard
@@ -2799,7 +2839,10 @@ These limits make operation more difficult. Know them before you start.
 - A unit whose own new browser test is broken (it errors before any check) cannot be repaired by a fix task from
   0.4.45: the fix chore runs the browser tests, fails its attempts, and the unit halts on `max_task_attempts` for a
   person to correct the test ([7.2](#72-halted)). Before 0.4.45 such a chore could be ticked done by a no-op or bend
-  correct code to suit the test.
+  correct code to suit the test. From 0.4.59 the green step of the task that wrote a browser test runs it, so a wrong
+  test is usually met there and not first at verification. That step is skipped, and verification step 3 runs the test
+  as before, when the e2e command selects tests (`-m`, `-k`) or shares a directory with the unit tests, when the test
+  is not in the report, and for browser tests in another language or in a support-only change.
 - A lock does not protect a local run against a CI run on another computer. A local `l4 retry`, `l4 resume` or
   `l4 restart` while CI works on the same unit can fail with exit 1.
 - Without the forge credentials, `l4 status` in GitHub Actions stops with `internal error: GitError` instead of a
@@ -3041,7 +3084,9 @@ verdict carries one minor finding that says so (`this batch was reviewed in part
 together, so defects visible only across units may be missed`). It blocks nothing, also when a person accepts the
 batch: it is not carried into the accepted findings of a unit, so no verifier answers it and no `merge: auto` unit
 waits for it. `l4 yolo findings` shows it, even for a READY batch (it is not counted among the minor findings), and
-`l4 yolo status` lists the batches judged in parts. Read the interfaces the batch's units share
+`l4 yolo status` lists the batches judged in parts. A batch split after an opencode judge stopped at its output
+limit can often be judged whole with `options.max_output_tokens` on that judge's profile
+([10.10](#1010-the-output-limit-of-an-opencode-profile)). Read the interfaces the batch's units share
 together yourself. If the size
 limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names the file, its
 size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000), `max_folder_chars` (80,000)

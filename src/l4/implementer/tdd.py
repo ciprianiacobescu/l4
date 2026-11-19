@@ -87,7 +87,7 @@ from l4.implementer.discrimination import (
     vacuity_check,
 )
 from l4.implementer.earlier_red import VIA, EarlierRed, confirmed_by_earlier_red
-from l4.implementer.excerpt import failure_excerpt, lint_excerpt
+from l4.implementer.excerpt import _redact_keys, failure_excerpt, lint_excerpt
 from l4.implementer.gateconfig import config_files, revert_gate_config
 from l4.implementer.guards import (
     IGNORE_FILE_GLOBS,
@@ -2950,7 +2950,10 @@ def _log_tail(wb: Workbench, path: Path | None) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
-    return wb.redactor.redact_text(text[-MAX_LOG_EXCERPT:])
+    # redact the whole log, then cut: a block the cut would split is already gone, and one that the log itself holds
+    # half is removed to the edge by the excerpt rule (the same rule as every failure excerpt)
+    redact = wb.redactor.redact_text
+    return _redact_keys(redact, redact(text)[-MAX_LOG_EXCERPT:])
 
 
 MAX_LOG_EXCERPT = 2000

@@ -1966,7 +1966,7 @@ def _ask_judges(
                 requested=vc.seat.expect_model, served=judged.model_resolved,
             )  # fmt: skip
         else:  # a judge that cannot answer (a rejected tool call, an upstream 5xx) must not strand the unit
-            wb.emit("availability.judge_error", role="judges", profile=vc.judge_profile, detail=judged.detail[:200])
+            wb.emit("availability.judge_error", role="judges", profile=vc.judge_profile, detail=judged.detail[:300])
         if vc.next_judge is None:
             break
         vc.judge, vc.judge_profile = vc.next_judge(judged.status, None)

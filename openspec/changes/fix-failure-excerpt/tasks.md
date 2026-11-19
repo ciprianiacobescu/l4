@@ -1,5 +1,5 @@
-Read `design.md` first (D1-D8). Requirements: L4-VER-078 and L4-IMP-102 (`docs/SPEC.md`), scenarios SCN-VER-308..310
-and SCN-IMP-557..561. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory, never
+Read `design.md` first (D1-D8). Requirements: L4-VER-078 and L4-IMP-102 (`docs/SPEC.md`), scenarios SCN-VER-308..311
+and SCN-IMP-557..561 and 565. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory, never
 two runs at once, and never a wait loop on `pgrep`. Secrets in tests: use a token shape the redactor knows
 (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`, as `tests/unit/implementer/test_excerpt_redaction.py` does); build a private-key
 block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the test file never holds a key marker.
@@ -95,7 +95,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 5. Checks
 
-- [x] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561 and change-table row 134.
+- [x] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..311, SCN-IMP-557..561 and 565 and change-table row 134.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

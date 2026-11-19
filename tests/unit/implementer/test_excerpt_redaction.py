@@ -60,3 +60,36 @@ def test_s2_a_configured_value_never_leaks_a_prefix_into_a_reason(tmp_path: Path
         GateResult("test-presatisfied", "fail", "exit 2", 2, log, None), real, redact=redactor.redact_text
     )
     assert SECRET[:6] not in nothing.reason
+
+
+# --- the tail of an e2e server log: it is redacted whole, then cut ---------------------------------------------------
+
+_BEGIN = "-----BEGIN " + "PRIVATE " + "KEY" + "-----"
+_END = "-----END " + "PRIVATE " + "KEY" + "-----"
+_BODY = [f"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC{n:04d}" for n in range(30)]
+
+
+def _tail(tmp_path: Path, log: str) -> str:
+    from types import SimpleNamespace
+
+    from l4.implementer.tdd import _log_tail
+
+    path = tmp_path / "server.log"
+    path.write_text(log)
+    return _log_tail(SimpleNamespace(redactor=Redactor({})), path)  # type: ignore[arg-type]
+
+
+def test_a_key_block_that_begins_before_the_cut_leaves_no_key_body_in_the_log_tail(tmp_path: Path):
+    block = "\n".join([_BEGIN, *_BODY, _END])
+    log = "start\n" + block + "\nlistening on 3000\n" + "z" * 300 + "\n"
+    assert log.index(_BEGIN) < len(log) - 2000 < log.index(_END)  # the old cut fell inside the block
+    tail = _tail(tmp_path, log)
+    assert not any(line in tail for line in _BODY) and _BEGIN not in tail and _END not in tail
+    assert "listening on 3000" in tail
+
+
+def test_a_half_key_block_in_the_log_itself_is_removed_to_the_edge_of_the_tail(tmp_path: Path):
+    log = "boot\n" + "\n".join([_BEGIN, *_BODY])  # the process died inside the block: no END marker
+    tail = _tail(tmp_path, log)
+    assert not any(line in tail for line in _BODY) and _BEGIN not in tail and tail.startswith("boot")
+    assert not any(line in _tail(tmp_path, "\n".join([*_BODY, _END, "after"])) for line in _BODY)
