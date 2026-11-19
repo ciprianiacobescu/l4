@@ -179,3 +179,19 @@ def test_the_previous_attempt_note_comes_before_greens_unfreeze_note(make_bench)
     context = (bench.wb.ref.path / "questions.md").read_text().split("the test is wrong", 1)[1]
     assert REJECTED in context and "frozen" in context
     assert context.index(REJECTED) < context.index("frozen")
+
+
+def test_a_full_size_block_leaves_the_fix_task_note_last_and_whole(make_bench, monkeypatch):
+    lines = "\n".join(f"E   line {n} " + "z" * 60 for n in range(8))
+    many = {
+        f"e2e.test_big::test_{n:02}": {"gate": "e2e", "kind": "assertion", "message": "m", "excerpt": lines}
+        for n in range(12)
+    }
+    bench = make_bench([Step(structured=result("single", status="blocked", questions=[ASKING]))])
+    seed_round(bench, failures=many)
+    text = asked_in_a_chore(bench, monkeypatch)
+    context = text.split("the fixture must change", 1)[1].split("### Options", 1)[0]
+    assert len(context) > 5000 and context.count("(assertion, e2e):") == 8
+    assert "and 4 more failing tests" in context
+    assert context.index(NOTE) < context.index("Harness note: this is a fix task.")
+    assert context.rstrip().endswith(f'`l4 questions answer Q-NNN --unit {bench.wb.ref.id} --text "..."`).')

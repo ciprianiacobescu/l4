@@ -62,13 +62,19 @@ def test_the_block_shows_at_most_eight_tests_and_counts_the_rest():
     assert "t.m::t07" in block and "t.m::t08" not in block  # sorted, whole tests only
 
 
-def test_the_block_is_cut_at_6000_characters_at_a_test_boundary():
+def test_the_block_is_cut_at_6000_characters_at_a_test_boundary_the_closing_count_included():
     big = {
         f"t.m::t{n}": {"gate": "test", "kind": "assertion", "excerpt": "\n".join(["E   " + "x" * 90] * 8)}
         for n in range(8)
     }
     block = failure_block(big, list(big))
     assert len(block) <= MAX_FAILURE_BLOCK_CHARS and block.count("(assertion, test):") < 8
-    assert "more failing tests" in block.splitlines()[-1]
-    one = {"t.m::a": {"gate": "test", "kind": "assertion", "excerpt": "E   " + "y" * 7000}}
-    assert failure_block(one, ["t.m::a"]).startswith("t.m::a (assertion, test):")  # the first test is never lost
+    assert block.splitlines()[-1].startswith("and ") and "more failing tests" in block.splitlines()[-1]
+    assert all(line.startswith(("t.m::t", "  ", "and ")) for line in block.splitlines())  # whole tests only
+
+
+def test_one_test_over_the_bound_is_cut_to_it_and_counted_with_the_rest():
+    one = {f"t.m::{n}": {"gate": "test", "kind": "assertion", "excerpt": "E   " + "y" * 7000} for n in "ab"}
+    block = failure_block(one, list(one))
+    assert len(block) <= MAX_FAILURE_BLOCK_CHARS and block.startswith("t.m::a (assertion, test):")
+    assert block.splitlines()[-1] == "and 1 more failing tests (the round's verdict.json)"

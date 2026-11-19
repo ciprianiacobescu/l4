@@ -445,3 +445,7 @@ def test_the_verdict_of_a_failed_e2e_gate_records_the_failing_test_with_its_gate
         verdict["failures"][test_id]["message"].startswith("assert ")
         and "\n" not in verdict["failures"][test_id]["message"]
     )
+    # L4-VER-078 through the real ladder: the record also holds the lines the retry prompt would show, bounded
+    excerpt = verdict["failures"][test_id]["excerpt"]
+    assert "assert" in excerpt and len(excerpt.splitlines()) <= 8 and len(excerpt) <= 600
+    assert str(run.tdd.cache) not in excerpt  # paths are relative to the worktree

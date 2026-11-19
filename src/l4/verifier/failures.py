@@ -11,7 +11,8 @@ TESTS_RAN_TITLES = ("new tests failed", "new tests errored")  # `check_tests_ran
 COLLECTION_KIND = "collection"  # the `kind` of a module the gate could not collect
 _CUT_LIST = re.compile(r" and \d+ more$")
 MAX_SHOWN_FAILURES = 8  # tests a failure block shows (L4-IMP-102); the rest are counted
-MAX_FAILURE_BLOCK_CHARS = 6000  # the whole block
+MAX_FAILURE_BLOCK_CHARS = 6000  # the whole block, the closing count included
+MORE_LINE_RESERVE = 80  # room kept for the line that counts the tests left out
 
 
 def failing_ids(failures: Any, gate: str) -> set[str]:
@@ -121,10 +122,13 @@ def failure_block(failures: Any, ids: Collection[str]) -> str:
         lines = [f"{test_id} ({record.get('kind', '')}, {record.get('gate', '')}):"]
         lines += [f"  {line}" for line in body.splitlines() if line.strip()]
         blocks.append("\n".join(lines))
+    room = MAX_FAILURE_BLOCK_CHARS - MORE_LINE_RESERVE  # the closing count of the rest always fits
     shown: list[str] = []
     size = 0
     for block in blocks[:MAX_SHOWN_FAILURES]:
-        if size + len(block) + 1 > MAX_FAILURE_BLOCK_CHARS and shown:
+        if size + len(block) + 1 > room:
+            if not shown:  # one test alone over the bound (an excerpt is bounded, so only a hand-made record): cut it
+                shown.append(block[:room])
             break
         shown.append(block)
         size += len(block) + 1
