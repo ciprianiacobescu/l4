@@ -95,7 +95,7 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561 and change-table row 132.
+- [ ] 5.1 `docs/SPEC.md` holds L4-VER-078, L4-IMP-102, SCN-VER-308..310, SCN-IMP-557..561 and change-table row 134.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [ ] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

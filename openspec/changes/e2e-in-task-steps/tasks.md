@@ -106,7 +106,7 @@ has text (extend the stub with an optional `details` mapping if needed).
 
 ## 6. Checks
 
-- [ ] 6.1 `docs/SPEC.md` holds L4-IMP-101, the L4-IMP-067 amendment, SCN-IMP-548..556 and change-table row 131. Check
+- [ ] 6.1 `docs/SPEC.md` holds L4-IMP-101, the L4-IMP-067 amendment, SCN-IMP-548..556 and change-table row 133. Check
   them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md` or
   `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [ ] 6.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

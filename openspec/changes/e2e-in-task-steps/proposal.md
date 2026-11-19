@@ -54,6 +54,6 @@ whole gate); browser tests in a language other than Python; a red-step run; a co
   `_prompt`; `_drop_gate_output` takes the phase.
 - `src/l4/implementer/prompt.py`: `PromptContext.browser_tests`, the green block, the red paragraph.
 - `src/l4/deadline.py` (`cap_s`) and `src/l4/implementer/loop.py` (`_check_step`).
-- `docs/SPEC.md` (L4-IMP-101, the L4-IMP-067 amendment, SCN-IMP-548..556, change-table row 131), `CHANGELOG.md`.
+- `docs/SPEC.md` (L4-IMP-101, the L4-IMP-067 amendment, SCN-IMP-548..556, change-table row 133), `CHANGELOG.md`.
 - Ledger: no new event; the runs record `gate.finished` (`build`, `e2e-task`) as every gate run does.
 - Cost: per task with browser tests, one build and one e2e suite run per green attempt that passed every other check.
