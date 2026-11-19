@@ -52,3 +52,39 @@ def test_the_changelog_names_the_keys_under_unreleased() -> None:
     head = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## 0.", 1)[0]
     for needle in ("roles.plan_judges", "yolo.review.timeout", "yolo.review.max_batch_chars", "plan.review_incomplete"):
         assert needle in head, needle
+
+
+def test_the_runbook_says_the_size_bound_is_off_by_default_and_names_the_note_on_a_batch_in_parts() -> None:
+    review = " ".join(section(read("docs", "runbook.md"), "### 12.2 ", "### 12.2a ").split())
+    assert "default `0`" in review and "160,000" not in review and "turns it off" not in review
+    assert "no judge saw two units' full text together" in review
+    assert "a review has finished" in review  # a part of a finished review does not split the batch again
+
+
+def test_the_runbook_counts_the_five_judge_roles() -> None:
+    runbook = read("docs", "runbook.md")
+    assert "judge adapter in all five roles" in " ".join(runbook.split())
+    assert "in all four" not in runbook
+
+
+def test_the_operate_row_gives_the_message_a_dry_run_prints() -> None:
+    row = next(
+        line for line in read(*REFERENCES, "operate.md").splitlines() if "the review is incomplete (<reason>)" in line
+    )
+    assert "answered and kept in the local cache" in row and "answered and kept, <l> left" in row
+
+
+def test_the_changelog_lists_the_changed_behaviour_of_the_review() -> None:
+    head = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## 0.", 1)[0]
+    assert "160,000" not in head
+    changed = head.split("### Changed", 1)[1].split("\n### ", 1)[0]
+    for needle in (
+        "plan.review_incomplete",
+        "job_time",
+        "plan.admitted",
+        "usage limit",
+        "CFG-012",
+        "yolo.review.max_batch_chars",
+        "reviewed in parts",
+    ):
+        assert needle in changed, needle

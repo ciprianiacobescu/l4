@@ -18,6 +18,7 @@ from l4.yolo.model import JudgeFailure, PlanEvent
 
 # A finding of these criteria is the harness saying that no review happened for the item (never reused, never a round).
 HARNESS_CRITERIA = frozenset({"schema", "unit_missing", "completeness"})
+IN_PARTS = "parts"  # the harness's minor note on a batch verdict made from parts (L4-YOLO-098): it blocks nothing
 BATCH_PREFIX = "batch:"
 
 Entry = dict[str, Any]
@@ -197,12 +198,21 @@ def failure_rows(failures: Sequence[JudgeFailure], *, material: bool) -> list[di
 
 
 def judges_answering(verdicts: Iterable[Any]) -> list[str]:
-    """The distinct profiles that answered the judged verdicts (a reuse names none), in the order they first answered; a
-    batch in parts carries its parts' profiles joined by `, `."""
+    """The distinct profiles that answered in this review (a reuse names none, nor does a part of a batch that was
+    reused), in the order they first answered. A batch in parts has the profiles of its parts in its entry (`judge`,
+    joined by `, `); only the parts judged in this review count here."""
     names: list[str] = []
     for verdict in verdicts:
-        if verdict.reused_from is None and verdict.judge:
-            names += [n for n in verdict.judge.split(", ") if n not in names]
+        if verdict.reused_from is not None:
+            continue
+        found = (
+            [p.judge for _, p in verdict.parts if p.reused_from is None and p.judge]
+            if verdict.parts
+            else verdict.judge.split(", ")
+            if verdict.judge
+            else []
+        )
+        names += [n for n in found if n not in names]
     return names
 
 
@@ -408,6 +418,12 @@ def resolve(
         )
     if criterion == "material":
         return finding.get("text", "")
+    if criterion == IN_PARTS:
+        return (
+            "A note, not a defect, and it blocks nothing: the batch was too large for one call, or its whole call "
+            "failed, so read the interfaces its units share together yourself. The batch is asked whole again when "
+            "its material changes (unless it is over yolo.review.max_batch_chars)."
+        )
     if criterion == "schema":
         return f"No review happened for this item: run the review again (l4 yolo review {plan_id})."
     if criterion in ("unit_missing", "completeness"):
@@ -474,6 +490,25 @@ def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any
                 yield f"{prefix}{ident}", entry
 
 
+def _in_parts(entry: Mapping[str, Any]) -> bool:
+    """A batch verdict made from parts carries the note (a minor finding of criterion `parts`): READY or not, the person
+    is shown that no judge saw two units' full text together."""
+    return any(isinstance(f, dict) and f.get("criterion") == IN_PARTS for f in entry.get("findings") or ())
+
+
+def batches_in_parts(events: Sequence[PlanEvent], prompt_version: int) -> list[str]:
+    """The batches of the plan's latest `plan.reviewed` (of the prompt version) whose verdict was made from parts, for
+    `l4 yolo status`."""
+    for event in reversed(events):
+        if event.type == "plan.reviewed" and _version(event) == prompt_version:
+            return [
+                str(batch)
+                for batch, entry in (event.data.get("batches") or {}).items()
+                if isinstance(entry, dict) and _in_parts(entry)
+            ]
+    return []
+
+
 def _facts(
     review: Mapping[str, Any],
     history_of: Callable[[str], Sequence[Mapping[str, Any]]],
@@ -491,7 +526,7 @@ def _facts(
         if only is not None:
             if subject != only:
                 continue
-        elif verdict == "READY" and not show_all:
+        elif verdict == "READY" and not show_all and not _in_parts(entry):
             continue
         hist = list(history_of(subject))
         material = entry.get("material") or (hist[-1]["material"] if hist else None)
@@ -577,8 +612,10 @@ def render(
         if fact.reused_from:
             lines.append(f"  reused: judged {fact.reused_from} on the same material")
         shown = _by_severity(fact.findings)
-        minors = [f for f in shown if f.get("severity") == "minor"]
-        for f in shown if show_all else [f for f in shown if f.get("severity") != "minor"]:
+        minors = [f for f in shown if f.get("severity") == "minor" and f.get("criterion") != IN_PARTS]
+        for f in (
+            shown if show_all else [f for f in shown if f.get("severity") != "minor" or f.get("criterion") == IN_PARTS]
+        ):
             lines.append(f"  {finding_id(fact.subject, f)} [{f.get('severity')}/{f.get('criterion')}] {f.get('text')}")
             lines.append(f"    Resolve: {resolver(fact.subject, f)}")
         if minors and not show_all:

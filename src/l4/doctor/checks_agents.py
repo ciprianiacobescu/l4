@@ -77,7 +77,8 @@ def _live_001(ctx: DoctorContext) -> CheckResult:
     hint = "log in or install the CLI as the runner user (docs/runner/README.md)"
     if failures:
         return CheckResult("fail", "; ".join([*failures, *optional]), hint)
-    if optional:  # only an optional role failed: the delegate escalates to a person, plan_judges falls back
+    if optional:  # only an optional role failed: the delegate escalates to a person; a review whose plan_judges has no
+        # usable profile is incomplete (L4-YOLO-099), it never falls back to roles.judges (L4-YOLO-095)
         return CheckResult("fail", "; ".join([*lines, *optional]), hint, severity="warn")
     return CheckResult("pass", "; ".join(lines))
 

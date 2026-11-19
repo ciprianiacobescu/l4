@@ -178,3 +178,16 @@ def test_kept_keys_are_the_answered_materials_of_the_incomplete_reviews_after_th
     ]
     assert fnd.kept_keys(events, 4) == {"mp", "mc"}  # a part a finished review recorded ("pp") is not kept
     assert fnd.kept_keys([*events, reviewed("2026-11-19T13:00:00Z")], 4) == set()
+
+
+def test_judges_answering_lists_the_profiles_that_answered_in_this_review_and_not_those_of_reused_parts():
+    from l4.yolo.model import Verdict
+
+    fresh = Verdict("READY", material="p1", judge="j1")
+    reused = Verdict("READY", material="p2", judge="j2", reused_from="2026-11-19T09:00:00Z")
+    batch = Verdict("READY", material="mb", judge="j1, j2", parts=(("batch:b1/a", fresh), ("batch:b1/summary", reused)))
+    unit = Verdict("READY", material="mu", judge="j3")
+    old = Verdict("READY", material="mo", judge="j4", reused_from="2026-11-19T09:00:00Z")
+    assert fnd.judges_answering([unit, batch, old]) == ["j3", "j1"]
+    whole = Verdict("READY", material="mw", judge="j2")
+    assert fnd.judges_answering([whole]) == ["j2"]  # a batch asked whole has no parts

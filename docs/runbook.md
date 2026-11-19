@@ -1638,7 +1638,7 @@ A profile whose adapter cannot judge (a judge call has no tools) in `roles.judge
 `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
 command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
 (a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, copilot-cli, fake; remove <name> from
-roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all four
+roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all five
 roles ([10.6](#106-a-kiro-judge-clarifier-or-readiness-reviewer)), and `copilot-cli` is one since 0.4.27
 ([10.8](#108-a-github-copilot-cli-profile)); a `command` profile is not. A backend profile (an API
 model) is still allowed in these roles.
@@ -2957,11 +2957,18 @@ dry run keeps the answers in its local cache and exits 12. A judge failure that 
 records nothing, and the next run tries again.
 
 The review's keys, set on the base branch: `yolo.review.timeout` (`15m`, at least `1m`) bounds each judge call, and
-`yolo.review.max_batch_chars` (160,000; `0` turns it off) is the length of a batch's material above which the batch is
-reviewed in parts. A batch is also reviewed in parts when one of its parts was answered in an earlier run, and when its
-whole call stops at the output limit or times out. A part shows one unit in full with the other units cut at 6,000
+`yolo.review.max_batch_chars` (default `0`: no size split) is, when positive, the length of a batch's material above
+which the batch is reviewed in parts. With the default a batch is asked whole, and is reviewed in parts when its whole
+call stops at the output limit or times out, and when a part of it was answered in an incomplete review since the
+latest review that finished (a part that only a finished review recorded is reused when the batch is split, but does
+not split it: once a review has finished, a changed batch is asked whole again; a `--worktree` dry run's local cache
+has no such end, and `--fresh batch:<id>` asks the batch again). A part shows one unit in full with the other units cut at 6,000
 characters each, and one part shows every unit at that depth. The parts' verdicts make the batch's verdict, and its
-`missing` says `judged in <n> parts` and why, with `no call saw two units of the batch in full together`. If the size
+`missing` says `judged in <n> parts` and why, with `no call saw two units of the batch in full together`, and the
+verdict carries one minor finding that says so (`this batch was reviewed in parts: no judge saw two units' full text
+together, so defects visible only across units may be missed`). It blocks nothing: `l4 yolo findings` shows it, even for
+a READY batch, and `l4 yolo status` lists the batches judged in parts. Read the interfaces the batch's units share
+together yourself. If the size
 limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names the file, its
 size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000), `max_folder_chars` (80,000)
 and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.

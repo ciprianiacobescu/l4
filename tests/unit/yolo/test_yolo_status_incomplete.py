@@ -75,3 +75,28 @@ def test_a_later_review_and_another_prompt_version_show_no_incomplete(world, cap
     assert "incomplete" not in out and "review: current" in out
     world.l4("status", "p1", "--json")
     assert "incomplete" not in json.loads(capsys.readouterr().out)["plans"][0]["review"]
+
+
+def test_status_names_a_batch_that_was_reviewed_in_parts(world, capsys):
+    seeded(world)
+    note = {
+        "criterion": "parts",
+        "severity": "minor",
+        "text": "this batch was reviewed in parts: no judge saw two units",
+    }
+    event = world.reviewed()
+    event.data["batches"]["b1"]["findings"] = [note]
+    world.seed("p1", event)
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "review: current" in out
+    assert "    reviewed in parts: b1 (no judge saw two units' full text together)" in out
+    world.l4("status", "p1", "--json")
+    assert json.loads(capsys.readouterr().out)["plans"][0]["review"]["in_parts"] == ["b1"]
+
+
+def test_status_says_nothing_of_parts_for_a_batch_asked_whole(world, capsys):
+    seeded(world)
+    world.seed("p1", world.reviewed())
+    world.l4("status", "p1", "--json")
+    assert "in_parts" not in json.loads(capsys.readouterr().out)["plans"][0]["review"]

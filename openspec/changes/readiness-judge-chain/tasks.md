@@ -34,7 +34,7 @@ Rules for every task:
     - `YoloReviewCfg().timeout == "15m"`;
     - `yolo: {review: {timeout: 30s}}` fails with `yolo.review.timeout must be at least 1m`;
     - `30m` loads.
-  - `YoloReviewCfg().max_batch_chars == 160_000`; `0` loads; `-1` fails.
+  - `YoloReviewCfg().max_batch_chars == 0` (changed from 160,000 by the review); `0` loads; `-1` fails.
   - `Budgets.of(cfg).batch` equals `max_batch_chars`.
 
   Then update the tests that pin the old text: `tests/unit/config/test_judge_roles.py` (the message) and
@@ -50,7 +50,7 @@ Rules for every task:
   - `src/l4/config/schema.py`:
     - add `plan_judges: list[str]` to `RolesCfg`, after `judges`, with a comment `optional (L4-YOLO-095): the
       readiness review's chain; empty: judges`;
-    - add `max_batch_chars: int = Field(default=160_000, ge=0)` and `timeout: Duration = "15m"` to `YoloReviewCfg`,
+    - add `max_batch_chars: int = Field(default=0, ge=0)` and `timeout: Duration = "15m"` to `YoloReviewCfg`,
       with a `field_validator` like `DelegateCfg._timeout`;
     - list `roles.plan_judges` in the message of `_judge_roles_can_judge`.
   - `src/l4/config/roles.py`: `JUDGE_ROLES`.
@@ -308,7 +308,7 @@ Rules for every task:
   - `docs/runbook.md`, 12.2 (search `The review does not run if the judge agent fails`): replace that paragraph. Say
     which chain reviews a plan, that a subject goes to the next judge and the answers are kept, what `incomplete` under
     `review:` in `l4 yolo status` shows, and the fix per reason. Name `yolo.review.timeout` (15m) and
-    `yolo.review.max_batch_chars` (160,000) with what they do, and the `judged in <n> parts` line.
+    `yolo.review.max_batch_chars` (0) with what they do, and the `judged in <n> parts` line.
   - `docs/runbook.md`, the capacity section (search `Every judge was discarded in step 9`): add a bullet for the plan
     review, and name `roles.plan_judges` beside `roles.judges` in the paragraph on judge adapters.
   - `docs/yolo-mode.md` (search `L4 records no review`): one paragraph in its place.

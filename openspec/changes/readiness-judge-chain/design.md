@@ -214,7 +214,8 @@ chain that is not discarded.
   batch in parts.
 - The event carries:
   - `judge`: the profile of the first judged entry, as before, so readers that know one string keep working;
-  - `judges`: the distinct profiles in the order they first answered;
+  - `judges`: the distinct profiles that answered in this review, in the order they first answered (a reused entry, and
+    a reused part of a batch in parts, name none; the batch entry's own `judge` still lists all its parts' profiles);
   - `failures`: `[{profile, subject, kind, detail}]`, only when there is at least one.
 - `ReviewResult` gains `failures: tuple[JudgeFailure, ...] = ()`.
 - `JudgeFailure(profile, subject, kind, detail, material=None)` lives in `model.py`. `detail` is redacted and cut to
@@ -241,7 +242,7 @@ job [I].
 
 **When.** A batch subject whose shown units (`left`, the units not done) are two or more is split in three cases:
 
-1. `yolo.review.max_batch_chars > 0` and `len(subject.user) > max_batch_chars`;
+1. `yolo.review.max_batch_chars > 0` (the default is `0`: no pre-split) and `len(subject.user) > max_batch_chars`;
 2. any of its parts' material keys was kept by a `plan.review_incomplete` after the plan's latest `plan.reviewed`
    (`findings.kept_keys`, passed as `kept`; a `--worktree` dry run adds the parts of its local cache, which no
    `plan.reviewed` ends). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
@@ -314,6 +315,12 @@ usually the proposal and the start of the specs. The summary part sees every uni
   read in part): no call saw two units of the batch in full together; why: <cause>`.
 - Then `_amend(merged, whole_batch_subject)` runs once. The whole batch's `left_out`, `not_shown` and `not_in_full` are
   the union of the unit parts', so a `material_cut` of a unit's folder blocks the batch exactly as before.
+- After `_amend`, one harness finding is appended: `IN_PARTS_FINDING`, criterion `parts`, severity `minor`, text `this
+  batch was reviewed in parts: no judge saw two units' full text together, so defects visible only across units may be
+  missed`. It comes after `_amend` so that no rule of `_amend` reads it (a verdict of only minor findings would become
+  READY, and a BLOCKED batch with its findings moved would lose its `not findings` test). It accompanies the `missing`
+  line. A minor finding blocks nothing, so a READY batch stays READY. `l4 yolo findings` shows a batch that carries it
+  even when it is READY, and `l4 yolo status` lists the batches of the current review that were judged in parts.
 - The batch verdict's `material` is the whole batch's key. Its `parts` are `(part name, part verdict with material,
   judge, reused_from)`.
 
@@ -473,8 +480,12 @@ def review_plan_costed(app, cfg, plan, units, *, git, rev, adapters=None, digest
 - **More calls.** A batch of n units in parts costs n + 1 calls instead of 1, and the parts are charged to the plan.
 - **A part over the bound is asked anyway.** For example, one huge unit with many siblings. A length stop there goes to
   the next judge, and no third level exists.
-- **The default bound of 160,000 characters is a judgement call [G].** It is two unit folders at the default folder
-  budget. No measurement links it to an output limit.
+- **The default bound is `0`: no pre-split.** A bound that splits before any call is a guess, since no measurement
+  links a size to an output limit, and a batch in parts sees less than a whole batch. So the whole batch is asked
+  first, and split only after its call ends with a length stop or a timeout, or for a part an incomplete review kept. A
+  consumer whose judge stops silently (an adapter that reports no length stop) sets a positive bound.
+- **A batch in parts is visible.** Its verdict always carries a minor harness finding of criterion `parts`, added after
+  `_amend` so it cannot change the verdict, and `l4 yolo findings` and `l4 yolo status` show it.
 - **Asking another judge first after a failure assumes the failure follows the judge and the material.** A judge that
   failed for a passing cause waits until the others have failed too.
 - **An `error` discards the judge for the whole review, even when the error was the material's.** One example is a

@@ -915,9 +915,9 @@ class YoloReviewCfg(_Strict):
     max_dependency_chars: int = Field(default=20_000, ge=0)
     accept_after_rounds: int = Field(default=2, ge=1)
     accept_by_agents: bool = False
-    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0: only after a length stop or
-    # a timeout
-    max_batch_chars: int = Field(default=160_000, ge=0)
+    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0 (default): no split before a call,
+    # only after a length stop, a timeout or a part kept by an incomplete review
+    max_batch_chars: int = Field(default=0, ge=0)
     timeout: Duration = "15m"  # each judge call of the review (L4-YOLO-097)
 
     @field_validator("timeout")

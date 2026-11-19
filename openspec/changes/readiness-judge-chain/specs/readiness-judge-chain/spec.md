@@ -52,7 +52,8 @@ is left and none broke the schema on it, the call has no answer and the review d
 the other judges of the chain, in chain order among themselves, so the next run does not start with the judge that
 failed it; the ledger is that memory, since the runner cache may be new in every CI job. Every entry a judge answered
 SHALL name it (`judge`); `plan.reviewed` SHALL carry `judge` (the first profile that answered, as before), `judges` (the
-distinct profiles that answered, in the order they first answered) and, when any, `failures`
+distinct profiles that answered in this review, in the order they first answered: not those of a reused entry or of a
+reused part of a batch) and, when any, `failures`
 (`[{profile, subject, kind, detail}]`, `detail` redacted and cut at its first line and 300 characters, one entry per
 judge discarded or skipped in the review, `subject` empty for a skip at selection). The run log, and the output of
 `l4 yolo review --local` and `--worktree`, SHALL print one line per failure (`<profile>: <subject>: <kind>: <detail>`). [V, a consumer's ten-unit plan lost three readiness reviews in 40 minutes: the first judge failed its hello,
@@ -146,8 +147,8 @@ code: `readiness.DEFAULT_TIMEOUT_S` is 900 and no caller passes a timeout; a con
 ### Requirement: L4-YOLO-098 A batch too large for one call is reviewed in parts
 A batch subject that shows two or more units SHALL
 be reviewed in parts, and never asked as a whole in that review, when its material (the user text the judge would get)
-has more than `yolo.review.max_batch_chars` characters (default 160,000, two unit folders at the default folder budget;
-`0`: no split before a call), or when a `plan.review_incomplete` recorded after the plan's latest `plan.reviewed` holds
+has more than `yolo.review.max_batch_chars` characters (default `0`: no split before a call, so a batch is asked whole
+and split only by the other triggers; a positive value is the size bound), or when a `plan.review_incomplete` recorded after the plan's latest `plan.reviewed` holds
 one of its parts (L4-YOLO-099). A part that only a `plan.reviewed` recorded SHALL be reused when the batch is split, but
 SHALL NOT split it: once a review has finished, the next review of a changed batch starts whole again, so that `0`
 turns the size split off. It SHALL also be reviewed in parts, by the same judge first, when its whole call stops at the
@@ -171,7 +172,13 @@ findings in part order with an exact repeat (criterion, severity and text) kept 
 lists joined the same way, and the `missing` line `judged in <n> parts (each unit in full with the other units read in
 part, and every unit read in part): no call saw two units of the batch in full together; why: <cause>` (`its material
 has <c> characters, over yolo.review.max_batch_chars (<m>)`, `the whole batch stopped at the output limit of
-<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`). A part whose
+<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`), and one harness
+finding of criterion `parts` and severity `minor`, added after the rules below: `this batch was reviewed in parts: no
+judge saw two units' full text together, so defects visible only across units may be missed`. The finding is a note: it
+SHALL NOT change the verdict, and a READY batch stays READY with it. `l4 yolo findings` SHALL show a batch that carries
+it, READY or not, with the note in full and a `Resolve:` line that says it is a note, and `l4 yolo status` SHALL name the
+batches of the current review that were judged in parts (`reviewed in parts: <batches> (no judge saw two units' full
+text together)`, and `review.in_parts` in `--json`). A part whose
 verdict is NEEDS_REVISION and names no finding SHALL get the harness finding `verdict` (L4-YOLO-023) before the merge,
 so that another part's findings cannot hide it and the merged verdict is never READY because of it. The other rules of
 L4-YOLO-004 and L4-YOLO-023 SHALL then be applied once, to the merged verdict, with the whole batch's cuts. The batch's entry
@@ -184,13 +191,15 @@ too; only the opencode adapters mark a length stop (L4-VER-071), so on the other
 a batch before its reply is cut.]
 
 #### Scenario: SCN-YOLO-273 (+) A large batch is reviewed in parts from the start · L4-YOLO-098
-- **Given** a batch of the units A, B and C whose batch material is longer than `yolo.review.max_batch_chars`, and a
-  judge that answers READY
+- **Given** `yolo.review.max_batch_chars: 1000`, a batch of the units A, B and C whose batch material is longer than
+  that, and a judge that answers READY
 - **When** the review runs
 - **Then** the judge is asked A, B and C, then `batch:b1/A`, `batch:b1/B`, `batch:b1/C` and `batch:b1/summary`, and never
   the whole batch; the part of A shows A's folder in full and B and C within 6,000 characters each, the summary part
   shows no folder in full, and no part's harness text names a unit or the batch; the batch's entry has the whole batch's
-  material key, `parts` with four rows, and the `missing` line `judged in 4 parts`
+  material key, `parts` with four rows, the `missing` line `judged in 4 parts` and one minor finding of criterion
+  `parts` (`this batch was reviewed in parts: no judge saw two units' full text together, so defects visible only
+  across units may be missed`); the verdict is READY, and `l4 yolo status` names the batch as reviewed in parts
 
 #### Scenario: SCN-YOLO-274 (+) A whole batch that stops at the output limit is split for the same judge · L4-YOLO-098, L4-YOLO-096
 - **Given** a batch under the bound, the chain `[j1, j2]`, and `j1`, whose whole call on the batch ends `error` with a
@@ -212,7 +221,7 @@ a batch before its reply is cut.]
 
 #### Scenario: SCN-YOLO-276 (−) A batch that fits and a unit keep today's prompt · L4-YOLO-098
 - **Given** a batch under the bound, a unit subject, a batch with one unit left to review (the others done), and a
-  large batch with `yolo.review.max_batch_chars: 0`
+  large batch (over 160,000 characters) with `yolo.review.max_batch_chars` at its default `0`
 - **When** the review builds and asks them
 - **Then** the batch under the bound and the unit are asked with the prompt of 0.4.58, byte for byte, and the same
   material keys, and the prompt version is 4; the last two are asked whole; a unit whose reply stops at the limit goes

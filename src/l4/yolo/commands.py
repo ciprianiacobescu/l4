@@ -1794,6 +1794,8 @@ def _describe(
         }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
+        if view.kind == "current" and (in_parts := fnd.batches_in_parts(read.events, PROMPT_VERSION)):
+            out["review"]["in_parts"] = in_parts
         if view.kind != "current" and (incomplete := fnd.latest_incomplete(read.events, PROMPT_VERSION)) is not None:
             out["review"]["incomplete"] = _incomplete_doc(incomplete)
         if view.kind == "stale":
@@ -2192,6 +2194,11 @@ def _render(d: dict[str, Any]) -> str:
             else ""
         )
         lines.append(f"  review: {d['review']['state']}{changed}{covered}")
+        if d["review"].get("in_parts"):
+            lines.append(
+                f"    reviewed in parts: {', '.join(d['review']['in_parts'])} "
+                "(no judge saw two units' full text together)"
+            )
         if d["review"].get("incomplete"):
             lines += _incomplete_lines(d["review"]["incomplete"])
         lines += [f"    {r}" for r in d["review"].get("stale", [])]

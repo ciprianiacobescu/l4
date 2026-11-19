@@ -115,7 +115,6 @@ These are amended in `docs/SPEC.md`:
   - `docs/SPEC.md`: L4-YOLO-095..100, the amendments, §3.2, SCN-YOLO-261..282 and change-table row 132.
   - `docs/runbook.md`, `docs/yolo-mode.md`, the skill references and `CHANGELOG.md`.
 - Configuration: three new keys (`roles.plan_judges`, `yolo.review.timeout`, `yolo.review.max_batch_chars`). They have
-  defaults, so an old configuration loads and reviews as before, except that a batch longer than 160,000 characters is
-  now reviewed in parts.
+  defaults, so an old configuration loads and reviews as before (`max_batch_chars` is `0`: no size split).
 - Ledger: one new plan event (`plan.review_incomplete`) and optional fields on `plan.reviewed`. An older harness ignores
   both.

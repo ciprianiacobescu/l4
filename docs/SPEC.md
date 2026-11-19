@@ -1130,7 +1130,7 @@ yolo:
     max_file_chars: 20000          # per file the judge reads (>= 1000)
     max_folder_chars: 80000        # per unit folder (>= 1000)
     max_dependency_chars: 20000    # per prerequisite folder (>= 0)
-    max_batch_chars: 160000        # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0: only after a length stop or a timeout
+    max_batch_chars: 0             # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0: no size split, only after a length stop, a timeout or a kept part
     timeout: 15m                   # each judge call of the readiness review (>= 1m; L4-YOLO-097); a CI job starts a call only with this much time left
     accept_after_rounds: 2         # versions of a subject's text judged not READY before `l4 yolo accept` (>= 1)
     accept_by_agents: false        # true: an agent may run `l4 yolo accept`; read from `.l4/config.yaml` at origin/<base>
@@ -7865,7 +7865,8 @@ is left and none broke the schema on it, the call has no answer and the review d
 the other judges of the chain, in chain order among themselves, so the next run does not start with the judge that
 failed it; the ledger is that memory, since the runner cache may be new in every CI job. Every entry a judge answered
 SHALL name it (`judge`); `plan.reviewed` SHALL carry `judge` (the first profile that answered, as before), `judges` (the
-distinct profiles that answered, in the order they first answered) and, when any, `failures`
+distinct profiles that answered in this review, in the order they first answered: not those of a reused entry or of a
+reused part of a batch) and, when any, `failures`
 (`[{profile, subject, kind, detail}]`, `detail` redacted and cut at its first line and 300 characters, one entry per
 judge discarded or skipped in the review, `subject` empty for a skip at selection). The run log, and the output of
 `l4 yolo review --local` and `--worktree`, SHALL print one line per failure (`<profile>: <subject>: <kind>: <detail>`). [V, a consumer's ten-unit plan lost three readiness reviews in 40 minutes: the first judge failed its hello,
@@ -7889,8 +7890,8 @@ code: `readiness.DEFAULT_TIMEOUT_S` is 900 and no caller passes a timeout; a con
 
 **L4-YOLO-098 A batch too large for one call is reviewed in parts.** A batch subject that shows two or more units SHALL
 be reviewed in parts, and never asked as a whole in that review, when its material (the user text the judge would get)
-has more than `yolo.review.max_batch_chars` characters (default 160,000, two unit folders at the default folder budget;
-`0`: no split before a call), or when a `plan.review_incomplete` recorded after the plan's latest `plan.reviewed` holds
+has more than `yolo.review.max_batch_chars` characters (default `0`: no split before a call, so a batch is asked whole
+and split only by the other triggers; a positive value is the size bound), or when a `plan.review_incomplete` recorded after the plan's latest `plan.reviewed` holds
 one of its parts (L4-YOLO-099). A part that only a `plan.reviewed` recorded SHALL be reused when the batch is split, but
 SHALL NOT split it: once a review has finished, the next review of a changed batch starts whole again, so that `0`
 turns the size split off. It SHALL also be reviewed in parts, by the same judge first, when its whole call stops at the
@@ -7914,7 +7915,13 @@ findings in part order with an exact repeat (criterion, severity and text) kept 
 lists joined the same way, and the `missing` line `judged in <n> parts (each unit in full with the other units read in
 part, and every unit read in part): no call saw two units of the batch in full together; why: <cause>` (`its material
 has <c> characters, over yolo.review.max_batch_chars (<m>)`, `the whole batch stopped at the output limit of
-<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`). A part whose
+<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`), and one harness
+finding of criterion `parts` and severity `minor`, added after the rules below: `this batch was reviewed in parts: no
+judge saw two units' full text together, so defects visible only across units may be missed`. The finding is a note: it
+SHALL NOT change the verdict, and a READY batch stays READY with it. `l4 yolo findings` SHALL show a batch that carries
+it, READY or not, with the note in full and a `Resolve:` line that says it is a note, and `l4 yolo status` SHALL name the
+batches of the current review that were judged in parts (`reviewed in parts: <batches> (no judge saw two units' full
+text together)`, and `review.in_parts` in `--json`). A part whose
 verdict is NEEDS_REVISION and names no finding SHALL get the harness finding `verdict` (L4-YOLO-023) before the merge,
 so that another part's findings cannot hide it and the merged verdict is never READY because of it. The other rules of
 L4-YOLO-004 and L4-YOLO-023 SHALL then be applied once, to the merged verdict, with the whole batch's cuts. The batch's entry
@@ -9464,7 +9471,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 128 | `static-gates-runnable` | an implementer may run the configured lint and typecheck commands before it finishes, so a lint or type error is no longer seen only after the step. `l4.agents.base.PermissionPolicy` gains `static_commands` (the `gates.lint` then `gates.typecheck` commands, each once); `agent_step` and `l4.sim.dryrun` pass them; claude-code adds one `Bash(<command>:*)` per command in implement mode, copilot-cli one `--allow-tool=shell(<first word>:*)` per distinct first word; opencode, codex and kiro-cli are unchanged; the prompt's `# Gate command` section says the agent may run them and to check by reading when one cannot run in the sandbox (L4-IMP-098, SCN-IMP-533..536) |
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
 | 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` right after the phase, before a refused move and the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
-| 132 | `readiness-judge-chain` | the plan readiness review walks its judge chain per subject and keeps what was answered: `roles.plan_judges` (empty: `roles.judges`; a judge role for L4-CFG-006, CFG-002, CFG-011, ENV-004, LIVE-001 and the skill's preflight script) is the review's chain; a call is asked of the first judge in chain order that is usable (`Factory.for_profile`, one profile's selection, and its sandbox) and not discarded for it; an `error` discards the judge for the review, a length stop or a schema break for that call, a limit cools it (`Factory.cool_limited`); a schema break with no judge left is BLOCKED as before; a judge that failed a material in an incomplete review since the latest `plan.reviewed` is asked it last; `yolo.review.timeout` (15m) bounds each call, a timeout that cannot be split ends the review for the run, and a CI job starts a call only with that much time left; a batch longer than `yolo.review.max_batch_chars` (160,000), one with a kept part, or one whose whole call stops at the limit or times out is reviewed in parts (one per unit in full with the others read within 6,000 characters, and one summary part), merged into one verdict under the batch's material key with `parts`; an unsplit prompt and its key are unchanged (prompt version 4); a review that does not finish records `plan.review_incomplete` (answered entries reused by material key, failures, cost charged, a repeat not written), shown in `l4 yolo status` and the run log; `plan.reviewed` gains `judges`, `failures` and per-entry `judge` (L4-YOLO-095..100, L4-YOLO-004, L4-YOLO-022, L4-CFG-006, L4-AVL-010, SCN-YOLO-261..282) |
+| 132 | `readiness-judge-chain` | the plan readiness review walks its judge chain per subject and keeps what was answered: `roles.plan_judges` (empty: `roles.judges`; a judge role for L4-CFG-006, CFG-002, CFG-011, ENV-004, LIVE-001 and the skill's preflight script) is the review's chain; a call is asked of the first judge in chain order that is usable (`Factory.for_profile`, one profile's selection, and its sandbox) and not discarded for it; an `error` discards the judge for the review, a length stop or a schema break for that call, a limit cools it (`Factory.cool_limited`); a schema break with no judge left is BLOCKED as before; a judge that failed a material in an incomplete review since the latest `plan.reviewed` is asked it last; `yolo.review.timeout` (15m) bounds each call, a timeout that cannot be split ends the review for the run, and a CI job starts a call only with that much time left; a batch longer than `yolo.review.max_batch_chars` (default `0`: no size split), one with a part an incomplete review kept, or one whose whole call stops at the limit or times out is reviewed in parts (one per unit in full with the others read within 6,000 characters, and one summary part), merged into one verdict under the batch's material key with `parts`; an unsplit prompt and its key are unchanged (prompt version 4); a review that does not finish records `plan.review_incomplete` (answered entries reused by material key, failures, cost charged, a repeat not written), shown in `l4 yolo status` and the run log; `plan.reviewed` gains `judges`, `failures` and per-entry `judge` (L4-YOLO-095..100, L4-YOLO-004, L4-YOLO-022, L4-CFG-006, L4-AVL-010, SCN-YOLO-261..282) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -18626,13 +18633,15 @@ scenario is a spec defect (§26).
   (15m) is not less than ci.time_budget (20m) minus ci.soft_deadline_margin (10m)`
 
 #### SCN-YOLO-273 (+) A large batch is reviewed in parts from the start · L4-YOLO-098
-- **Given** a batch of the units A, B and C whose batch material is longer than `yolo.review.max_batch_chars`, and a
-  judge that answers READY
+- **Given** `yolo.review.max_batch_chars: 1000`, a batch of the units A, B and C whose batch material is longer than
+  that, and a judge that answers READY
 - **When** the review runs
 - **Then** the judge is asked A, B and C, then `batch:b1/A`, `batch:b1/B`, `batch:b1/C` and `batch:b1/summary`, and never
   the whole batch; the part of A shows A's folder in full and B and C within 6,000 characters each, the summary part
   shows no folder in full, and no part's harness text names a unit or the batch; the batch's entry has the whole batch's
-  material key, `parts` with four rows, and the `missing` line `judged in 4 parts`
+  material key, `parts` with four rows, the `missing` line `judged in 4 parts` and one minor finding of criterion
+  `parts` (`this batch was reviewed in parts: no judge saw two units' full text together, so defects visible only
+  across units may be missed`); the verdict is READY, and `l4 yolo status` names the batch as reviewed in parts
 
 #### SCN-YOLO-274 (+) A whole batch that stops at the output limit is split for the same judge · L4-YOLO-098, L4-YOLO-096
 - **Given** a batch under the bound, the chain `[j1, j2]`, and `j1`, whose whole call on the batch ends `error` with a
@@ -18654,7 +18663,7 @@ scenario is a spec defect (§26).
 
 #### SCN-YOLO-276 (−) A batch that fits and a unit keep today's prompt · L4-YOLO-098
 - **Given** a batch under the bound, a unit subject, a batch with one unit left to review (the others done), and a
-  large batch with `yolo.review.max_batch_chars: 0`
+  large batch (over 160,000 characters) with `yolo.review.max_batch_chars` at its default `0`
 - **When** the review builds and asks them
 - **Then** the batch under the bound and the unit are asked with the prompt of 0.4.58, byte for byte, and the same
   material keys, and the prompt version is 4; the last two are asked whole; a unit whose reply stops at the limit goes

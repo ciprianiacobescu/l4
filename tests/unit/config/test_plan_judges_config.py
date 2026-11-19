@@ -45,7 +45,7 @@ def test_the_review_timeout_defaults_to_15m_and_has_a_floor():  # SCN-YOLO-270
 
 
 def test_max_batch_chars_defaults_and_bounds():
-    assert YoloReviewCfg().max_batch_chars == 160_000
+    assert YoloReviewCfg().max_batch_chars == 0  # no split before a call: a length stop or a timeout splits
     assert load_config_text("yolo: {review: {max_batch_chars: 0}}\n").yolo.review.max_batch_chars == 0
     load("yolo: {review: {max_batch_chars: -1}}\n")
 

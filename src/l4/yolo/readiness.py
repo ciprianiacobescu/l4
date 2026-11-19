@@ -141,7 +141,7 @@ class Budgets:
     file: int
     folder: int
     dependency: int
-    batch: int = 160_000  # a batch subject longer than this is reviewed in parts (L4-YOLO-098); 0: no bound
+    batch: int = 0  # a batch subject longer than this is reviewed in parts (L4-YOLO-098); 0 (default): no bound
 
     @classmethod
     def of(cls, cfg: L4Config) -> "Budgets":
@@ -519,6 +519,16 @@ def _batch_summary(
 ) -> Subject:
     """The summary part of a batch reviewed in parts: every unit read in part, no folder in full (design D6)."""
     return _batch_part(plan, batch, None, folders, siblings, deps, delivered, dep_budget, skip)
+
+
+IN_PARTS_FINDING = {
+    "criterion": "parts",
+    "severity": "minor",
+    "text": (
+        "this batch was reviewed in parts: no judge saw two units' full text together, so defects visible only across "
+        "units may be missed"
+    ),
+}  # the harness's note on a batch verdict made from parts (L4-YOLO-098): a minor finding blocks nothing
 
 
 _WORST = {"BLOCKED": 2, "NEEDS_REVISION": 1, "READY": 0}
@@ -1206,6 +1216,9 @@ def review_plan_costed(
             left_over.extend([call.name, *missing])
             return None
         merged = _amend(merge_parts([v for _, v in rows], cause), subject)
+        merged = replace(
+            merged, findings=(*merged.findings, dict(IN_PARTS_FINDING))
+        )  # a note: the verdict is as it was
         judges = ", ".join(dict.fromkeys(v.judge for _, v in rows if v.judge))
         verdict = replace(merged, material=key, judge=judges or None, parts=tuple(rows))
         keep(call.name, verdict)

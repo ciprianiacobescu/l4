@@ -37,6 +37,16 @@ def said(verdict, findings=()):
     return Step(structured={"verdict": verdict, "findings": list(findings), "assumptions": [], "missing": []})
 
 
+PARTS_FINDING = {
+    "criterion": "parts",
+    "severity": "minor",
+    "text": (
+        "this batch was reviewed in parts: no judge saw two units' full text together, so defects visible only across "
+        "units may be missed"
+    ),
+}
+
+
 def cfg_of(bound=None, judges=("j1", "j2")):
     review = {} if bound is None else {"max_batch_chars": bound}
     return make_cfg(profiles=PROFILES, roles={"implementer": ["impl"], "judges": list(judges)}, yolo={"review": review})
@@ -149,6 +159,73 @@ def _whole_key(world, plan):
     fake = FakeAdapter([ok() for _ in range(len(plan.units()) + 1)])
     result, _ = review(world, plan, fake, cfg=cfg_of(0))
     return result.batches["b1"].material
+
+
+def test_the_default_bound_is_off_so_a_large_batch_is_asked_whole(tmp_path):
+    """`yolo.review.max_batch_chars` defaults to 0: a batch over 160,000 characters is asked whole, and split only after
+    its whole call stops at the limit or times out."""
+    w = World(tmp_path)
+    files = {}
+    for name in "abc":
+        files[f"{ROOT}/{name}/proposal.md"] = f"Why: {name}.\n"
+        files[f"{ROOT}/{name}/specs/x/spec.md"] = SPEC_A
+        files[f"{ROOT}/{name}/design.md"] = ("d" * 19_000 + "\n") * 1
+        files[f"{ROOT}/{name}/notes-1.md"] = "n" * 19_000 + "\n"
+        files[f"{ROOT}/{name}/notes-2.md"] = "m" * 19_000 + "\n"
+        files[f"{ROOT}/{name}/notes-3.md"] = "o" * 19_000 + "\n"
+    w.rev = w.commit(files)
+    w.units = {A: UnitInfo(A, f"{ROOT}/a"), B: UnitInfo(B, f"{ROOT}/b"), C: UnitInfo(C, f"{ROOT}/c")}
+    fake = FakeAdapter([ok() for _ in range(4)])
+    result, _ = review(w, THREE, fake)  # no bound configured
+    batch = fake.requests[-1].prompt
+    assert len(batch) > 160_000 and "read in part" not in batch and len(fake.requests) == 4
+    assert result.batches["b1"].parts == ()
+
+
+# --- the note that a batch was reviewed in parts (L4-YOLO-098) -------------------------------------------------------
+
+
+def parts_findings(verdict):
+    return [f for f in verdict.findings if f["criterion"] == "parts"]
+
+
+def test_a_batch_in_parts_carries_one_minor_finding_that_says_so_and_stays_ready(world):
+    fake = FakeAdapter([ok() for _ in range(7)])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(1000))
+    verdict = result.batches["b1"]
+    assert verdict.verdict == "READY" and parts_findings(verdict) == [PARTS_FINDING]  # a note: it blocks nothing
+    assert verdict.missing[-1].startswith("judged in 4 parts")  # the `missing` line stays
+    assert all(not parts_findings(v) for _, v in verdict.parts)  # the recorded parts are what the judge said
+    assert all(not parts_findings(v) for v in result.units.values())
+
+
+def test_the_finding_is_added_once_to_a_verdict_that_already_has_findings(world):
+    major = {"criterion": "contradiction", "severity": "major", "text": "a and b disagree"}
+    fake = FakeAdapter([ok(), ok(), said("NEEDS_REVISION", [major]), ok(), ok()])
+    result, _ = review(world, TWO, fake, cfg=cfg_of(1000))
+    verdict = result.batches["b1"]
+    assert verdict.verdict == "NEEDS_REVISION" and verdict.findings == (major, PARTS_FINDING)
+
+
+def test_a_batch_asked_whole_carries_no_such_finding(world):
+    fake = FakeAdapter([ok() for _ in range(4)])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(0))
+    assert not parts_findings(result.batches["b1"]) and result.batches["b1"].parts == ()
+
+
+def test_every_way_into_parts_carries_the_finding(world):
+    limit = Step(status="error", length_stop=True, detail="stopped at the output limit")
+    j1 = FakeAdapter([ok(), ok(), limit, ok(), ok(), ok()])
+    by_limit, _ = review(world, TWO, j1)
+    j1 = FakeAdapter([ok(), ok(), Step(status="timeout"), ok(), ok(), ok()])
+    by_timeout, _ = review(world, TWO, j1)
+    first = _first_review(world)
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    kept = [v.material for _, v in first.batches["b1"].parts][:2]
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    by_kept, _ = review(world, THREE, FakeAdapter([]), cfg=cfg_of(0), prior=prior, kept=kept)
+    for result in (by_limit, by_timeout, by_kept):
+        assert parts_findings(result.batches["b1"]) == [PARTS_FINDING]
 
 
 # --- SCN-YOLO-274 ----------------------------------------------------------------------------------------------------
