@@ -846,3 +846,19 @@ def test_scn_imp_554_the_next_red_attempt_may_change_the_test_after_an_already_s
     committed = bench.wb.git.run("show", "HEAD:e2e/test_existing_ui.py").stdout
     assert "1500 == 1500" in committed  # the second attempt's version, not the one that failed
     assert [e["phase"] for e in bench.events("task.attempt_failed")] == ["red"]
+
+
+def test_the_real_red_prompt_says_the_browser_tests_are_frozen_when_the_test_globs_cover_them(make_bench):
+    """`_prompt` sets `PromptContext.e2e_frozen` from `tdd.test_globs` and the e2e directory."""
+    bench = make_bench([browser_red()], e2e=e2e_config(free_port()))
+    assert run_red(bench.wb, TASK, attempt=1).status == "ok"
+    prompt = bench.adapter.requests[0].prompt
+    assert "The step that completes this task runs them" in prompt and "frozen after this step" in prompt
+
+
+def test_the_real_red_prompt_does_not_say_frozen_when_the_test_globs_miss_the_e2e_directory(make_bench, monkeypatch):
+    monkeypatch.setattr("l4.implementer.tdd._matches", lambda globs, path: False)
+    bench = make_bench([browser_red()], e2e=e2e_config(free_port()))
+    assert run_red(bench.wb, TASK, attempt=1).status == "ok"
+    prompt = bench.adapter.requests[0].prompt
+    assert "The step that completes this task runs them" in prompt and "frozen after this step" not in prompt
