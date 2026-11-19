@@ -70,12 +70,14 @@ fail, then write the code. Run only the test files named here, never the whole s
     byte-identical to the text for `options=None` with the same `cli_major` handling (assert no `"providers"` in the text
     and equality with the existing pinned expectations of `test_opencode_v2_command.py`);
   - SCN-OCV-52: with the `make_ctx` fixture (as `tests/unit/availability/test_probes_opencode_v2.py` uses it), the hello
-    and the `auth` step of a `cli_major: 2` profile with the key both carry the `providers` block in
-    `OPENCODE_CONFIG_CONTENT`, and neither environment holds `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`; the run (with the
-    `V2Proc` of `tests/unit/agents/test_opencode_v2_run.py`) carries it in the run's and the export's configuration.
+    of a `cli_major: 2` profile with the key carries the `providers` block in `OPENCODE_CONFIG_CONTENT`, and its `auth`
+    step's `OPENCODE_CONFIG_CONTENT` equals the one of the same profile without the key; the run (with the `V2Proc` of
+    `tests/unit/agents/test_opencode_v2_run.py`) carries the block in the run's and the export's configuration; no
+    environment holds `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`.
 - [ ] 3.2 Then, in `src/l4/agents/opencode_v2.py`, append the block in `config_content_v2` after `agents` when
-  `options is not None and options.max_output_tokens is not None`, splitting `model` on the first `/`. Nothing else
-  changes. Run the new tests and `uv run --frozen pytest tests/unit/agents/test_opencode_v2_command.py
+  `options is not None and options.max_output_tokens is not None`, splitting `model` on the first `/`. In the `auth`
+  step of `probe_opencode_v2`, pass `options.model_copy(update={"max_output_tokens": None})` (when `options` is not
+  None) so the listing's configuration stays as without the key. Nothing else changes. Run the new tests and `uv run --frozen pytest tests/unit/agents/test_opencode_v2_command.py
   tests/unit/agents/test_opencode_v2_run.py tests/unit/agents/test_opencode_v2_allow_list.py
   tests/unit/availability/test_probes_opencode_v2.py -q`.
 
@@ -123,12 +125,18 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 6. The live record (a person with keys; not the implementer)
 
-- [ ] 6.1 On a machine with `@opencode/cli` 2.2.6 and an `opencode-go/` key, run `l4 probe <profile> --role judges
-  --no-cache` for a `cli_major: 2` profile with `max_output_tokens: 65536`, and one judge call of a unit or plan review;
-  record the stream and the export under `tests/fixtures/recorded/opencode/2.2.6/live-output-limit*` (redacted as the
-  other `live-` fixtures). If a step's `tokens.output` passes 32000 or the hello answers, mark the [I] of L4-OCV-020 and
-  design D8 [V]; if the hello fails, report the error and do not release the v2 part. Do the same for a v1 profile and
-  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` on 1.18.34.
+- [ ] 6.1 The oracle is the lowering direction, which is cheap and does not depend on a model writing 32000 tokens. On a
+  machine with `@opencode/cli` 2.2.6 and an `opencode-go/` key, for a `cli_major: 2` profile:
+  - with `max_output_tokens: 1024`, one judge call whose prompt asks for a long reply (for example "write 3000 words
+    about X, then the JSON") must stop with `length` and a `step_finish` `tokens.output` near 1024; the same prompt on
+    the same profile without the key must not stop at 1024;
+  - `l4 probe <profile> --role judges --no-cache` with `max_output_tokens: 65536` must answer the hello;
+  - record the streams and exports under `tests/fixtures/recorded/opencode/2.2.6/live-output-limit*` (redacted as the
+    other `live-` fixtures).
+  Do the same on OpenCode 1.18.34 with a v1 profile (this also shows that the pin still reads
+  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`; nobody has read 1.18.34's binary), under `.../1.18.34/` or the v1 recorded
+  folder in use. When the 1024 runs stop where they should, mark the [I] of L4-OCV-020 and of design D8 [V]. If the hello
+  fails, or the 1024 run does not stop near 1024, report it and do not release that major's part.
 
 ## 7. Docs
 
@@ -146,8 +154,13 @@ fail, then write the code. Run only the test files named here, never the whole s
     provider's model entry `output` above 32000 needs the key on OpenCode 1. An example:
     `judge-oc: {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu, options:
     {max_output_tokens: 65536}}`, with a comment to use the model's own maximum.
-  - Section 10.9 gets one line pointing to 10.10 for the output limit. Do not add a row to its known-fallbacks table
-    (`tests/unit/docs/test_opencode_v2_docs.py` pins U1 to U11).
+  - Section 10.9 gets one line pointing to 10.10 for the output limit, without the word "experimental". Do not add a row
+    to its known-fallbacks table (`tests/unit/docs/test_opencode_v2_docs.py` pins U1 to U11).
+  - `tests/unit/docs/test_opencode_v2_docs.py` slices "runbook 10.9" from `### 10.9 ` to `\n## 11. `, and
+    `test_neither_text_calls_the_adapter_experimental` asserts that the slice never says "experimental"; 10.10 names
+    `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`. End that slice at the next `\n### 10.` heading as well (in `sections()`:
+    `.split("\n### 10.10 ", 1)[0]` before `.split("\n## 11. ", 1)[0]`), so the 10.9 tests still read only 10.9. Run
+    `uv run --frozen pytest tests/unit/docs/test_opencode_v2_docs.py -q` after the edit.
 - [ ] 7.2 `plugins/l4/skills/l4/references/adopt.md`: a short `## 4h. An OpenCode profile's output limit` after 4g, in
   the style of 4d: the key, that the default is OpenCode's own (32000 on v1), when to set it (a judge or reviewer whose
   replies stop with `length`), to use the model's real maximum, and that the pin must be 0.4.59 or later before the key

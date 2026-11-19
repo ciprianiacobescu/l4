@@ -85,7 +85,9 @@ SHALL stay pure: the adapters' `run()` add the hints after it.
 For a `cli_major: 2` profile with `options.max_output_tokens: n`, `config_content_v2` SHALL append, after `agents`,
 `providers: {<provider>: {models: {<model id>: {limit: {output: n}}}}}`, where `<provider>` is the profile model's part
 before the first `/` and `<model id>` everything after it, and nothing else in that block (no `context`, no `input`, no
-package, settings or name). The run, the hello and the `auth list` step SHALL get that configuration. Without the key the
+package, settings or name). The run, its export and the hello SHALL get that configuration; the `auth list` step SHALL
+get the configuration without it (it makes no model call, and what a configured provider entry does to the listing is
+not recorded); no v2 call SHALL get `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`. Without the key the
 configuration SHALL be byte-identical to the one before this requirement.
 
 OpenCode 2 has no output variable; its loader merges a configured model's limit over the catalog's (`{...catalog.limit,
@@ -111,11 +113,12 @@ provider's own settings and login and reaches the request is inferred from the l
 - **When** its configuration is rendered
 - **Then** it has no `providers` key and is byte-identical to 0.4.58's
 
-#### Scenario: SCN-OCV-52 (+) The hello and auth list carry the same overlay
+#### Scenario: SCN-OCV-52 (+) The run, the export and the hello carry the overlay; auth list does not
 - **Given** the profile of SCN-OCV-49
-- **When** its hello and its `auth list` step run
-- **Then** each `OPENCODE_CONFIG_CONTENT` holds the same `providers` block, and the hello's environment holds no
-  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`
+- **When** its run and export, its hello and its `auth list` step run
+- **Then** the run's, the export's and the hello's `OPENCODE_CONFIG_CONTENT` hold the same `providers` block, and the
+  `auth list` step's equals the one of the profile without the key
+- **And** no environment holds `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`
 
 ## MODIFIED Requirements
 

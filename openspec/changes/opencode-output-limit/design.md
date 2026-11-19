@@ -151,8 +151,9 @@ Context). Without the key, the configuration is byte-identical to 0.4.58's.
   the built environment, and `options.provider` is refused on v2. So the key wins over the catalog and nothing else
   competes. When a later release lifts `provider_refused` (U3), the load rule of D2 holds for both majors (the key is
   at most the entry's `output`), and the overlay is the entry's own `limit` with `output` set to the key.
-- The hello and `auth list` get the same configuration, because they call the same builder; only the hello makes a model
-  call.
+- The run, its export and the hello get the overlay. The `auth list` step does not: it makes no model call, and what a
+  configured provider entry does to the listing (which enumerates providers) is not recorded. It calls
+  `config_content_v2` with `options.model_copy(update={"max_output_tokens": None})`, as v1's auth step gets no variable.
 - The asymmetry is stated in the docs: v1 takes the smaller of the key and the catalog's limit; v2 takes the key. The 400
   risk is therefore any model on v2, and only a model the catalog does not know on v1.
 

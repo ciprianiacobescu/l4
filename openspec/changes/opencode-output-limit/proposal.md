@@ -36,8 +36,9 @@ So a large value for every model is wrong when the model's limit is not known.
   256000, checked at load like the other opencode options. With `options.provider` it may not exceed the model entry's
   `output`; with `context_window` it must be below it.
 - OpenCode 1: the run (every mode) and the hello export `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=<n>`.
-- OpenCode 2: the run, the hello and `auth list` render `providers.<provider>.models.<model>.limit.output = <n>` in
-  `OPENCODE_CONFIG_CONTENT`, after `agents`, and nothing else in that block.
+- OpenCode 2: the run, its export and the hello render `providers.<provider>.models.<model>.limit.output = <n>` in
+  `OPENCODE_CONFIG_CONTENT`, after `agents`, and nothing else in that block; `auth list` keeps the configuration
+  without it.
 - Without the key nothing changes: no variable, no `providers` block, byte-identical configurations.
 - A run that stops with `length` on an opencode profile gets a hint in its detail that names the key (with its value
   when set); a run or hello that fails with status 400 on a profile with the key says the key may be above the model's
