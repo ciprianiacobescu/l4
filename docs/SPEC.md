@@ -2773,6 +2773,33 @@ keeps the browser's default 8px body margin, so the scroll width was 1508 and no
 all nine tasks without running, failed first at verification step 3, and its fix unit could change neither the test nor
 the support file it uses (ci-evidence D11), while the parent task's green step could have had the test unfrozen.]
 
+**L4-IMP-102 A fix task, its prompt and its questions carry the failure text of its tests.** A fix task whose findings
+name failing tests SHALL carry a *failure block*. The tests are, per finding: for `test gate failed` and `e2e gate
+failed` every record of that gate in the round's `failures` (collection records included); for `new tests failed` and
+`new tests errored` the recorded ids its detail names (the part of a cut list that matches included); for any other
+finding none. The block SHALL hold each test, sorted, as `<id> (<kind>, <gate>):` followed by the lines of its `excerpt`
+(L4-VER-078), or its `message` when it has none, indented by two spaces, at most 8 tests and 6,000 characters, whole tests
+only, and a last line `and <n> more failing tests (the round's verdict.json)` for the rest. `plan_fix_unit` SHALL set it
+on every task that is not a feedback item (`Finding.failures`, the repair chore included), and the plan's redaction
+SHALL redact it. The block SHALL be written into the fix unit's `proposal.md` (OpenSpec: right after the finding's line
+in `## What Changes`) or `design.md` (Kiro: after the finding's detail), after the line `Failing tests as the verifier
+recorded them:`, every line indented by four spaces, so that no line of it can open or close a heading, a list or a
+fence, and never into `tasks.md`, where the OpenSpec CLI counts any line shaped like a checkbox; the fix unit SHALL
+still validate. The prompt of a fix chore (kind `fix`) SHALL hold the block, read from the round that spawned the fix
+unit (`fix.spawned.verify_round`), under `# Failures of this task's tests` in a data block that the context budget does
+not govern, so a `proposal.md` cut from the unit context does not lose it; the repair chore keeps its own `Tests to
+repair` block. Every question a fix chore raises SHALL hold the block in its Context as `Harness note: the verifier recorded these
+failures for the tests of this task's findings:`. Every question raised by an attempt that follows a failed attempt of
+the same task and phase in the run SHALL hold `Harness note: the previous attempt of this task was rejected: <reason,
+at most 300 characters>` and, when that attempt had one, its ledger excerpt (L4-IMP-064, 600 characters). These notes
+SHALL come after the agent's own text and before the harness note on unfreezing or on the fix task, which stays last
+(SCN-IMP-398; the delegate finds a chore's question by `chore: true` and that note's first sentence, L4-DLG-025); the question of a hung frozen test (W-D1) is
+about the attempt that just failed and gets neither. Everything SHALL pass the redactor (the Context is redacted again
+when `questions.md` is written). With no stored round (a recovered fix unit) or a round without `failures`, nothing
+SHALL be added. [V, a consumer's fix chore for a browser test that failed by assertion got the test's id but not its
+message; its implementer asked a question that said it did not reproduce the failure, the delegate escalated it, and the
+person read a question without the one-line cause, which the round's `verdict.json` held.]
+
 ### 7.5 Post-step guards, commits and trailers
 
 **L4-IMP-006** After each agent step the harness MUST: (1) revert protected-path changes (P4, `odd.forbidden_paths`
@@ -5928,6 +5955,20 @@ unit test in `tests`. `restore_round` keeps the three keys of a reused round. Re
 working, and a verdict written before them has none (no id is known then, and a fix chore relies on the finding's title
 alone, L4-IMP-090). [V, a consumer's end-to-end test raised an error before any check; nothing in the round said which gate
 a failing test came from or whether it failed by assertion or by error, so a broken test and broken code looked the same]
+
+**L4-VER-078 Step 3 records a bounded failure excerpt of each failing test.** For each of the first 20 failed or errored
+tests of each gate (`test`, `e2e`) in sorted id order, the round's `failures` record (L4-VER-069) SHALL hold an
+`excerpt`: the lines the retry prompt shows for that test (L4-IMP-064: its `E` lines, the deepest repository frame's
+source line and location, the last location; the message's first lines when the report holds no body), paths relative
+to the worktree and the gate's tmp root shown as `<tmp>`, the body redacted whole before a line is dropped and the result
+redacted again, at most 8 lines and 600 characters (cut at a line end; a longer single line at 600). A module that a
+report could not collect, among those 20 by its id, SHALL get the `E` lines of its collection error the same way. A
+record with nothing to show has no `excerpt`. `message`, `location`, `frames`, the 200-record cap of the `test` side and
+`failures_dropped` SHALL stay as they are; `restore_round` SHALL keep the excerpts of a reused round, and readers that do
+not know the key (`repairs`, the fix unit's grouping, the fix chore's e2e duty) SHALL keep working. A `verdict.json`
+grows by at most 24,000 characters. [V, a consumer unit's browser test failed at step 3 with `assert 1508 == 1500`; the
+verdict kept the first line of each failing test's message, but the fix task and the question made from it carried
+only the test's id, and the implementer of the fix chore reported that it could not reproduce the failure.]
 
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
@@ -9368,6 +9409,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
 | 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` right after the phase, before a refused move and the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
 | 131 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the test functions (`tamper.facts_of`) of the Python files under `e2e_test_dir(gates.e2e)`, not `conftest.py`, `__init__.py` or a support glob, that the red commit added or changed (read from git, so a resumed red counts); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`, the task's tests matched by `names_test_id` and judged in order (timed out, no report, not collected, not in the report, not passed), the excerpt of the failing ones, `ServerNotReady` a failed attempt with the log's end, `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold, when `e2e_configured`; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt's browser-test paragraph says the green step runs them and that they are frozen. `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for green. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; browser tests in another language and a support-only change are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_fix_chore_e2e`, `test_tdd_green`, `test_near_pass_carry`, `test_already_satisfied`, `test_prompt`, `test_deadline`) |
+| 132 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding by `openspec._proposal` and `kiro._fix_design`, never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason and ledger excerpt. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..310, SCN-IMP-557..561; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_loop`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13462,6 +13504,38 @@ scenario is a spec defect (§26).
 - **When** the next green step is checked
 - **Then** its estimate is 55 minutes (the cap is 60), where without `gates.e2e` it would be 40
 
+#### SCN-IMP-557 (+) The fix proposal shows why the test failed · L4-IMP-102, L4-VER-006
+- **Given** a round with `e2e gate failed` whose record of `e2e.test_layout::test_width[chromium]` has kind `assertion`
+  and an excerpt that holds `assert 1508 == 1500`
+- **When** the fix unit is written (OpenSpec, and Kiro)
+- **Then** its `proposal.md` (Kiro: `design.md`) holds, under that finding, `e2e.test_layout::test_width[chromium]
+  (assertion, e2e):` and `assert 1508 == 1500` on indented lines, its `tasks.md` is as before, and it validates
+
+#### SCN-IMP-558 (+) The fix chore's first prompt holds the failure · L4-IMP-102
+- **Given** the fix unit of SCN-IMP-557 and a context budget so small that `proposal.md` is cut from the prompt
+- **When** its fix chore's first step is prompted
+- **Then** the prompt holds a `Failures of this task's tests` block with `assert 1508 == 1500`
+
+#### SCN-IMP-559 (+) The fix chore's question shows the failure to the person · L4-IMP-102, L4-DLG-025
+- **Given** the fix chore of SCN-IMP-558, whose agent reports blocked with a technical question that holds no failure
+  text
+- **When** the question is raised
+- **Then** its Context holds the agent's text, then the harness note with `assert 1508 == 1500`, and ends with the
+  fix chore's note as before
+
+#### SCN-IMP-560 (+) A question after a failed attempt says why that attempt failed · L4-IMP-102, L4-IMP-064
+- **Given** a green attempt that failed with `red tests still failing: tests.test_a::test_x` and the excerpt
+  `E   assert 2 == 3`, and a next green attempt that reports blocked with a question
+- **When** the question is raised
+- **Then** its Context holds, after the agent's text, `Harness note: the previous attempt of this task was rejected:
+  red tests still failing: tests.test_a::test_x` and a line holding `assert 2 == 3`; a question of a first attempt has
+  no such note
+
+#### SCN-IMP-561 (−) Nothing is added without a recorded failure · L4-IMP-102
+- **Given** a fix unit whose spawning round is not on record, and another whose round's verdict has no `failures`
+- **When** their fix chores are prompted and raise questions
+- **Then** no failure block is in the prompt or the Context, and the rest of both is as before
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -15548,6 +15622,26 @@ scenario is a spec defect (§26).
 - **Then** the criterion's UI hold is raised right after the judge step and stored in `verdict.json` (the criterion does
   not pass on the other test alone), one hold question is asked, and a reused round keeps the hold; with the
   `zero_value` test alone the criterion is `needs_human` through aggregation and no hold is raised (SCN-VER-303)
+
+#### SCN-VER-308 (+) The excerpt of a failing browser test is recorded · L4-VER-078, L4-VER-069
+- **Given** a round whose e2e gate fails `e2e.test_layout::test_width[chromium]` with the body lines `>       assert
+  width == 1500` and `E       assert 1508 == 1500` under an absolute worktree path
+- **When** step 3 writes the verdict
+- **Then** its `failures` record holds `message` as before and an `excerpt` that holds both lines with the file's path
+  relative to the worktree, at most 8 lines and 600 characters
+
+#### SCN-VER-309 (−) A secret in a failure is not recorded · L4-VER-078, L4-OBS-002
+- **Given** a failing test whose body holds a token-shaped value (`glpat-` followed by 20 letters and digits), and a
+  private-key block whose end marker lies past the eighth line
+- **When** step 3 writes the verdict
+- **Then** no part of the token of 8 characters or more and no line of the key block is in the `excerpt` or in
+  `verdict.json`
+
+#### SCN-VER-310 (+) The excerpts are bounded per gate · L4-VER-078
+- **Given** a round with 30 failing unit tests and 2 failing browser tests
+- **When** step 3 writes the verdict
+- **Then** the first 20 unit-test records by id and both browser records hold an `excerpt`, the other 10 hold their
+  `message` only, and a reused round keeps the same records
 
 ## MODIFIED Requirements
 
