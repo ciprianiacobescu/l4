@@ -207,7 +207,12 @@ def config_content_v2(
     ordered `permissions` and `agents.build.steps`. No v1 key (`permission`, `tools`, `snapshot`, `autoupdate`) and no
     `list` or `doom_loop` rule, which are not v2 actions. A read-only policy raises (amendment E4). With
     `options.max_output_tokens` the model's `limit.output` follows `agents` as `providers.<provider>.models.<id>`: the
-    loader merges it over the catalog's limit and nothing else of the provider changes (L4-OCV-020)."""
+    loader merges it over the catalog's limit (L4-OCV-020). The block is not limit-only [I, from the 2.2.6 binary's
+    strings, not seen in a request]: a provider named in `providers` gets `activation="enabled"`; an enabled provider
+    counts as available without a connection, and the model resolution can then swap the request's auth when there is
+    no credential or key; and a model the catalog does not know is created with the defaults `limit {context: 200000,
+    output: 32000}`. A profile with a credential (a stored login, `OPENCODE_API_KEY`, the free tier's public key) does
+    not take that branch."""
     steps = step_bound(policy, options)
     refuse = "ask" if model.startswith(FREE_PREFIX) else "deny"
     config: dict[str, Any] = {

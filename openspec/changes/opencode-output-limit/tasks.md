@@ -49,7 +49,7 @@ fail, then write the code. Run only the test files named here, never the whole s
     (`run.calls[-1][2]` is the environment).
 - [x] 2.2 Then, in `src/l4/agents/opencode.py`: add `OUTPUT_TOKEN_ENV = "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"` (a
   comment: OpenCode 1 reads it as `flags.outputTokenMax`, `maxOutputTokens = min(model.limit.output, value) || value`,
-  default 32000 [V src, 1.18.33]; re-read it when the pin moves) and `output_limit_env(options: OpencodeOptions | None)
+  default 32000 [V src, 1.18.33 and 1.18.34]; re-read it when the pin moves) and `output_limit_env(options: OpencodeOptions | None)
   -> dict[str, str]`. Merge it in `run()` after `isolation_env(...)` and in `_hello_once` into the `probe_env` extra.
   Leave `config_content` and `isolation_env` unchanged. Run the new file and `uv run --frozen pytest
   tests/unit/agents/test_opencode.py tests/unit/agents/test_opencode_provider.py tests/unit/agents/test_opencode_delegate.py
@@ -133,8 +133,17 @@ fail, then write the code. Run only the test files named here, never the whole s
   - `l4 probe <profile> --role judges --no-cache` with `max_output_tokens: 65536` must answer the hello;
   - record the streams and exports under `tests/fixtures/recorded/opencode/2.2.6/live-output-limit*` (redacted as the
     other `live-` fixtures).
+  Also, on the same machine, with a `cli_major: 2` profile that has `max_output_tokens`:
+  - a hello with no credential at all (no stored login, no `OPENCODE_API_KEY`, a model that is not of the free tier):
+    the 2.2.6 binary's strings suggest that naming the provider in `providers` enables it, counts it as available
+    without a connection and can swap the request's auth [I, design D5]; record what the hello answers (an auth error
+    is the right answer; a request that goes out with other auth is a finding to report, not to release);
+  - a hello of a profile with a stored login (`opencode2 auth login`) and the key, which must answer with the stored
+    credential.
   Do the same on OpenCode 1.18.34 with a v1 profile (this also shows that the pin still reads
-  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`; nobody has read 1.18.34's binary), under `.../1.18.34/` or the v1 recorded
+  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`; the binaries of 1.18.33 and 1.18.34 were read and agree [V src], and a live
+  run on 1.18.33 showed that the variable limits the output [V live, 1.18.33]: `1024` gave an empty reply in 12 s,
+  unset gave 800 lines; raising above 32000 and the v2 block are not verified live), under `.../1.18.34/` or the v1 recorded
   folder in use. When the 1024 runs stop where they should, mark the [I] of L4-OCV-020 and of design D8 [V]. If the hello
   fails, or the 1024 run does not stop near 1024, report it and do not release that major's part.
 
@@ -164,7 +173,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 - [x] 7.2 `plugins/l4/skills/l4/references/adopt.md`: a short `## 4h. An OpenCode profile's output limit` after 4g, in
   the style of 4d: the key, that the default is OpenCode's own (32000 on v1), when to set it (a judge or reviewer whose
   replies stop with `length`), to use the model's real maximum, and that the pin must be 0.4.59 or later before the key
-  is added (the schema is strict).
+  is added (an older harness ignores the key without an error: check the pin is 0.4.59 or later first).
 - [x] 7.3 `docs/SPEC.md` already holds L4-FAC-023, L4-OCV-020, the amendments of L4-OCV-005 and L4-VER-071, the §8.3
   rows, the §3.2 example, SCN-FAC-52..58, SCN-OCV-49..52 and change-table row 131, and `CHANGELOG.md` its Unreleased
   entry. Check them against the code; fix the code or tell the orchestrator where they differ. Run

@@ -158,7 +158,7 @@ def mask_instruction_files(root: Path) -> list[Path]:
 
 
 # OpenCode 1 reads this as `flags.outputTokenMax`: `maxOutputTokens = min(model.limit.output, value) || value`, default
-# 32000 [V src, 1.18.33]. Re-read it when the pin moves: the variable is named EXPERIMENTAL.
+# 32000 [V src, 1.18.33 and 1.18.34]. Re-read it when the pin moves: the variable is named EXPERIMENTAL.
 OUTPUT_TOKEN_ENV = "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"
 _HINT_LENGTH_V1 = (
     "the reply stopped at its output limit: OpenCode 1 asks for at most 32000 output tokens unless "

@@ -9,7 +9,7 @@ reasoning model fills with its thinking is not helped by fewer criteria. L4 sets
 
 What the two CLIs ask for, read in their binaries [V src]:
 
-- **OpenCode 1** (L4 pins 1.18.34; read in the 1.18.33 binary): `maxOutputTokens(model, Z) = Math.min(model.limit.output,
+- **OpenCode 1** (L4 pins 1.18.34; read in the 1.18.33 and 1.18.34 binaries): `maxOutputTokens(model, Z) = Math.min(model.limit.output,
   Z) || Z`, where `Z` is `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` and 32000 when the variable is unset. The request asks
   for the smaller of the model's known output limit and `Z`, and for exactly `Z` when the model's limit is unknown (0).
   The variable is a ceiling, not a setter: it cannot lift a request above a limit OpenCode knows. The same value sets the

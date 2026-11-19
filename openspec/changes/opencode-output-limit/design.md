@@ -99,6 +99,10 @@ profile makes, in every role and mode (implementer, judge, clarifier, readiness 
   smaller): raise the entry's output or lower the key`. OpenCode 1 takes the smaller of the two, so a larger key would be
   a silent no-op; the two numbers say the same thing, and a contradiction is a load error here (the `vendor` checks are
   the precedent). Equal is fine and is how a custom provider's `output` above 32000 takes effect (D3).
+- With a custom provider's model entry, the key SHALL also be below the entry's `context` (`options.max_output_tokens
+  must be below the context of the model's entry in options.provider.models (the prompt and the reply share the
+  window)`): OpenCode 1 compacts at `context - min(output, key)`, so a key at or above the context leaves no room for
+  the prompt. The two entry checks are both reported when both fail.
 - With the profile's `context_window`, the key SHALL be below it: `options.max_output_tokens must be below
   context_window (the prompt and the reply share the window)`. On OpenCode 1 a key at or above the window makes the
   auto-compaction threshold 0 for a model without a catalog input limit (Context). This check is in
@@ -140,8 +144,7 @@ into the hello's `probe_env` extra. The `auth` probe step (`opencode auth list`)
 {"output": n}}}}}` after `agents`, where `<provider>` is the profile model's part before the first `/` and `<model id>`
 everything after it (`openrouter/anthropic/claude-x` gives `openrouter` and `anthropic/claude-x`, as
 `provider_config` splits a v1 model). Nothing else goes in the block: no `context`, no `input`, no package, settings or
-name, so the catalog's context and the provider's own settings and login stay (the loader merges only what is given,
-Context). Without the key, the configuration is byte-identical to 0.4.58's.
+name, so the catalog's context stays (the loader merges only the limit it is given, Context). Without the key, the configuration is byte-identical to 0.4.58's.
 
 - Effect: the configured `output` replaces the catalog's (`{...catalog.limit, ...config.limit}`), then `cV` clamps it to
   256000 and fits it to the context. On v2 the key is a setter: it can raise a request above a limit the catalog knows,
@@ -151,6 +154,13 @@ Context). Without the key, the configuration is byte-identical to 0.4.58's.
   the built environment, and `options.provider` is refused on v2. So the key wins over the catalog and nothing else
   competes. When a later release lifts `provider_refused` (U3), the load rule of D2 holds for both majors (the key is
   at most the entry's `output`), and the overlay is the entry's own `limit` with `output` set to the key.
+- The block is not limit-only [I, from the 2.2.6 binary's strings; not seen in a request]. A provider named in
+  `providers` gets `activation="enabled"`. An enabled provider counts as available without a connection, and the model
+  resolution can then swap the request's auth when there is no credential or key. A model the catalog does not know is
+  created with the defaults `limit {context: 200000, output: 32000}`. A profile with a credential (a stored login,
+  `OPENCODE_API_KEY`, the free tier's public key) does not take that branch, so the profiles of the harness are not
+  affected; a profile with no credential at all could be (task 6.1 adds a no-credential hello and a stored-login
+  profile to the live check).
 - The run, its export and the hello get the overlay. The `auth list` step does not: it makes no model call, and what a
   configured provider entry does to the listing (which enumerates providers) is not recorded. It calls
   `config_content_v2` with `options.model_copy(update={"max_output_tokens": None})`, as v1's auth step gets no variable.
@@ -195,9 +205,10 @@ the live check. A bad value is a load error, which every command, `l4 doctor` in
 
 | Fact | Label | Where it is pinned |
 |---|---|---|
-| v1's formula, the variable's name and the compaction threshold | [V src, 1.18.33 binary]; the 1.18.34 pin was not read | the env tests of task 2 pin the name; a pin move re-reads it |
+| v1's formula, the variable's name and the compaction threshold | [V src, 1.18.33 and 1.18.34] (the same variable, the same `Math.min($.limit.output,Z)\|\|Z` with Z=32000 and the same compaction formula in both binaries) | the env tests of task 2 pin the name; a pin move re-reads it |
+| the variable limits the output on OpenCode 1 | [V live, 1.18.33]: with `1024` the reply was empty after 12 s, unset it was 800 lines | task 6.1 repeats it on the pin; raising above 32000 is not verified live |
 | v2's `cV`, the `providers` root key, the optional `limit` fields, the merge | [V src, 2.2.6 binary] | the config tests of task 3 pin the shape |
-| a v2 overlay on a built-in provider keeps its login and settings and reaches the request | [I] | task 6 records it live (owner) |
+| a v2 overlay on a built-in provider reaches the request, and naming a provider also enables it, lets it count as available without a connection (the request's auth can then be swapped when there is no credential or key) and gives an unknown model `limit {context: 200000, output: 32000}` | [I] (2.2.6 binary strings, not seen in a request); a profile with a credential does not take that branch | task 6.1 records it live (owner), with a no-credential hello and a stored-login profile |
 | a provider answers a maximum above the model's with 400 | [I] | the hello of D6 |
 | OpenRouter refuses a maximum its key's credits cannot cover with 402 | [V] `tests/fixtures/recorded/opencode/1.18.33/error-openrouter-credits-max-tokens.jsonl` (`You requested up to 32000 tokens, but can only afford 7377`) | today's credits limit (L4-AVL) |
 

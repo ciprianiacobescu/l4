@@ -2728,9 +2728,10 @@ Load errors. They never print the value that you wrote.
 |---|---|
 | `options.max_output_tokens: must be a whole number from 1024 to 256000` | Write an integer in that range. A string, a decimal and `true` are refused. |
 | `options.max_output_tokens is above the output of the model's entry in options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key` | Make the key equal to or lower than the `output` of the model entry, or raise that `output`. |
+| `options.max_output_tokens must be below the context of the model's entry in options.provider.models (the prompt and the reply share the window)` | Lower the key, or raise the entry's `context` when the model's window is larger. |
 | `options.max_output_tokens must be below context_window (the prompt and the reply share the window)` | Lower the key, or raise `context_window` when the model's window is larger. |
 
-Notes in the failure line of a run, and in the reason of a hello:
+Notes in the failure line of a run. The reason of a hello carries only the last one, the HTTP 400 note:
 
 | Text | Meaning |
 |---|---|
@@ -2739,8 +2740,8 @@ Notes in the failure line of a run, and in the reason of a hello:
 | `; options.max_output_tokens is set: a provider refuses a maximum output above the model's own (HTTP 400)` | The profile has the key and the provider answered HTTP 400. The key may be above the model's maximum. Lower it. A custom provider's `grammar binding failed` has another cause and gets no such text. |
 
 Risks:
-- A value above the model's maximum gets an HTTP 400 on OpenCode 2 for every model, and on OpenCode 1 for a model that
-  the catalog does not know. The hello shows it.
+- A value above the model's maximum can get an HTTP 400 on OpenCode 2 for every model, and on OpenCode 1 for a model
+  that the catalog does not know. The hello shows it.
 - OpenRouter reserves credits for the whole maximum output. A raised key on a key with few credits can turn a call
   into a 402, which L4 reads as out of credits, and the profile cools down. A recorded line reads `You requested up to
   32000 tokens, but can only afford 7377`.
@@ -2750,8 +2751,12 @@ Risks:
 - A larger limit lets a model that loops or explains too much spend more tokens for each call.
 - OpenCode 1 names the variable `EXPERIMENTAL`, and a later 1.x can drop it. The pin is fixed, and a move of the pin
   re-reads the variable.
-- That an OpenCode 2 configuration for a built-in provider keeps the provider's own login and settings and reaches
-  the request is read from the loader's code. It is [I] until a live run records it.
+- That an OpenCode 2 configuration for a built-in provider reaches the request is read from the loader's code. It is
+  [I] until a live run records it. The block is not limit-only [I, from the 2.2.6 binary's strings, not seen in a
+  request]: a provider named in it is enabled, an enabled provider counts as available without a connection (the
+  request's auth can then be swapped when there is no credential or key), and a model the catalog does not know gets
+  `limit {context: 200000, output: 32000}`. A profile with a credential (a stored login, `OPENCODE_API_KEY`, the free
+  tier's public key) does not take that branch.
 
 `l4 doctor` adds a note to PRV-001 for a custom-provider profile on OpenCode 1 whose model entry has an `output` above
 32000 and that has no key: `<profile> asks for at most 32000 output tokens although its model entry allows <output>

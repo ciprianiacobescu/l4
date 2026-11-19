@@ -5,13 +5,13 @@ An `opencode` profile SHALL accept `options.max_output_tokens`, the model's outp
 makes (every role and mode, and the hello). The value SHALL be a whole number from 1024 to 256000; anything else (a
 `bool`, a float, a string, a number outside the range) SHALL be refused at load with `options.max_output_tokens: must be
 a whole number from 1024 to 256000`, which never holds the value. With `options.provider`, the key SHALL NOT be above
-the output of the model's entry in `options.provider.models` (OpenCode asks for the smaller of the two); with the
-profile's `context_window`, the key SHALL be below it. Without the key, the adapters SHALL run exactly as before: no
+the output of the model's entry in `options.provider.models` (OpenCode asks for the smaller of the two) and SHALL be
+below that entry's `context`; with the profile's `context_window`, the key SHALL be below it. Without the key, the adapters SHALL run exactly as before: no
 variable, no configuration block, byte-identical configurations.
 
 For OpenCode 1, a profile with the key SHALL export `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=<n>` to the run, in every
 mode, and to the hello, and not to the `auth` probe step; its `OPENCODE_CONFIG_CONTENT` SHALL be unchanged. OpenCode 1
-asks for `min(model.limit.output, n)`, or `n` when the catalog does not know the model's limit [V src, 1.18.33].
+asks for `min(model.limit.output, n)`, or `n` when the catalog does not know the model's limit [V src, 1.18.33 and 1.18.34]. A live run on 1.18.33 shows that the variable limits the output: with `1024` the reply was empty after 12 s, unset it was 800 lines [V live, 1.18.33]; that a value above 32000 raises a request is not verified live.
 
 A run whose `length_stop` is set SHALL carry a hint after its detail, joined by `; ` (the hint alone when the detail is
 empty): `the reply stopped at its output limit: OpenCode 1 asks for at most 32000 output tokens unless
@@ -49,13 +49,16 @@ SHALL stay pure: the adapters' `run()` add the hints after it.
 - **And** `1024`, `32000` and `256000` load
 
 #### Scenario: SCN-FAC-55 (−) A key above a custom provider's model output, or not below context_window, is refused
-- **Given** a custom-provider profile whose model entry's `output` is 16384 with `options.max_output_tokens: 32000`, and
-  a profile with `context_window: 65536` and `options.max_output_tokens: 65536`
+- **Given** a custom-provider profile whose model entry's `output` is 16384 with `options.max_output_tokens: 32000`, a
+  custom-provider profile whose model entry's `context` is 65536 (and `output` 100000) with `options.max_output_tokens:
+  65536`, and a profile with `context_window: 65536` and `options.max_output_tokens: 65536`
 - **When** the configuration loads
 - **Then** the first is refused with `options.max_output_tokens is above the output of the model's entry in
   options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key`
-- **And** the second with `options.max_output_tokens must be below context_window (the prompt and the reply share the
-  window)`, while `16384` with that entry and `65535` with that window load
+- **And** the second with `options.max_output_tokens must be below the context of the model's entry in
+  options.provider.models (the prompt and the reply share the window)`, and the third with `options.max_output_tokens
+  must be below context_window (the prompt and the reply share the window)`, while `16384` with the first entry, `65535`
+  with the second entry's context and `65535` with that window load
 
 #### Scenario: SCN-FAC-56 (+) A length stop names the key
 - **Given** a v1 judge run and a v2 judge run whose last `step_finish` reason is `length` (no export for v2, `exit 1`),
@@ -94,8 +97,12 @@ OpenCode 2 has no output variable; its loader merges a configured model's limit 
 ...config.limit}`), and its request asks for `min(limit.output > 0 ? limit.output : 32000, 256000)`, lowered to fit the
 context and never below 1024 [V src, 2.2.6]. So the key replaces the catalog's output limit (it may raise or lower it).
 No other configuration the run reads sets it: the configuration home is an empty directory of the step, project
-configuration is off, and `options.provider` is refused on v2 (L4-OCV-001). That the overlay keeps a built-in
-provider's own settings and login and reaches the request is inferred from the loader [I] until a live run records it.
+configuration is off, and `options.provider` is refused on v2 (L4-OCV-001). That the overlay reaches the request is
+inferred from the loader [I] until a live run records it, and the block is not limit-only [I, from the 2.2.6 binary's
+strings, not seen in a request]: a provider named in `providers` gets `activation="enabled"`, an enabled provider counts
+as available without a connection (the model resolution can then swap the request's auth when there is no credential or
+key), and a model the catalog does not know is created with the defaults `limit {context: 200000, output: 32000}`. A
+profile with a credential (a stored login, `OPENCODE_API_KEY`, the free tier's public key) does not take that branch.
 
 #### Scenario: SCN-OCV-49 (+) An OpenCode 2 profile with the key renders its model's limit.output after agents
 - **Given** a `cli_major: 2` profile on `opencode-go/deepseek-v4.1-flash` with `options.max_output_tokens: 65536`

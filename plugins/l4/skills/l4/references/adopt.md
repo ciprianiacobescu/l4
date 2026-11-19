@@ -286,9 +286,9 @@ profiles:
   the failure line now names the key). Set it on that profile, not on every profile.
 - **Use the model's real maximum.** A whole number from 1024 to 256000. A larger value gets an HTTP 400 from the
   provider (the hello shows it), OpenRouter reserves credits for it, and on OpenCode 1 an implementer's session compacts
-  earlier. The key may not exceed a custom provider's model `output` and must be below `context_window`.
-- **The pin must be 0.4.59 or later before you add the key.** The options schema is strict, so an older harness refuses
-  the config. Details: `docs/runbook.md` 10.10.
+  earlier. The key may not exceed a custom provider's model `output`, must be below its `context` and below `context_window`.
+- **The pin must be 0.4.59 or later before you add the key.** An older harness ignores the key without an error: check
+  the pin is 0.4.59 or later first. Details: `docs/runbook.md` 10.10.
 
 ## 5. Upgrades
 

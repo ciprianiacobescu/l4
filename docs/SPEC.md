@@ -4578,7 +4578,9 @@ context, and its clamp); anything else, a `bool`, a float or a string included, 
 `options.max_output_tokens: must be a whole number from 1024 to 256000`, which never holds the value. A value below
 32000 is allowed: the key also lowers a request. With `options.provider`, the key SHALL NOT be above the output of the
 model's entry in `options.provider.models` (`options.max_output_tokens is above the output of the model's entry in
-options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key`); with the profile's
+options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key`) and below its
+`context` (`options.max_output_tokens must be below the context of the model's entry in options.provider.models (the
+prompt and the reply share the window)`, as OpenCode 1 compacts at `context - min(output, key)`); with the profile's
 `context_window`, it SHALL be below it (`options.max_output_tokens must be below context_window (the prompt and the reply
 share the window)`). Without the key, both adapters SHALL run exactly as before: no variable, no configuration block, and
 byte-identical configurations; the default stays OpenCode's own, because the model's real maximum is model knowledge L4
@@ -4589,12 +4591,12 @@ key answered a request for 32000 with 402, `You requested up to 32000 tokens, bu
 For OpenCode 1, a profile with the key SHALL export `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=<n>` to the run in every mode
 (implement, judge, read-only) and to the hello, and not to the `auth` step; `OPENCODE_CONFIG_CONTENT` SHALL be unchanged.
 OpenCode 1 reads the variable as `flags.outputTokenMax` and asks for `Math.min(model.limit.output, n) || n`, 32000 when
-the variable is unset [V src, 1.18.33; the 1.18.34 pin was not read]: the key is a ceiling, so above a limit the catalog
-knows it changes nothing, and a custom provider's model entry `output` above 32000 takes effect only with the key. The
+the variable is unset [V src, 1.18.33 and 1.18.34]: the key is a ceiling, so above a limit the catalog
+knows it changes nothing, and a custom provider's model entry `output` above 32000 takes effect only with the key. A live run on 1.18.33 shows that the variable limits the output: with `1024` the reply was empty after 12 s, unset it was 800 lines [V live, 1.18.33]; that a value above 32000 raises a request is not verified live. The
 variable reaches the CLI because the adapter's variables go to the sandbox with `--setenv` unfiltered, and a value in the
 harness's own environment never does (the agent environment is built, L4-SEC-001). The same value sets OpenCode 1's
 auto-compaction threshold: `context - n` for a model without a catalog input limit, `input - min(20000, n)` for one with
-it [V src, 1.18.33]; this is why the key must be below `context_window`.
+it [V src, 1.18.33 and 1.18.34]; this is why the key must be below `context_window`.
 
 Each adapter's `run()` SHALL add hints to the result of `parse()`, which stays pure and keeps its details. A run whose
 `length_stop` is set SHALL carry after its detail, joined by `; ` (the hint alone when the detail is empty): `the reply
@@ -4629,8 +4631,12 @@ limit: on v2 it may raise a request above a limit the catalog knows, where on v1
 configuration the run reads sets the limit: the configuration home is an empty directory of the step, project
 configuration is off (v2 reads `OPENCODE_DISABLE_PROJECT_CONFIG` [V src]), and `options.provider` is refused on v2
 (L4-OCV-001); when that refusal is lifted, the overlay SHALL be the model entry's own `limit` with `output` set to the key,
-which L4-FAC-023 keeps at most the entry's `output`. That the overlay keeps a built-in provider's own settings and login
-and reaches the request is inferred from the loader [I] until a live run records it.
+which L4-FAC-023 keeps at most the entry's `output`. That the overlay reaches the request is inferred from the loader
+[I] until a live run records it, and the block is not limit-only [I, from the 2.2.6 binary's strings, not seen in a
+request]: a provider named in `providers` gets `activation="enabled"`, an enabled provider counts as available without a
+connection (the model resolution can then swap the request's auth when there is no credential or key), and a model the
+catalog does not know is created with the defaults `limit {context: 200000, output: 32000}`. A profile with a credential
+(a stored login, `OPENCODE_API_KEY`, the free tier's public key) does not take that branch.
 
 **L4-FAC-009 Strict schema for OpenAI-strict backends.** For native schema mode on Codex, and on any OpenAI-strict
 backend [I for `openai-chat`], the adapter MUST send a strictified copy of the canonical schema:
@@ -9386,7 +9392,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 128 | `static-gates-runnable` | an implementer may run the configured lint and typecheck commands before it finishes, so a lint or type error is no longer seen only after the step. `l4.agents.base.PermissionPolicy` gains `static_commands` (the `gates.lint` then `gates.typecheck` commands, each once); `agent_step` and `l4.sim.dryrun` pass them; claude-code adds one `Bash(<command>:*)` per command in implement mode, copilot-cli one `--allow-tool=shell(<first word>:*)` per distinct first word; opencode, codex and kiro-cli are unchanged; the prompt's `# Gate command` section says the agent may run them and to check by reading when one cannot run in the sandbox (L4-IMP-098, SCN-IMP-533..536) |
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
 | 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` right after the phase, before a refused move and the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
-| 131 | `opencode-output-limit` | an opencode profile can declare its model's output limit, `options.max_output_tokens` (a whole number from 1024 to 256000; at most a custom provider's model entry `output`; below `context_window`): OpenCode 1 gets `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` in the run (every mode) and the hello, and asks for the smaller of it and the catalog's limit; OpenCode 2 gets `providers.<p>.models.<m>.limit.output` after `agents` in the run, the export and the hello (not in `auth list`), which replaces the catalog's limit; without the key nothing changes. A length stop's detail names the key (with its value when set), a 400 on a profile with the key says the key may be above the model's maximum, and doctor PRV-001 notes a v1 custom provider whose entry `output` above 32000 the default caps; L4-OCV-005 and L4-VER-071's remedy are amended (L4-FAC-023, L4-OCV-020, SCN-FAC-52..58, SCN-OCV-49..52) | a person records, on 2.2.6 and on 1.18.34, a judge call with `max_output_tokens: 1024` that stops with `length` near 1024 output tokens where the same prompt without the key does not, and a hello with the key that answers (`live-output-limit*`) |
+| 131 | `opencode-output-limit` | an opencode profile can declare its model's output limit, `options.max_output_tokens` (a whole number from 1024 to 256000; at most a custom provider's model entry `output` and below its `context`; below `context_window`): OpenCode 1 gets `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` in the run (every mode) and the hello, and asks for the smaller of it and the catalog's limit; OpenCode 2 gets `providers.<p>.models.<m>.limit.output` after `agents` in the run, the export and the hello (not in `auth list`), which replaces the catalog's limit; without the key nothing changes. A length stop's detail names the key (with its value when set), a 400 on a profile with the key says the key may be above the model's maximum, and doctor PRV-001 notes a v1 custom provider whose entry `output` above 32000 the default caps; L4-OCV-005 and L4-VER-071's remedy are amended (L4-FAC-023, L4-OCV-020, SCN-FAC-52..58, SCN-OCV-49..52) | a person records, on 2.2.6 and on 1.18.34, a judge call with `max_output_tokens: 1024` that stops with `length` near 1024 output tokens where the same prompt without the key does not, and a hello with the key that answers (`live-output-limit*`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -21459,13 +21465,16 @@ fake process runners and probe contexts of the opencode tests; none starts `open
 - **And** `1024`, `32000` and `256000` load, on `cli_major` 1 and 2
 
 #### SCN-FAC-55 (−) A key above a custom provider's model output, or not below context_window, is refused · L4-FAC-023
-- **Given** a custom-provider profile whose model entry's `output` is 16384 with `options.max_output_tokens: 32000`, and
-  a profile with `context_window: 65536` and `options.max_output_tokens: 65536`
+- **Given** a custom-provider profile whose model entry's `output` is 16384 with `options.max_output_tokens: 32000`, a
+  custom-provider profile whose model entry's `context` is 65536 (and `output` 100000) with `options.max_output_tokens:
+  65536`, and a profile with `context_window: 65536` and `options.max_output_tokens: 65536`
 - **When** the configuration loads
 - **Then** the first is refused with `options.max_output_tokens is above the output of the model's entry in
   options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key`
-- **And** the second with `options.max_output_tokens must be below context_window (the prompt and the reply share the
-  window)`, while `16384` with that entry and `65535` with that window load
+- **And** the second with `options.max_output_tokens must be below the context of the model's entry in
+  options.provider.models (the prompt and the reply share the window)`, and the third with `options.max_output_tokens
+  must be below context_window (the prompt and the reply share the window)`, while `16384` with the first entry, `65535`
+  with the second entry's context and `65535` with that window load
 
 #### SCN-FAC-56 (+) A length stop names the key · L4-FAC-023, L4-VER-071
 - **Given** a v1 judge run and a v2 judge run (its export failed, `exit 1`) whose last `step_finish` reason is `length`,
@@ -21482,7 +21491,7 @@ fake process runners and probe contexts of the opencode tests; none starts `open
 - **When** each ends
 - **Then** each detail or hello reason ends with `; options.max_output_tokens is set: a provider refuses a maximum output
   above the model's own (HTTP 400)`
-- **And** without the key, with a status other than 400, or for a v1 hello whose 400 says `grammar binding failed`, the
+- **And** without the key, with a status other than 400, or for a hello (v1 or v2) whose 400 says `grammar binding failed`, the
   texts are today's
 
 #### SCN-FAC-58 (+) Doctor notes a custom provider that the default caps · L4-FAC-023
