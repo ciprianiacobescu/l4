@@ -26,6 +26,12 @@ MAX_RECORD_EXCERPT_CHARS = 600  # a round's per-test excerpt (L4-VER-078): the b
 _E_LINE = re.compile(r"^E\s+\S")
 _PYTEST_TMP = re.compile(r"/(?:private/)?(?:var/folders/[^\s'\"]+?/T|tmp)/pytest-of-[^/\s'\"]+/pytest-\d+")
 _TRUNCATED = "... (truncated)"
+# the shared redactor removes a whole private-key block (BEGIN to END). A report keeps only the last 4,000 characters of
+# a body and the first 500 of a message, so a block can reach this module with one marker only; the markers are built
+# from parts so that no source file holds a key marker as one string
+_KEY_BEGIN = re.compile("-----BEGIN [A-Z ]*PRIVATE " + "KEY" + "-----")
+_KEY_END = re.compile("-----END [A-Z ]*PRIVATE " + "KEY" + "-----")
+_KEY_CUT = "[REDACTED:private-key]"
 
 
 def _clean(text: str, worktree: Path, tmp_root: Path | None) -> str:
@@ -37,6 +43,28 @@ def _clean(text: str, worktree: Path, tmp_root: Path | None) -> str:
     for variant in sorted({str(worktree), str(worktree.resolve())}, key=len, reverse=True):
         text = text.replace(variant + "/", "").replace(variant, ".")
     return text
+
+
+def _redact_keys(redact: Callable[[str], str], text: str) -> str:
+    """`redact(text)`, and a private-key block that is only half there removed to the edge of the text: an END marker
+    without its BEGIN (the text was cut from the front) takes everything before it, a BEGIN without its END (cut at
+    the back) everything after it. Local to the excerpts: the shared redactor is unchanged."""
+    text = redact(text)
+    if ends := list(_KEY_END.finditer(text)):
+        text = _KEY_CUT + text[ends[-1].end() :]
+    if begin := _KEY_BEGIN.search(text):
+        text = text[: begin.start()] + _KEY_CUT
+    return text
+
+
+def _cut_at_line(text: str, limit: int) -> str:
+    """`text` cut at the last line end before `limit`; one line longer than `limit` is cut at `limit`."""
+    if len(text) <= limit:
+        return text
+    kept = text[:limit]
+    if text[limit] != "\n" and "\n" in kept:
+        kept = kept.rsplit("\n", 1)[0]
+    return kept
 
 
 def _test_lines(body: str) -> list[str]:
@@ -98,7 +126,7 @@ def failure_excerpt(
             continue
         # redacted whole before any line is dropped: a secret that spans lines (a private key) loses its end marker
         # to the 6-line bound, and the redactor would no longer see it
-        body = redact(case.detail or case.message)
+        body = _redact_keys(redact, case.detail or case.message)
         lines = _test_lines(body) if case.detail else body.splitlines()[:MAX_TEST_LINES]
         lines = [line for line in lines if line.strip()] or body.splitlines()[:2]
         if lines:
@@ -120,7 +148,7 @@ def failure_excerpt(
             out.append(f"  {line} (same for {counts[line]} tests)" if counts[line] > 1 else f"  {line}")
     if len(blocks) > MAX_TESTS:
         out.append(f"... and {len(blocks) - MAX_TESTS} more failing tests")
-    text = redact(_clean("\n".join(out), worktree, tmp_root))
+    text = _redact_keys(redact, _clean("\n".join(out), worktree, tmp_root))
     return _fit(text.splitlines())
 
 
@@ -138,16 +166,10 @@ def case_excerpt(
     the bound is never shown in part. Cut at the last line end before `limit` (one line longer than `limit` is cut at
     `limit`); empty when there is nothing to show. The name does not start with `test`: a test module that imports it
     would collect it."""
-    body = redact(case.detail or case.message)
+    body = _redact_keys(redact, case.detail or case.message)
     lines = _test_lines(body) if case.detail else body.splitlines()[:MAX_TEST_LINES]
     lines = [line for line in lines if line.strip()] or [line for line in body.splitlines() if line.strip()][:2]
-    text = redact(_clean("\n".join(lines[:MAX_TEST_LINES]), worktree, tmp_root))
-    if len(text) <= limit:
-        return text
-    kept = text[:limit]
-    if text[limit] != "\n" and "\n" in kept:
-        kept = kept.rsplit("\n", 1)[0]
-    return kept
+    return _cut_at_line(_redact_keys(redact, _clean("\n".join(lines[:MAX_TEST_LINES]), worktree, tmp_root)), limit)
 
 
 def collection_case_excerpt(
@@ -158,9 +180,10 @@ def collection_case_excerpt(
     redact: Callable[[str], str],
     limit: int = MAX_RECORD_EXCERPT_CHARS,
 ) -> str:
-    """The `E` lines of a collection error's traceback end (L4-VER-078), redacted before and after the cut, paths made
-    relative, at most `limit` characters."""
-    return redact(_clean(error_lines(redact(detail), limit), worktree, tmp_root))
+    """The `E` lines of a collection error's traceback end (L4-VER-078), redacted before the cut and again after the
+    paths are made relative, cut as a test's excerpt is: at most 8 lines and `limit` characters, at a line end."""
+    found = error_lines(_redact_keys(redact, detail), 10 * MAX_CHARS).splitlines()[:MAX_TEST_LINES]
+    return _cut_at_line(_redact_keys(redact, _clean("\n".join(found), worktree, tmp_root)), limit)
 
 
 def lint_excerpt(text: str) -> str:

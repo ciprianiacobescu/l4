@@ -453,12 +453,14 @@ FAILING_LEAD = "Failing tests as the verifier recorded them:"
 
 
 def _failing_block(finding: Finding) -> str:
-    """L4-IMP-102: the failure block of a finding, as a paragraph of its list item: every line indented by four spaces
-    (empty lines stay empty), so no line of it can open a heading, a list or a fence, or close one. Never in
-    `tasks.md`, whose checkboxes the OpenSpec CLI counts."""
+    """L4-IMP-102: the failure block of a finding, as a paragraph of its list item: every line indented by six spaces
+    (empty lines stay empty). The item's content starts at column 2, so six spaces are an indentation of four inside it
+    (an indented code block, which CommonMark can never read as a heading, a fence or a list, nor close one); four
+    spaces, the indentation of a block at the top level, would be two inside the item, where a test id line that begins
+    with `#`, a backquote fence or `-` is structure. Never in `tasks.md`, whose checkboxes the OpenSpec CLI counts."""
     if not finding.failures.strip():
         return ""
-    lines = (f"    {line}" if line.strip() else "" for line in (FAILING_LEAD, *finding.failures.splitlines()))
+    lines = (f"      {line}" if line.strip() else "" for line in (FAILING_LEAD, *finding.failures.splitlines()))
     return "\n\n" + "\n".join(lines)
 
 

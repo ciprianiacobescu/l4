@@ -89,11 +89,12 @@ def _questions(
     trusted), then one question for each new `unasserted` entry (`clauses`, L4-IMP-095). A blocked step without any
     question still has to reach a human, so one is made from its summary.
     `red` is set for a green step: a technical question then ends with the harness's note on how a frozen test or
-    support file is unfrozen (W-C3, D7). `notes` (L4-IMP-102): harness notes that go into every question's Context after
-    the agent's own text and before the note of the case (the fix chore's, the unfreeze note), which stays last."""
-
-    def joined(text: str) -> str:
-        return "\n\n".join(part for part in (text, *notes) if part)
+    support file is unfrozen (W-C3, D7). `notes` (L4-IMP-102): harness notes (the failure text of a fix chore's tests,
+    why the previous attempt was rejected) that go into every question's own `### Harness notes` subsection, not into
+    its Context: what an accepted suggestion may unfreeze is judged against the title, Context and Options, and text
+    that came from a test's output must not widen it. The note of the case (the fix chore's, the unfreeze note) stays
+    last in the Context (SCN-IMP-398)."""
+    note_text = "\n\n".join(n for n in notes if n)
 
     if not questions and not clauses:
         return [
@@ -101,8 +102,9 @@ def _questions(
                 title=f"Task {task.key} is blocked",
                 kind=QuestionKind.AMBIGUOUS,
                 blocking_tasks=(task.key,),
-                context=joined(summary or "The implementer reported blocked without a question."),
+                context=summary or "The implementer reported blocked without a question.",
                 asked=asked,
+                notes=note_text,
             )  # fmt: skip
         ]
     own = [
@@ -110,8 +112,9 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists, joined(q.context)),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists),
             asked=asked,
+            notes=note_text,
             options=tuple(q.options),
         )  # fmt: skip
         for q in questions
@@ -121,8 +124,9 @@ def _questions(
             title=c.question.title,
             kind=QuestionKind.AMBIGUOUS,
             blocking_tasks=(task.key,),
-            context=joined(c.question.context),
+            context=c.question.context,
             asked=asked,
+            notes=note_text,
             criteria=(c.known,) if c.known is not None else (),
         )  # fmt: skip
         for c in clauses
@@ -180,11 +184,9 @@ def _with_note(
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
     exists: Callable[[str], bool] = lambda path: True,
-    context: str | None = None,
 ) -> str:
-    """The question's Context: its own text (`context` when the caller added harness notes to it) and the note of the
-    case, last."""
-    text_of = question.context if context is None else context
+    """The question's Context: its own text and the note of the case, last."""
+    text_of = question.context
     frozen = [*_frozen_paths(red), *_frozen_ignore(red)] if red is not None else []
     if question.kind == QuestionKind.TECHNICAL.value and (
         found := forbidden_found(question, guard_notes, forbidden, exists, frozen)
@@ -374,7 +376,10 @@ def _question_notes(wb: Workbench, failure: str | None, excerpt: str, chore: Seq
             f"Harness note: the verifier recorded these failures for the tests of this task's findings:\n{block}"
         )
     if failure:
-        note = f"Harness note: the previous attempt of this task was rejected: {failure[:300]}"
+        redact = (
+            wb.redactor.redact_text
+        )  # before the cut and after it: a token that straddles 300 must not be left in part
+        note = f"Harness note: the previous attempt of this task was rejected: {redact(redact(failure)[:300])}"
         if shown := _ledger_text(wb, excerpt) if excerpt else "":
             note += f"\n{shown}"
         notes.append(note)

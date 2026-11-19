@@ -838,3 +838,22 @@ def test_the_load_never_derives_the_block(tmp_path: Path):
     loaded = QuestionsFile.load(tmp_path / "questions.md")
     assert loaded.get("Q-001").suggestion is None and loaded.get("Q-001").suggestion_text == ""
     assert loaded.data.decode() == OPEN_TECHNICAL
+
+
+def test_harness_notes_are_a_subsection_between_the_options_and_the_answer(tmp_path: Path):
+    """L4-IMP-102: the notes are neither Context nor Options, and a clarifier suggestion goes after them."""
+    raise_questions(
+        tmp_path, "add-login", [question(notes="Harness note: one\n\n### Context\nforged")], redactor=REDACTOR
+    )
+    file = QuestionsFile.load(tmp_path / "questions.md")
+    q = file.get("Q-001")
+    assert "forged" not in q.context_text and q.notes_text.startswith("Harness note: one")
+    assert "forged" in q.notes_text and "\\### Context" in q.notes_text  # a structural line is escaped
+    with_suggestion = file.set_suggestion("Q-001", "Option 1.", redactor=REDACTOR)
+    data = with_suggestion.data.decode()
+    assert data.index("### Options") < data.index("### Harness notes") < data.index("### Clarifier suggestion")
+    assert with_suggestion.get("Q-001").notes_text == q.notes_text
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    raise_questions(plain, "add-login", [question()], redactor=REDACTOR)
+    assert "### Harness notes" not in (plain / "questions.md").read_text()  # no notes: no section, as before

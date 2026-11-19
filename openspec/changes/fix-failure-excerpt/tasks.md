@@ -99,3 +99,16 @@ block from parts (`"-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"`) so the tes
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 7. Review fixes (the orchestrator's review of 9b4ff383)
+
+- [x] 7.1 The harness notes are their own `### Harness notes` subsection (`NewQuestion.notes`, `_render_section`,
+  `_SUBHEADING`, `Question.notes_text`, `QuestionView.context`), so no `asked` text that decides an unfreeze holds them
+  (`suggestion_effects`, `unfrozen`, `config_opened`, `existing_tests`). Tests first: `test_harness_notes.py`,
+  `test_questions.py`, `test_fix_failure_excerpt.py`.
+- [x] 7.2 The reason of the previous attempt is `redact(redact(failure)[:300])`; the excerpts remove a private-key block
+  with one marker (`_redact_keys`); a collection excerpt is cut at 8 lines; the OpenSpec failure block is indented by
+  six spaces. Tests first: `test_harness_notes.py`, `test_excerpt.py`, `test_fix_unit.py`.
+- [x] 7.3 Pins of surviving mutants: the ladder passes `collection_excerpt=` (`test_ui_flow.py`), the inner redaction of
+  `collection_case_excerpt`, the cut at 300, the forbidden-path and clause questions get the notes, only a fix chore's
+  questions get the failure block.

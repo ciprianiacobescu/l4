@@ -52,9 +52,15 @@ are unchanged; the excerpt adds no record. `ladder.tests()` passes both, with `w
 
 Redaction: the body is redacted whole before any line is dropped (a private key cut in half would no longer match),
 the excerpt is redacted again after it is assembled, and the verdict is redacted again when written. A cut after the
-redaction can only drop text, never uncover it.
+redaction can only drop text, never uncover it. A report keeps the last 4,000 characters of a body and the first 500
+of a message (`junit._status`), so a key block can arrive with one marker only, and the shared redactor, which needs both,
+would leave its body lines. The excerpt path therefore also removes an END marker without a BEGIN together with
+everything before it, and a BEGIN without an END together with everything after it (`excerpt._redact_keys`, after the
+shared redaction). It is local to the excerpts, and also covers the retry prompt's excerpt (`failure_excerpt`), which reads
+the same text; the shared redactor and the JUnit reader are unchanged. A collection error's excerpt is cut as a test's:
+at most 8 lines, then at a line end before 600 characters (`_cut_at_line`).
 
-Size: at most 2 x 20 x 600 = 24,000 characters more in a `verdict.json`.
+Size: at most 2 x 20 x 600 = 24,000 characters of excerpt more in a `verdict.json` (the keys, ids and JSON around them are not counted).
 
 ### D2. Which tests a fix task is about
 
@@ -78,11 +84,14 @@ item, from `result.failures` and the findings the task groups (`_Candidate` keep
 them), the repair chore included. `redact_plan` redacts it with the other text fields.
 
 - OpenSpec `_proposal`: right after a finding's line in `## What Changes`, when `f.failures` is set, a blank line, the
-  line `    Failing tests as the verifier recorded them:` and the block with every line indented by four spaces (empty
-  lines stay empty), as `_requests` writes quoted code. An indented line can neither open a heading, a list or a fence
-  nor close one, and `openspec validate --strict` accepts it (checked with the OpenSpec CLI on a scratch change; the
+  line `      Failing tests as the verifier recorded them:` and the block with every line indented by six spaces (empty
+  lines stay empty). The finding is a list item whose content starts at column 2, so six spaces are four inside it: an
+  indented code block, which CommonMark can neither read as a heading, a list or a fence nor close. Four spaces, the
+  indentation `_requests` uses at the top level, would be two inside the item, where an id line that begins `#`, a fence
+  or `-` is structure. `openspec validate --strict` accepts it (checked with the OpenSpec CLI on a scratch change; the
   CLI counts checkboxes in `tasks.md` only).
-- Kiro `_fix_design`: after the finding's detail, the same lead line and indented block (`finding.code`'s pattern).
+- Kiro `_fix_design`: after the finding's detail, the same lead line and block at the top level of the file, four spaces
+  (`finding.code`'s pattern), where a blank line precedes it and no list item contains it.
 - `tasks.md` is not touched: a task is one line there, and the OpenSpec CLI counts any line of `tasks.md` that looks
   like a checkbox, inside code fences too.
 
@@ -101,21 +110,33 @@ to `_prompt(..., failing=...)`.
 
 ### D6. The questions
 
-`_questions` gains `notes: Sequence[str] = ()`: each note goes into every question's Context after the agent's own text
-and BEFORE the harness note that `_with_note` adds (a blank line between each), the question made from a bare blocked
-summary and the clause questions included. The harness note stays last because SCN-IMP-398 pins that a fix chore's
-question ends with the fix-task note, and green's unfreeze note keeps its place too; the delegate finds a chore's
-question by `chore: true` and by the note's first sentence, which does not change. `_raise_blocked` gains the same
-keyword. In `_run_task`:
+`_questions` gains `notes: Sequence[str] = ()`, joined by a blank line into `NewQuestion.notes`, which every question
+gets, the question made from a bare blocked summary and the clause questions included. `raise_questions` writes it as its
+own `### Harness notes` subsection between `### Options` and `### Answer` (redacted and escaped like any harness-written
+block: `_block` backslash-escapes a `###` line, so a note cannot close or forge its subsection), and the parser reads it
+into `Question.notes_text`. It is not part of the Context.
+
+Why not the Context: what an accepted suggestion may unfreeze is judged against the question's title, Context and
+Options (L4-IMP-015: `suggestion_effects`, `unfrozen` and `config_opened`, and `existing_tests` for pre-existing tests).
+The notes carry text that came from a test's output, so a test path named only in a note would count as "the question
+names it" and widen an accepted suggestion. With their own subsection, `context_text` and `options_text` exclude them and
+none of those readers changes. The harness note of the case (the forbidden-path note, the fix chore's note, green's
+unfreeze note) stays in the Context, last, because SCN-IMP-398 pins that a fix chore's question ends with the fix-task
+note and the delegate finds a chore's question by that note in `context_text` (L4-DLG-025). `QuestionView.context` (what
+the clarifier and the delegate read) is the Context followed by the notes, so they see the failure text. `_SUBHEADING`
+gains `Harness notes`, so an answer text that holds that heading is refused as structure.
+
+`_raise_blocked` gains the same keyword. In `_run_task`:
 
 - the chore branch passes, when `fix_failure_text(wb, chore)` is not empty, `"Harness note: the verifier recorded these
   failures for the tests of this task's findings:\n" + block`;
 - every branch (red, green, single) passes, when `failure` is set (an earlier attempt of the phase failed in this run),
-  `f"Harness note: the previous attempt of this task was rejected: {failure[:300]}"` followed, when `excerpt` is set, by
-  a new line and `_ledger_text(wb, excerpt)` (600 characters, redacted).
+  `f"Harness note: the previous attempt of this task was rejected: {reason}"` with `reason = redact(redact(failure)[:300])`
+  (before the cut and after, as `_ledger_text` does: a token that straddles 300 is not left in part), followed, when
+  `excerpt` is set, by a new line and `_ledger_text(wb, excerpt)` (600 characters, redacted).
 
 The question of a hung frozen test (`_hang_question`) is about the attempt that just failed and gets neither. A held
-check's question (`_raise_held`) is unchanged. `raise_questions` redacts and escapes the Context as before.
+check's question (`_raise_held`) is unchanged. `raise_questions` redacts the notes and escapes structural lines as before.
 
 ### D7. Where the text ends up
 

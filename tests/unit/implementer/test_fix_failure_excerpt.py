@@ -3,6 +3,7 @@
 from l4.agents.fake import Step
 from l4.implementer.loop import run_task
 from l4.implementer.tdd import fix_failure_text, run_single
+from l4.specs.questions import QuestionsFile, unescape_text
 
 from .conftest import blocked_step, red_step, result
 from .test_fix_chore_e2e import E2E_FINDING, NEW_FINDING, TASK, TEST_X, TEST_Z, seed_round
@@ -84,6 +85,10 @@ ASKING = {
 NOTE = "Harness note: the verifier recorded these failures for the tests of this task's findings:"
 
 
+def first_question(bench):
+    return QuestionsFile.load(bench.wb.ref.path / "questions.md").questions[0]
+
+
 def asked_in_a_chore(bench, monkeypatch) -> str:
     import l4.implementer.loop as loop
 
@@ -97,11 +102,15 @@ def test_scn_imp_559_a_fix_chores_question_shows_the_failure_and_still_ends_with
 ):
     bench = make_bench([Step(structured=result("single", status="blocked", questions=[ASKING]))])
     seed_round(bench, failures=WITH_EXCERPT)
-    text = asked_in_a_chore(bench, monkeypatch)
-    context = text.split("the fixture must change", 1)[1]
-    assert NOTE in context and EXCERPT in context
-    assert context.index(NOTE) < context.index("Harness note: this is a fix task.")  # SCN-IMP-398: that note is last
-    assert "A person must commit the change" in context.split(NOTE, 1)[1]  # the fix task note comes after
+    asked_in_a_chore(bench, monkeypatch)
+    question = first_question(bench)
+    context, notes = unescape_text(question.context_text), unescape_text(question.notes_text)
+    assert NOTE in notes and EXCERPT in notes and NOTE not in context and EXCERPT not in context
+    assert context.startswith("the fixture must change")
+    assert "A person must commit the change" in context.split("Harness note: this is a fix task.", 1)[1]
+    assert context.rstrip().endswith(
+        f'`l4 questions answer Q-NNN --unit {bench.wb.ref.id} --text "..."`).'
+    )  # SCN-IMP-398
 
 
 def test_a_bare_blocked_chore_gets_the_block_in_the_question_made_from_its_summary(make_bench, monkeypatch):
@@ -150,9 +159,11 @@ def green_question_after_a_failure(make_bench) -> tuple[object, str]:
 
 def test_scn_imp_560_a_question_after_a_failed_attempt_says_why_that_attempt_failed(make_bench):
     bench, text = green_question_after_a_failure(make_bench)
-    context = text.split("the scenarios disagree", 1)[1]
-    assert REJECTED in context and "tests.test_discount::test_known_code" in context
-    assert "NotImplementedError" in context.split(REJECTED, 1)[1]  # a line of the ledger excerpt
+    notes = unescape_text(first_question(bench).notes_text)
+    assert REJECTED in notes and "tests.test_discount::test_known_code" in notes
+    assert "NotImplementedError" in notes.split(REJECTED, 1)[1]  # a line of the ledger excerpt
+    assert REJECTED not in unescape_text(first_question(bench).context_text)
+    assert text.index("### Harness notes\n") < text.index(REJECTED) < text.rindex("### Answer")
 
 
 def test_a_question_of_a_first_attempt_has_no_such_note(make_bench):
@@ -161,7 +172,7 @@ def test_a_question_of_a_first_attempt_has_no_such_note(make_bench):
     assert "rejected" not in (bench.wb.ref.path / "questions.md").read_text()
 
 
-def test_the_previous_attempt_note_comes_before_greens_unfreeze_note(make_bench):
+def test_the_previous_attempt_note_is_its_own_section_and_greens_unfreeze_note_stays_in_the_context(make_bench):
     asking = {
         "title": "Unfreeze tests/test_discount.py?",
         "context": "the test is wrong",
@@ -176,9 +187,10 @@ def test_the_previous_attempt_note_comes_before_greens_unfreeze_note(make_bench)
         ]
     )
     assert run_task(bench.wb, LOOP_TASK).status == "blocked"
-    context = (bench.wb.ref.path / "questions.md").read_text().split("the test is wrong", 1)[1]
-    assert REJECTED in context and "frozen" in context
-    assert context.index(REJECTED) < context.index("frozen")
+    question = first_question(bench)
+    context = unescape_text(question.context_text)
+    assert "frozen" in context and REJECTED not in context
+    assert REJECTED in unescape_text(question.notes_text)
 
 
 def test_a_full_size_block_leaves_the_fix_task_note_last_and_whole(make_bench, monkeypatch):
@@ -189,9 +201,22 @@ def test_a_full_size_block_leaves_the_fix_task_note_last_and_whole(make_bench, m
     }
     bench = make_bench([Step(structured=result("single", status="blocked", questions=[ASKING]))])
     seed_round(bench, failures=many)
-    text = asked_in_a_chore(bench, monkeypatch)
-    context = text.split("the fixture must change", 1)[1].split("### Options", 1)[0]
-    assert len(context) > 5000 and context.count("(assertion, e2e):") == 8
-    assert "and 4 more failing tests" in context
-    assert context.index(NOTE) < context.index("Harness note: this is a fix task.")
+    asked_in_a_chore(bench, monkeypatch)
+    question = first_question(bench)
+    notes, context = unescape_text(question.notes_text), unescape_text(question.context_text)
+    assert len(notes) > 5000 and notes.count("(assertion, e2e):") == 8
+    assert "and 4 more failing tests" in notes
     assert context.rstrip().endswith(f'`l4 questions answer Q-NNN --unit {bench.wb.ref.id} --text "..."`).')
+
+
+def test_only_a_fix_chore_gets_the_failure_block_in_its_question(make_bench, monkeypatch):
+    """F21: a chore of another kind (refactor) raises its question with no block, though the round is on record."""
+    import l4.implementer.loop as loop
+
+    bench = make_bench([Step(structured=result("single", status="blocked", questions=[ASKING]))])
+    seed_round(bench, failures=WITH_EXCERPT)
+    monkeypatch.setattr(loop, "chore_findings", lambda path, title: (E2E_FINDING,))
+    monkeypatch.setattr(loop, "chore_kind", lambda path, title: "refactor")
+    assert run_task(bench.wb, LOOP_TASK).status == "blocked"
+    question = first_question(bench)
+    assert NOTE not in question.notes_text and EXCERPT not in question.notes_text and question.notes_text == ""

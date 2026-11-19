@@ -323,6 +323,26 @@ def test_the_fix_spec_carries_the_ci_excerpt(parent):
 BLOCK = "e2e.test_layout::test_width[chromium] (assertion, e2e):\n  E   assert 1508 == 1500\n\n  >   boom"
 
 
+def test_a_failure_line_that_looks_like_structure_stays_inside_the_list_item_as_indented_code(parent):
+    """Six spaces are four inside the list item's content: a line that begins `#`, a fence, `-` or `---` is code there,
+    where four spaces (two inside the item) would let CommonMark read it as a heading, a fence or a list."""
+    repo, ref = parent
+    nasty = "t.a::b (assertion, test):\n  # a heading\n  ```\n  - an item\n  1. another\n  ---\n  ## Impact"
+    shown = [replace(Finding(("F-dddddddd",), "test gate failed", "d", "major"), failures=nasty)]
+    fix = provider_of(repo)[0].create_fix_unit(ref, 1, shown, None)
+    lines = (fix.path / "proposal.md").read_text().splitlines()
+    start = lines.index("      Failing tests as the verifier recorded them:")
+    block = lines[start : start + 8]
+    assert all(line.startswith("      ") for line in block), block  # six spaces, every line of it
+    assert [h for h in lines if h.startswith(("#", "```", "- ", "---"))] == [
+        "# Proposal: fix 1 for add-greeting",
+        "## Why",
+        "## What Changes",
+        "- F-dddddddd (major): test gate failed: d",
+        "## Impact",
+    ]
+
+
 def test_scn_imp_557_the_fix_proposal_shows_why_the_test_failed(parent):
     repo, ref = parent
     plain = [FINDINGS[0], Finding(("F-dddddddd",), "e2e gate failed", "`pytest e2e` failed", "major")]
@@ -333,8 +353,9 @@ def test_scn_imp_557_the_fix_proposal_shows_why_the_test_failed(parent):
     proposal = (fix.path / "proposal.md").read_text()
     item = proposal.split("- F-dddddddd (major): e2e gate failed: `pytest e2e` failed\n", 1)[1]
     assert item.startswith(
-        "\n    Failing tests as the verifier recorded them:\n"
-        "    e2e.test_layout::test_width[chromium] (assertion, e2e):\n      E   assert 1508 == 1500\n\n      >   boom\n"
+        "\n      Failing tests as the verifier recorded them:\n"
+        "      e2e.test_layout::test_width[chromium] (assertion, e2e):\n"
+        "        E   assert 1508 == 1500\n\n        >   boom\n"
     ), item[:300]
     assert "Failing tests" not in (without.path / "proposal.md").read_text()
     assert [h for h in proposal.splitlines() if h.startswith("## ")] == ["## Why", "## What Changes", "## Impact"]
