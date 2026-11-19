@@ -100,6 +100,50 @@ def test_prv_001_an_unreachable_provider_is_a_note_not_a_failure(make_ctx, monke
     assert result.status == "pass" and "mag provider 192.0.2.10:10100 unreachable" in result.message
 
 
+def _two_providers_ctx(make_ctx, monkeypatch, *, key: int | None = None):
+    """SCN-FAC-58: two custom-provider judge profiles, one whose model entry allows 65536 and one that allows 16384."""
+    import copy
+
+    import httpx
+
+    import l4.agents.opencode_provider as provider
+    from l4.agents import factory
+
+    monkeypatch.setitem(factory.ADAPTERS, "opencode", lambda: Scripted(True, True))
+    monkeypatch.setattr(provider, "TRANSPORT", httpx.MockTransport(lambda request: httpx.Response(401)))
+    profiles = {}
+    for name, output in (("big", 65536), ("small", 16384)):
+        profile = copy.deepcopy(PROVIDER_PROFILE)
+        profile["options"]["provider"]["models"][MODEL]["output"] = output
+        if key is not None and name == "big":
+            profile["options"]["max_output_tokens"] = key
+        profiles[name] = profile
+    cfg = L4Config.model_validate({"profiles": profiles, "roles": {"judges": ["big", "small"]}})
+    ctx, _ = make_ctx(cfg=cfg)
+    return ctx
+
+
+NOTE = (
+    "big asks for at most 32000 output tokens although its model entry allows 65536 (OpenCode 1's default): "
+    "set options.max_output_tokens to use it"
+)
+
+
+def test_prv_001_notes_a_custom_provider_that_the_default_output_limit_caps(make_ctx, monkeypatch):
+    ctx = _two_providers_ctx(make_ctx, monkeypatch)
+    result = checks_provision._prv_001(ctx)
+    assert NOTE in result.message and "small asks for at most" not in result.message
+    assert result.message.count("asks for at most 32000") == 1
+    assert result.message.index("big provider 192.0.2.10:10100 reachable") < result.message.index(NOTE)
+    assert result.status == "pass"  # a note never changes the status
+
+
+def test_prv_001_the_output_limit_note_goes_with_the_key(make_ctx, monkeypatch):
+    ctx = _two_providers_ctx(make_ctx, monkeypatch, key=65536)
+    result = checks_provision._prv_001(ctx)
+    assert "asks for at most 32000" not in result.message and result.status == "pass"
+
+
 def test_prv_001_a_missing_provider_key_names_the_variable_in_the_steps(make_ctx, monkeypatch):
     import httpx
 

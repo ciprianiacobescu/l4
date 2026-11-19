@@ -114,13 +114,13 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 5. The doctor note (D7)
 
-- [ ] 5.1 Write the test first in `tests/unit/doctor/test_checks_provision.py`, next to the test that asserts `mag
+- [x] 5.1 Write the test first in `tests/unit/doctor/test_checks_provision.py`, next to the test that asserts `mag
   provider 192.0.2.10:10100 reachable`: SCN-FAC-58, two custom-provider judge profiles, one with model entry `output:
   65536` and no key, one with `output: 16384`; PRV-001's message holds `<first> asks for at most 32000 output tokens
   although its model entry allows 65536 (OpenCode 1's default): set options.max_output_tokens to use it` and no such
   note for the second; the first with `max_output_tokens: 65536` gets no note; the status is the same as without the
   notes.
-- [ ] 5.2 Then extend `_provider_notes` in `src/l4/doctor/checks_provision.py` (after the reachability note of the
+- [x] 5.2 Then extend `_provider_notes` in `src/l4/doctor/checks_provision.py` (after the reachability note of the
   same profile). Run `uv run --frozen pytest tests/unit/doctor/test_checks_provision.py -q`.
 
 ## 6. The live record (a person with keys; not the implementer)
