@@ -248,8 +248,9 @@ job [I].
 
 1. `yolo.review.max_batch_chars > 0` (the default is `0`: no pre-split) and `len(subject.user) > max_batch_chars`;
 2. any of its parts' material keys was kept by a `plan.review_incomplete` after the plan's latest `plan.reviewed`
-   (`findings.kept_keys`, passed as `kept`; a `--worktree` dry run adds the parts of its local cache, which no
-   `plan.reviewed` ends). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
+   (`findings.kept_keys`, passed as `kept`; a `--worktree` dry run adds the parts of its local cache that no cached
+   whole-batch line is as new as: a dry run that finished writes that line with its parts, and one that did not does
+   not). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
    never splits it: without this a batch split once stays split, and `max_batch_chars: 0` would not turn the split off
    after a prerequisite changed;
 3. its whole call ends `error` with `length_stop`, or `timeout`, and the same judge is asked the parts first.
@@ -480,7 +481,9 @@ def review_plan_costed(app, cfg, plan, units, *, git, rev, adapters=None, digest
 ## Risks / Trade-offs
 
 - **A batch in parts sees less than a whole batch.** A defect visible only when two full designs are read together is
-  missed. Mitigation: the merged verdict says so in `missing`, and a consumer can raise `max_batch_chars`.
+  missed. Mitigation: the merged verdict says so in `missing` and in a minor finding that `l4 yolo findings` and `l4 yolo
+  status` show, and a batch is split only after its whole call fails (a consumer's `max_batch_chars` stays `0`, or is set
+  high).
 - **More calls.** A batch of n units in parts costs n + 1 calls instead of 1, and the parts are charged to the plan.
 - **A part over the bound is asked anyway.** For example, one huge unit with many siblings. A length stop there goes to
   the next judge, and no third level exists.

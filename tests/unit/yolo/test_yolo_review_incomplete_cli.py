@@ -137,21 +137,38 @@ def test_scn_yolo_277_fresh_asks_every_part_of_a_batch_again(world, monkeypatch,
     assert len(again.requests) == 3 and all("read in part" in r.prompt for r in again.requests)
 
 
-def test_a_part_in_the_dry_run_cache_still_splits_its_batch_with_the_bound_off(world, monkeypatch, capsys):
-    """The cache has no `plan.reviewed` to end it: a cached part splits the batch (and is reused), so `--fresh
-    batch:<id>` is how a dry run asks the batch whole again."""
+def rewrite_cache(world, change):
+    path = next(world.root.glob("**/yolo/p1/review/verdicts.jsonl"))
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    path.write_text("".join(json.dumps(x) + "\n" for x in change(lines)), encoding="utf-8")
+
+
+def test_the_parts_of_a_finished_dry_run_do_not_split_the_changed_batch_again(world, monkeypatch, capsys):
+    """A finished dry run writes the whole-batch line with its parts. The batch changes (its key is no longer the cached
+    one), and with the bound off it is asked whole: its cached parts no longer count as kept."""
     ready_world(world)
     configure(world, ["j1"], review={"max_batch_chars": 100})
     judges(monkeypatch, FakeAdapter([ok() for _ in range(5)]), FakeAdapter([]))
     assert world.l4("review", "p1", "--worktree") == 0
-    path = next(world.root.glob("**/yolo/p1/review/verdicts.jsonl"))
-    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-    path.write_text("".join(json.dumps(x) + "\n" for x in lines if x["kind"] != "batch"), encoding="utf-8")
+    rewrite_cache(world, lambda lines: [{**x, "material": "stale"} if x["kind"] == "batch" else x for x in lines])
     configure(world, ["j1"], review={"max_batch_chars": 0})
-    again = FakeAdapter([])
+    again = FakeAdapter([ok()])
     judges(monkeypatch, again, FakeAdapter([]))
     assert world.l4("review", "p1", "--worktree") == 0
-    assert again.requests == []  # the cached parts are reused, none is asked and the batch is not asked whole
+    assert len(again.requests) == 1 and "read in part" not in again.requests[0].prompt
+
+
+def test_the_parts_an_incomplete_dry_run_cached_split_the_batch_and_are_reused(world, monkeypatch, capsys):
+    ready_world(world)
+    configure(world, ["j1"], review={"max_batch_chars": 100})
+    first = FakeAdapter([ok(), ok(), ok(), Step(status="timeout")])  # A, B, the part of A, the part of B times out
+    judges(monkeypatch, first, FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 12
+    configure(world, ["j1"], review={"max_batch_chars": 0})  # no size split: the kept part splits the batch
+    again = FakeAdapter([ok(), ok()])
+    judges(monkeypatch, again, FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 0
+    assert len(again.requests) == 2 and all("read in part" in r.prompt for r in again.requests)  # B's part, the summary
 
 
 def test_record_writes_judge_and_sandbox_per_entry_from_the_judge_that_answered_it(world, monkeypatch, capsys):

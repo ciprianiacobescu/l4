@@ -162,8 +162,9 @@ and split only by the other triggers; a positive value is the size bound), or wh
 one of its parts (L4-YOLO-099). A part that only a `plan.reviewed` recorded SHALL be reused when the batch is split, but
 SHALL NOT split it: once a review has finished, the next review of a changed batch starts whole again, so that `0`
 turns the size split off. It SHALL also be reviewed in parts, by the same judge first, when its whole call stops at the
-output limit or times out. (A `--worktree` dry run has no `plan.reviewed` to end its local cache: a part in the cache
-splits the batch, and `l4 yolo review --worktree --fresh batch:<id>` asks the batch again.) The parts
+output limit or times out. (A `--worktree` dry run has no `plan.reviewed`: a cached part counts as kept, and splits
+the batch, unless a cached line of its batch is as new as it, which a dry run that finished writes; `l4 yolo review
+--worktree --fresh batch:<id>` asks the batch again.) The parts
 SHALL be, in order: one part per unit the batch review shows, in plan order (`batch:<batch>/<unit>`), whose material is
 the batch's with that unit's folder in full as a subject's is shown (its budgets and its `material_cut`), the
 prerequisites outside the batch of that unit as a batch shows them, and each other unit of the batch read as a
@@ -186,7 +187,8 @@ has <c> characters, over yolo.review.max_batch_chars (<m>)`, `the whole batch st
 finding of criterion `parts` and severity `minor`, added after the rules below: `this batch was reviewed in parts: no
 judge saw two units' full text together, so defects visible only across units may be missed`. The finding is a note: it
 SHALL NOT change the verdict, and a READY batch stays READY with it. `l4 yolo findings` SHALL show a batch that carries
-it, READY or not, with the note in full and a `Resolve:` line that says it is a note, and `l4 yolo status` SHALL name the
+it, READY or not, with the note in full and a `Resolve:` line that says it is a note (and still says that every subject is
+READY when none is open; the exit code is unchanged), and `l4 yolo status` SHALL name the
 batches of the current review that were judged in parts (`reviewed in parts: <batches> (no judge saw two units' full
 text together)`, and `review.in_parts` in `--json`). A part whose
 verdict is NEEDS_REVISION and names no finding SHALL get the harness finding `verdict` (L4-YOLO-023) before the merge,

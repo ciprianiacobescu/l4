@@ -375,6 +375,24 @@ def test_a_part_of_a_finished_review_does_not_split_the_batch_again(world):
     assert len(only_units.requests) == 1 and "read in part" not in only_units.requests[0].prompt
 
 
+def test_a_changed_prerequisite_outside_the_batch_asks_the_batch_whole_again_with_the_bound_off(world):
+    """The review's case: the batch was judged in parts, a prerequisite outside it (of A only) changes, and the bound is
+    0. Only A's part and the whole batch change; the parts of B and C and the summary are in `prior`."""
+    x = "openspec:x"
+    world.units = {**world.units, x: UnitInfo(x, f"{ROOT}/x")}
+    world.rev = world.commit({f"{ROOT}/x/proposal.md": "Why: X.\n", f"{ROOT}/x/specs/x/spec.md": SPEC_B})
+    plan = plan_of({A: [x], B: [], C: []}, batches=[("b1", [A, B, C])])
+    first, _ = review(world, plan, FakeAdapter([ok() for _ in range(7)]), cfg=cfg_of(1000))
+    assert len(first.batches["b1"].parts) == 4
+    world.rev = world.commit({f"{ROOT}/x/proposal.md": "Why: X, changed.\n"}, "change the prerequisite")
+    prior = {v.material: _entry(v) for v in first.units.values() if v.material}
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    fake = FakeAdapter([ok(), ok()])
+    result, _ = review(world, plan, fake, cfg=cfg_of(0), prior=prior)
+    assert len(fake.requests) == 2  # A (its prerequisite changed) and the batch, asked whole
+    assert "read in part" not in fake.requests[-1].prompt and result.batches["b1"].parts == ()
+
+
 def test_a_batch_split_for_its_size_reuses_the_parts_of_a_finished_review(world):
     first = _first_review(world)
     prior = {v.material: _entry(v) for v in first.units.values()}

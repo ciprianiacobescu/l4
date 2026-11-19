@@ -195,3 +195,23 @@ def test_findings_list_the_force_acceptance_after_the_subjects_and_say_when_it_n
         B: False,
         "batch:b1": False,
     }
+
+
+def test_a_ready_plan_with_a_batch_in_parts_shows_the_note_and_still_says_every_subject_is_ready(world, capsys):
+    """The note of a batch reviewed in parts lists the READY batch; the line that says nothing is open stays, and so do
+    the exit code and the JSON subject (preflight skips READY subjects)."""
+    note = {
+        "criterion": "parts",
+        "severity": "minor",
+        "text": "this batch was reviewed in parts: no judge saw two units' full text together",
+    }
+    world.push_plan()
+    batch = {"verdict": "READY", "digest": None, "material": "kb", "findings": [note]}
+    world.seed("p1", review(world, "2026-10-14T10:00:00Z", {}, {"b1": batch}))
+    assert world.l4("findings", "p1") == 0
+    out = capsys.readouterr().out
+    assert "batch:b1: READY" in out and "reviewed in parts" in out and "Resolve: A note, not a defect" in out
+    assert "p1: every subject of the latest review is READY (--all lists them)" in out
+    assert world.l4("findings", "p1", "--json") == 0
+    subjects = json.loads(capsys.readouterr().out)["subjects"]
+    assert [(x["subject"], x["verdict"]) for x in subjects] == [("batch:b1", "READY")]

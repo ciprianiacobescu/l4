@@ -2961,8 +2961,8 @@ The review's keys, set on the base branch: `yolo.review.timeout` (`15m`, at leas
 which the batch is reviewed in parts. With the default a batch is asked whole, and is reviewed in parts when its whole
 call stops at the output limit or times out, and when a part of it was answered in an incomplete review since the
 latest review that finished (a part that only a finished review recorded is reused when the batch is split, but does
-not split it: once a review has finished, a changed batch is asked whole again; a `--worktree` dry run's local cache
-has no such end, and `--fresh batch:<id>` asks the batch again). A part shows one unit in full with the other units cut at 6,000
+not split it: once a review has finished, a changed batch is asked whole again, in a `--worktree` dry run too;
+`--fresh batch:<id>` asks a batch again). A part shows one unit in full with the other units cut at 6,000
 characters each, and one part shows every unit at that depth. The parts' verdicts make the batch's verdict, and its
 `missing` says `judged in <n> parts` and why, with `no call saw two units of the batch in full together`, and the
 verdict carries one minor finding that says so (`this batch was reviewed in parts: no judge saw two units' full text

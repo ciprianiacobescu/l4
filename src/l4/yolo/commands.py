@@ -2505,10 +2505,9 @@ def run_findings(
         ctx.say(json.dumps(doc, indent=2))
         return ExitCode.OK
     lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
-    if lines:
-        for line in lines:
-            ctx.say(line)
-    else:
+    for line in lines:
+        ctx.say(line)
+    if not lines or (subject is None and fnd.all_ready(review)):  # the notes of batches in parts are no open finding
         ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
     if force is not None:
         for line in _force_lines(force):

@@ -496,6 +496,12 @@ def _in_parts(entry: Mapping[str, Any]) -> bool:
     return any(isinstance(f, dict) and f.get("criterion") == IN_PARTS for f in entry.get("findings") or ())
 
 
+def all_ready(review: Mapping[str, Any]) -> bool:
+    """No subject of the review is open: every verdict is READY (a READY batch that carries the note of a batch in parts
+    is listed by `l4 yolo findings`, but nothing is open)."""
+    return all(str(entry["verdict"]) == "READY" for _, entry in _subjects(review))
+
+
 def batches_in_parts(events: Sequence[PlanEvent], prompt_version: int) -> list[str]:
     """The batches of the plan's latest `plan.reviewed` (of the prompt version) whose verdict was made from parts, for
     `l4 yolo status`."""
