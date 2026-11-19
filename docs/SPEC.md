@@ -2728,6 +2728,51 @@ started again from the red commit, redid about 20 minutes of work and reached th
 halted with `last failure: the agent step reached its time limit (30m)`, which did not say that attempt 4 had nearly
 passed.]
 
+**L4-IMP-101 The step that completes a task runs that task's own browser tests.** A task's *browser tests* SHALL be the
+test functions (`tamper.facts_of`) of the Python files under the e2e test directory (`e2e_test_dir(gates.e2e,
+worktree)`), other than `conftest.py`, `__init__.py` and files of `tdd.test_support_globs`, that the task's red step
+added or whose definition or what they use in their file changed, read from git between the red commit's parent and the
+red commit, so a red that a later run resumes counts the same and nothing of the agent's own record is trusted (between
+the step base and the work tree for a red step that finishes the task as already satisfied). A support file alone (a
+helper in `e2e/conftest.py`) and a file of another language add none. When `gates.e2e` is configured (`command`,
+`serve.command` and `serve.ready_url`; `e2e_configured`) and the task has browser tests, its green step SHALL run
+`gates.build` (when it is configured) and then the e2e gate (`run_e2e`, name `e2e-task`, the project's whole e2e command
+as every e2e run of the harness) last: after the test gate, the static gates (L4-IMP-096), the test-at-red run and any
+held check passed, and before its commit. The attempt SHALL fail unless each browser test of the task has an id in the
+report (matched by module and function, `names_test_id`, so a test that pytest-playwright reports once per browser,
+`test_x[chromium]`, counts; `must_contain` is not used, because those exact ids are not known before the run) and each
+of its ids passed or was skipped with at least one passed. In this order: a timed-out gate gives its reason; no readable
+report gives `the e2e gate produced no readable report (<reason>)`; a collection error of one of the task's files gives
+`browser tests not collected: <modules>`; a test with no id gives `the task's browser tests are not in the e2e report:
+<path::name, ...>`; a failing, erroring or only-skipped one gives `the task's browser tests do not pass: <ids>`, and the
+failure text of the failing ones (the retry excerpt, L4-IMP-064) SHALL be the excerpt the next attempt's prompt
+carries. The other tests of the e2e report and the gate's exit code SHALL NOT be judged at the step: a task step has no
+e2e baseline, and step 3 judges the whole gate. A build that fails SHALL fail the attempt with `gates.build failed
+before the e2e gate: ...` and no e2e run. A server that is not ready SHALL fail the attempt with `the e2e server was not
+ready (see <log name>)` and the last 2,000 characters of its log, redacted, as the excerpt; it counts as a failed attempt
+(the agent's code may be what keeps the server from starting) and SHALL NOT be an error of the run; any other refusal of
+`run_e2e` (a format it does not read, no `reports`) stops the run with its exit as for a fix chore (L4-IMP-090). Such a
+failure is no near pass (L4-IMP-100): a near pass stops at the static gates, before the e2e run. What the runs write into
+the tree is put away as for a fix chore (L4-IMP-090: a new path goes back to the base, a path the step had edited gets
+the step's content back, a link a gate planted is removed and recorded, the test-path freeze runs again with the files
+the task may change kept), so the commit holds the tree the test gate tested (L4-IMP-088). A red step that finishes a
+task as already satisfied (L4-IMP-003) SHALL run the task's browser tests the same way before its commit (with no
+test-path freeze: the test files are the step's own), and a failure SHALL fail the red attempt, whose next attempt may
+change the test. A red step that commits a red SHALL NOT run the e2e gate: a browser test's honest red failure is often
+an error raised in the browser library (a locator that waits for a button not built yet), so red could not ask for an
+assertion, and a test whose page is its own fails before and after the code alike. When `gates.e2e` is not configured,
+or the task has no browser tests, no step of the task SHALL run it (a gate with a command only is refused at step 3 as
+before). The green prompt SHALL list the task's browser tests (`path::name`) in a block that says the harness builds and
+serves the app after the step and runs them, that the task is green only when they pass, and that they are frozen like
+the other red tests (a wrong one: a technical question whose first option is the edit, L4-IMP-015); the red prompt's
+browser-test paragraph SHALL say that the green step runs them with the app served and that they are frozen after red.
+Cost: at most one build and one e2e gate run per green attempt of a task with browser tests that passed every other
+check, none for any other task, each bounded by `gates.timeout`, and the run deadline's cap of a green step counts them
+(L4-IMP-067). [V, a consumer unit's red steps added browser tests; one built its page with `page.set_content`, which
+keeps the browser's default 8px body margin, so the scroll width was 1508 and not the 1500 it asserted; it went through
+all nine tasks without running, failed first at verification step 3, and its fix unit could change neither the test nor
+the support file it uses (ci-evidence D11), while the parent task's green step could have had the test unfrozen.]
+
 ### 7.5 Post-step guards, commits and trailers
 
 **L4-IMP-006** After each agent step the harness MUST: (1) revert protected-path changes (P4, `odd.forbidden_paths`
@@ -3580,7 +3625,8 @@ committed red is resumed (its setup and baseline belong to the green step), and 
 profile. The estimate SHALL be the longest step of the same phase measured in this run or among the unit's last 10
 recorded `step.timed` and stopped steps of that phase, or, with no measure of that phase, the longest of any phase. It
 SHALL be at least 10 minutes, and at most a cap per phase: the agent's time limit plus `gates.timeout` for red, green
-and single, and four times `gates.timeout` for a verification round. A step whose estimate exceeds the time left MUST
+and single (for green when `gates.e2e` is configured, the agent's time limit plus three times `gates.timeout`: the
+test gate, the build and the e2e gate, L4-IMP-101), and four times `gates.timeout` for a verification round. A step whose estimate exceeds the time left MUST
 NOT start, and the step is handed back (L4-IMP-069). The first step of a run MUST start whenever any time is left. A
 step that was stopped at the last deadline (L4-IMP-071) starts only as the first step of a run. Every step that starts
 SHALL record `step.timed{phase, task, attempt, seconds}` (a round: `round` in place of `task` and `attempt`). With no
@@ -9321,6 +9367,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 128 | `static-gates-runnable` | an implementer may run the configured lint and typecheck commands before it finishes, so a lint or type error is no longer seen only after the step. `l4.agents.base.PermissionPolicy` gains `static_commands` (the `gates.lint` then `gates.typecheck` commands, each once); `agent_step` and `l4.sim.dryrun` pass them; claude-code adds one `Bash(<command>:*)` per command in implement mode, copilot-cli one `--allow-tool=shell(<first word>:*)` per distinct first word; opencode, codex and kiro-cli are unchanged; the prompt's `# Gate command` section says the agent may run them and to check by reading when one cannot run in the sandbox (L4-IMP-098, SCN-IMP-533..536) |
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
 | 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` right after the phase, before a refused move and the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
+| 131 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the test functions (`tamper.facts_of`) of the Python files under `e2e_test_dir(gates.e2e)`, not `conftest.py`, `__init__.py` or a support glob, that the red commit added or changed (read from git, so a resumed red counts); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`, the task's tests matched by `names_test_id` and judged in order (timed out, no report, not collected, not in the report, not passed), the excerpt of the failing ones, `ServerNotReady` a failed attempt with the log's end, `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold, when `e2e_configured`; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt's browser-test paragraph says the green step runs them and that they are frozen. `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for green. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; browser tests in another language and a support-only change are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_fix_chore_e2e`, `test_tdd_green`, `test_near_pass_carry`, `test_already_satisfied`, `test_prompt`, `test_deadline`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13359,6 +13406,61 @@ scenario is a spec defect (§26).
   changes; its previous-attempt block says the limited agent's changes were discarded and its `near pass` block names
   attempt 1 (impl); in the second case the halt reason still names the nearest attempt and `breaker.tripped` holds
   `near_pass`
+
+#### SCN-IMP-548 (−) A wrong browser test is met in green · L4-IMP-101
+- **Given** a task whose red commit added `e2e/test_layout.py::test_width`, a configured `gates.e2e`, and a green step
+  after which the e2e run reports `e2e.test_layout::test_width[chromium]` failed with `assert 1508 == 1500`
+- **When** the green attempt is judged
+- **Then** it fails with `the task's browser tests do not pass: e2e.test_layout::test_width[chromium]`, the next
+  attempt's prompt holds `assert 1508 == 1500`, the task is not ticked, and `gate.finished` holds a run named `e2e-task`
+
+#### SCN-IMP-549 (+) Passing browser tests let the task be green · L4-IMP-101, L4-IMP-088
+- **Given** the task of SCN-IMP-548 and a green step after which that test passes, with `gates.build` configured
+- **When** the attempt is judged
+- **Then** the build runs once and then the e2e gate once, the task is done, and what the runs wrote into the tree (a
+  build output, `test-results/`) is not in the green commit
+
+#### SCN-IMP-550 (+) A task that touched no browser test runs no e2e gate · L4-IMP-101
+- **Given** a task whose red commit changed only unit tests and `e2e/conftest.py`, and another unit whose `gates.e2e`
+  has a command but no `serve.command`
+- **When** their green steps run
+- **Then** neither runs the build or the e2e gate, and both are judged as before
+
+#### SCN-IMP-551 (−) A server that never gets ready is a failed attempt · L4-IMP-101
+- **Given** a task with browser tests whose e2e server never becomes ready
+- **When** its green attempt runs the e2e gate
+- **Then** the attempt fails with `the e2e server was not ready (see <log name>)`, the end of the log is the excerpt,
+  the attempt is counted, and the run does not stop with an internal error
+
+#### SCN-IMP-552 (−) A browser test that did not run does not pass · L4-IMP-101
+- **Given** a task with browser tests `test_a` and `test_b`, and an e2e report that holds no id of `test_b`, or holds
+  `test_b[chromium]` only as skipped
+- **When** the green attempt is judged
+- **Then** it fails naming `test_b`; with both passing, an e2e test that is not the task's and fails changes nothing
+
+#### SCN-IMP-553 (+) The e2e run comes last · L4-IMP-101, L4-IMP-100
+- **Given** a task with browser tests, a green attempt whose test gate fails, and another whose tests pass and whose
+  lint gate fails
+- **When** they are judged
+- **Then** neither runs the e2e gate, and the second is a near pass as before
+
+#### SCN-IMP-554 (−) An already-satisfied task's browser test must pass before its commit · L4-IMP-101, L4-IMP-003
+- **Given** a red step that adds a browser test for a criterion the harness confirms as already satisfied, and an e2e
+  run in which that test fails
+- **When** red would finish the task as already satisfied
+- **Then** the red attempt fails naming the test, nothing is committed, and the next red attempt may change the test;
+  when the test passes, the task is committed as already satisfied with the test
+
+#### SCN-IMP-555 (+) A resumed red still has its browser tests · L4-IMP-101
+- **Given** a task whose red commit added a browser test, and a later run that resumes the task at its green step
+- **When** the green step runs
+- **Then** it runs the e2e gate for that test, as the run that made the red commit would have
+
+#### SCN-IMP-556 (+) The deadline counts a green step's e2e gate · L4-IMP-067, L4-IMP-101
+- **Given** a known deadline, `gates.timeout: 10m`, the agent's 30-minute limit, a configured `gates.e2e`, and a
+  recorded green step of 55 minutes
+- **When** the next green step is checked
+- **Then** its estimate is 55 minutes (the cap is 60), where without `gates.e2e` it would be 40
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

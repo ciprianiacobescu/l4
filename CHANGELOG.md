@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Fixed
+- A browser test that a task's red step writes now runs before that task is done. In a consumer unit a browser test (Playwright under pytest) built its page with `page.set_content`, which keeps the browser's default 8px body margin, so the page was 1508 pixels wide and not the 1500 the test asserted. Red and green run only `gates.test`, which does not run the e2e directory, so the test went through all nine tasks without running and failed first at verification, where its fix unit could change neither the test nor the support file it uses. Now, when `gates.e2e` is configured and a task's red commit added or changed a test function of a Python file under the e2e test directory, its green step runs `gates.build` and the e2e gate (`e2e-task`) last, after the test gate, the static gates and the test-at-red run, and the task is green only when each of those browser tests is in the report and passed; the failure text goes to the next attempt, which can still have the frozen test unfrozen by a person's answer. A red step that finishes a task as already satisfied runs them before its commit too; a red commit runs none. The rest of the e2e suite is judged at verification as before. A server that never gets ready is a failed attempt with the end of its log. The green prompt lists the task's browser tests, and the red prompt says they are run in green and frozen after red. The run deadline's cap of a green step is the agent's limit plus three `gates.timeout` when `gates.e2e` is configured (L4-IMP-101, L4-IMP-067).
+
 ## 0.4.58 (2026-11-13)
 
 ### Fixed
