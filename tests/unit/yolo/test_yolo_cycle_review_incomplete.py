@@ -169,3 +169,26 @@ def test_a_plain_judge_failure_still_records_nothing(world, monkeypatch):
     monkeypatch.setattr("l4.yolo.cycle.review_plan_costed", failing)
     step = world.step()
     assert world.store().read().head == head and any("no judge could run" in a for a in step.actions)
+
+
+def test_scn_yolo_280_a_timeout_on_an_edited_unit_is_recorded_again_and_the_next_run_asks_the_other_judge(world):
+    """The repeat check compares the material too: j1 times out on A at no cost, a person edits A, and the same failure
+    on the new text must be written, or `failed_before` never learns it and j2 is never asked."""
+    world.plan(deps={})
+    judges(world, FakeAdapter([Step(status="timeout")]), FakeAdapter([]))
+    world.step()
+    old = last(world, "plan.review_incomplete").data["failures"][0]["material"]
+    spec = world.unit_files("a")["openspec/changes/a/specs/x/spec.md"]
+    world.commit({"openspec/changes/a/specs/x/spec.md": spec + "\nA SHALL also be fast.\n"}, "change a")
+    world.push_main()
+    judges(world, FakeAdapter([Step(status="timeout")]), FakeAdapter([]))
+    world.step()
+    events = [e for e in world.events() if e.type == "plan.review_incomplete"]
+    assert len(events) == 2  # a timeout of the same judge and subject, on another text, is no repeat
+    new = events[-1].data["failures"][0]["material"]
+    assert new != old
+    j1, j2 = FakeAdapter([ok(), ok(), ok()]), FakeAdapter([ok()])
+    judges(world, j1, j2)
+    world.step()
+    assert len(j2.requests) == 1  # A went to j2 first; B and the batch to j1
+    assert last(world, "plan.reviewed").data["units"][A]["judge"] == "j2"

@@ -7938,8 +7938,9 @@ acceptances and its activation are unchanged by it. Its cost SHALL be charged as
 run asks only what is left; a changed unit, a changed prerequisite or another prompt version changes the key, and the
 subject is judged again. The history of `l4 yolo findings` SHALL count a judgement where it was made, in a
 `plan.reviewed` or in a `plan.review_incomplete`. No event SHALL be written when the newest `plan.review_incomplete`
-after the plan's latest `plan.reviewed` has the same plan digest, reason and failures (profile, subject and kind) and
-the run answered nothing and spent nothing; the log line is still printed. The run log SHALL say `<plan>: the review is
+after the plan's latest `plan.reviewed` has the same plan digest, reason and failures (profile, subject, kind and material key,
+so that the same judge failing the same unit on a text a person has changed since is written, and the next run asks
+another judge first) and the run answered nothing and spent nothing; the log line is still printed. The run log SHALL say `<plan>: the review is
 incomplete (<reason>): <a> answered and kept, <l> left; a later run asks the rest`, after the lines of the failures, and
 no other plan is reviewed in that run. While the review is not current, `l4 yolo status` SHALL show, under the review
 line, for the newest `plan.review_incomplete` of the current prompt version that is newer than the plan's latest
@@ -18682,7 +18683,9 @@ scenario is a spec defect (§26).
 - **Given** the ledger of SCN-YOLO-278, and a run in which every judge fails as before, answers nothing and spends
   nothing; then a person changes the spec of A
 - **When** that run reviews, and then the run after the change
-- **Then** the first writes nothing to the plan ref and logs the line; the second judges A again and reuses B
+- **Then** the first writes nothing to the plan ref and logs the line; the second judges A again and reuses B; and when
+  `j1` times out on A at no cost, a person changes A, and `j1` times out on A again, the second timeout is recorded (its
+  material key is new) and the run after asks `j2` first for A
 
 #### SCN-YOLO-281 (+) A local review records it, and a dry run keeps it locally · L4-YOLO-099
 - **Given** the judges of SCN-YOLO-278

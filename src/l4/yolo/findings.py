@@ -209,14 +209,20 @@ def repeats_incomplete(
     cost: float,
 ) -> bool:
     """True when the newest incomplete review (`latest_incomplete`) has the same plan digest, reason and failures
-    (profile, subject and kind) and this run answered nothing and spent nothing: nothing is written (L4-YOLO-099)."""
+    (profile, subject, kind and material key) and this run answered nothing and spent nothing: nothing is written
+    (L4-YOLO-099). The material key is part of it: the same judge failing the same unit on a text a person has since
+    changed is new, and `failed_before` learns it only from the event."""
     if previous is None or answered or cost > 0:
         return False
-    same = {(f.get("profile"), f.get("subject"), f.get("kind")) for f in previous.data.get("failures") or ()}
+    same = {
+        (f.get("profile"), f.get("subject"), f.get("kind"), f.get("material"))
+        for f in previous.data.get("failures") or ()
+        if isinstance(f, dict)
+    }
     return (
         previous.data.get("plan_digest") == plan_digest
         and previous.data.get("reason") == reason
-        and same == {(f.profile, f.subject, f.kind) for f in failures}
+        and same == {(f.profile, f.subject, f.kind, f.material) for f in failures}
     )
 
 

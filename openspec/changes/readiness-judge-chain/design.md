@@ -364,7 +364,9 @@ the ledger.
 latest `plan.reviewed`. Nothing is written when all of these hold:
 
 - that event exists and has the same `plan_digest` and `reason`;
-- the set of `(profile, subject, kind)` of its failures equals this run's;
+- the set of `(profile, subject, kind, material)` of its failures equals this run's (the material key is part of it: a
+  judge that fails a unit again after a person changed the unit is new, and `failed_before` learns the new key only from
+  the event);
 - `answered` is empty;
 - the cost is 0.
 

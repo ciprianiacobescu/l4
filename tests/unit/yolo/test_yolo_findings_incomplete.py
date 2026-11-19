@@ -4,6 +4,7 @@ over hand-built events."""
 from dataclasses import replace
 
 from l4.yolo import findings as fnd
+from l4.yolo.model import JudgeFailure
 from l4.yolo.state import fold_plan
 
 from .yolo_ledger_world import ev
@@ -132,3 +133,31 @@ def test_the_state_fold_and_rounds_not_ready_ignore_the_event():
     extra = incomplete("2026-11-19T10:00:00Z", {"a": entry("NEEDS_REVISION", "m1", "d1", [GAP])}, [failure()])
     assert fold_plan("p1", [*base, extra]) == fold_plan("p1", base)
     assert fnd.rounds_not_ready([*base, extra], "a") == fnd.rounds_not_ready(base, "a") == 1
+
+
+def test_a_repeat_is_the_same_digest_reason_failures_and_material_and_nothing_answered_or_spent():
+    f = JudgeFailure("j1", "a", "timeout", "late", "m1")
+    previous = incomplete("2026-11-19T10:00:00Z", failures=[failure("j1", "a", "timeout", "m1")], reason="timeout")
+
+    def repeats(**over):
+        args = {"plan_digest": "p", "reason": "timeout", "failures": [f], "answered": {}, "cost": 0.0} | over
+        return fnd.repeats_incomplete(previous, **args)
+
+    assert repeats()
+    assert not repeats(failures=[JudgeFailure("j1", "a", "timeout", "late", "m2")])  # the same call on another text
+    assert not repeats(plan_digest="q")
+    assert not repeats(reason="no_judge")
+    assert not repeats(failures=[JudgeFailure("j2", "a", "timeout", "late", "m1")])
+    assert not repeats(failures=[JudgeFailure("j1", "b", "timeout", "late", "m1")])
+    assert not repeats(failures=[JudgeFailure("j1", "a", "error", "late", "m1")])
+    assert not repeats(answered={"a": entry()})
+    assert not repeats(cost=0.1)
+    assert not fnd.repeats_incomplete(None, plan_digest="p", reason="timeout", failures=[f], answered={}, cost=0.0)
+
+
+def test_a_selection_failure_has_no_material_and_still_repeats():
+    skipped = JudgeFailure("j1", "", "unusable", "hello refused")
+    previous = incomplete("2026-11-19T10:00:00Z", failures=[failure("j1", "", "unusable", None)])
+    assert fnd.repeats_incomplete(
+        previous, plan_digest="p", reason="no_judge", failures=[skipped], answered={}, cost=0.0
+    )
