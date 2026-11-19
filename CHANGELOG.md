@@ -6,6 +6,27 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Added
+- `roles.plan_judges`: an optional judge chain for the plan readiness review. When it is set, the review asks its judges instead of those of `roles.judges`, and unit verification keeps `roles.judges`. Before, a consumer that wanted another judge first for its plan reviews had to reorder the judges of its running units too. An empty or missing `roles.plan_judges` reviews with `roles.judges` as before. It is a judge role like the others: a profile whose adapter cannot judge does not load, `l4 doctor` checks its profiles, and `l4 doctor --live` probes it (a failure is a warning) (L4-YOLO-095).
+- `yolo.review.timeout` (default `15m`, the 900 seconds of before, at least `1m`) bounds each judge call of the readiness review. Before, the time was fixed. In a CI job a call starts only when the job has that much time left before its soft deadline, and `l4 doctor` (CFG-012) warns when the timeout does not fit `ci.time_budget` (L4-YOLO-097).
+
+### Fixed
+- A plan readiness review no longer stops at the first judge that fails, and no longer throws away what it answered. A consumer's ten-unit plan lost three reviews in 40 minutes: the first judge failed its hello, the next one stopped at its output limit on the batch, the whole review was discarded, and the later judges of the chain were never asked. Every later run picked the same judge and failed the same way. Now each subject goes to the next judge of the chain when a judge cannot answer it:
+  - an error discards the judge for the rest of the review;
+  - a reply stopped at the output limit, or one that breaks the schema twice, discards it for that subject only;
+  - a usage limit cools the profile down;
+  - a judge that cannot run here (a failed probe, no sandbox) is skipped and named.
+
+  The subjects already answered are kept, and a review that finishes is recorded once, with the judge of each entry (`judge`) and the judges and failures of the review (`judges`, `failures`). With one judge, a reply that breaks the schema twice is still BLOCKED (L4-YOLO-096).
+- A review that does not finish keeps what it answered and says why. A judge that times out (no next judge is asked in the same job, as in unit verification), a chain with no judge left, or a CI job with no time left for another call now records `plan.review_incomplete`. It holds the subjects answered, the subjects left, each judge and its failure, and the cost, which is now charged to the plan; before, a failed review's cost was never charged. The next run reuses those answers and asks only the rest, and it asks a judge that failed a subject after the others. `l4 yolo status` shows `incomplete`, the failures and a `fix:` line under `review:`, and the run log names each failure. `l4 yolo review --local` and `--worktree --record` record it too; a `--worktree` dry run keeps the answers in its local cache. The plan's status, review, acceptances and activation are unchanged by it, and an older harness ignores the event (L4-YOLO-099).
+- A batch too large for one judge call is reviewed in parts. Even a different judge stopped at its output limit on a batch the size of a whole plan, and only the opencode adapters report such a stop. A batch whose review material is longer than `yolo.review.max_batch_chars` (new, default 160,000 characters; `0` turns this off), a batch that has a part kept from an earlier run, and a batch whose whole call stops at the output limit or times out are each reviewed in parts:
+  - one part per unit, with that unit in full and the other units read within 6,000 characters;
+  - one part with every unit read that way.
+
+  The parts' verdicts make one batch verdict, recorded under the batch's material key with its `parts`. Its `missing` says `judged in <n> parts` and why. A unit and a batch that fit are asked exactly as before, with the same material keys and readiness prompt version 4, so an upgrade asks for no new review (L4-YOLO-098).
+
 ## 0.4.58 (2026-11-13)
 
 ### Fixed
