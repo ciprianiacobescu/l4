@@ -414,6 +414,29 @@ def test_fresh_on_a_batch_judged_in_parts_asks_every_part_again_even_under_the_b
     assert len(fake.requests) == 4 and all("read in part" in r.prompt for r in fake.requests)
 
 
+def test_a_reused_batch_keeps_its_part_rows_so_fresh_still_asks_every_part(world):
+    first = _first_review(world)
+    batch = first.batches["b1"]
+    at = "2026-11-19T10:00:00Z"
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    prior[batch.material] = {**_entry(batch), "at": at}
+    nothing = FakeAdapter([])
+    reused, _ = review(world, THREE, nothing, cfg=cfg_of(0), prior=prior)
+    assert nothing.requests == []
+    again = reused.batches["b1"]
+    assert again.reused_from == at
+    assert [(name, v.material) for name, v in again.parts] == [(name, v.material) for name, v in batch.parts]
+    assert all(v.reused_from == at for _, v in again.parts)  # judged at that time, as the whole entry was
+    # the entry a second review records for it still has the rows, so `--fresh` finds a batch judged in parts
+    prior2 = {v.material: _entry(v) for v in reused.units.values()}
+    prior2[again.material] = _entry(again)
+    assert len(prior2[again.material]["parts"]) == 4
+    fake = FakeAdapter([ok() for _ in range(4)])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(0), prior=prior2, fresh=("batch:b1",))
+    assert len(fake.requests) == 4 and all("read in part" in r.prompt for r in fake.requests)
+    assert len(result.batches["b1"].parts) == 4
+
+
 def test_the_summary_part_names_every_prerequisite_outside_the_batch_on_its_own_line(world):
     plan = plan_of({A: ["openspec:x"], B: ["openspec:y"]})
     world.units = {

@@ -224,3 +224,20 @@ def test_a_batch_that_was_split_before_is_asked_whole_again_once_a_review_finish
     assert len(j1.requests) == 2  # A, and the batch asked whole
     assert "read in part" not in j1.requests[1].prompt
     assert "parts" not in last(world, "plan.reviewed").data["batches"]["b1"]
+
+
+def test_a_batch_reused_whole_keeps_its_part_rows_in_the_next_review(world):
+    """A review that reuses a batch judged in parts records the entry with its `parts` rows again."""
+    world.plan(deps={})
+    limit = Step(status="error", length_stop=True, detail="stopped at the output limit")
+    judges(world, FakeAdapter([ok(), ok(), limit, ok(), ok(), ok()]), FakeAdapter([]))
+    world.step()
+    first = last(world, "plan.reviewed").data["batches"]["b1"]
+    assert len(first["parts"]) == 3
+    world.plan(deps={}, limits={"max_cost_usd": 55})  # the plan file changes: a new review, with every subject reused
+    nothing = FakeAdapter([])
+    judges(world, nothing, FakeAdapter([]))
+    world.step()
+    assert nothing.requests == []
+    again = last(world, "plan.reviewed").data["batches"]["b1"]
+    assert again["reused_from"] and [r["material"] for r in again["parts"]] == [r["material"] for r in first["parts"]]

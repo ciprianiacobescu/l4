@@ -190,14 +190,16 @@ chain that is not discarded.
 **The job's time.** `review_plan_costed(time_left: Callable[[], float | None] | None = None)`. The CI step passes
 `self.budget`; the commands pass None.
 
-- Before every judge call, when `time_left()` is not None and is less than `timeout_s`, the review stops with reason
-  `job_time`. That call gets no failure entry, since no judge failed. The calls not asked are in `left`.
+- Before every judge call, the repair prompt after a schema break included, when `time_left()` is not None and is less
+  than `timeout_s`, the review stops with reason `job_time`. That call gets no failure entry, since no judge failed. The calls not asked are in `left`.
 - The soft-deadline margin that `job_remaining_s` subtracts already leaves room to write the ledger, so no extra
   reserve is needed.
 
 **Doctor.** CFG-012 gains a warning, the same way DLG-001 checks `delegate.timeout`:
 
-- when `ci.time_budget` is a duration and `duration_seconds(yolo.review.timeout) >= time_budget - soft_deadline_margin`,
+- when `duration_seconds(yolo.review.timeout) >= budget - soft_deadline_margin`, with `budget` the `ci.time_budget` when
+  it is a duration, else (`auto`) the job's timeout that `shortens_job` reads (`job_timeout`; nothing is said when it is
+  unknown),
   it warns `yolo.review.timeout (<t>) is not less than ci.time_budget (<b>) minus ci.soft_deadline_margin (<m>): no
   readiness call can start in a CI job`;
 - the fix line says to lower the timeout or raise the budget;

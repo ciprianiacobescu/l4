@@ -720,15 +720,20 @@ class _Calls:
             wrap=lambda argv, env, cwd=None: self.sandbox.wrap(argv, self.spec, env, cwd), host_env=self.app.environ,
         )  # fmt: skip
 
-    def ask(self, subject: Subject, *, timeout_s: int, digest: str | None) -> _Reply:
-        """At most two calls: a break of the schema gets one repair prompt. The reply says what came of it and what it
-        cost; the review decides what a failure means (L4-YOLO-096)."""
+    def ask(
+        self, subject: Subject, *, timeout_s: int, digest: str | None, may_start: Callable[[], bool] | None = None
+    ) -> _Reply:
+        """At most two calls: a break of the schema gets one repair prompt, which is a call like the first and starts
+        only when `may_start` says the job has the time (L4-YOLO-097; the reply is then `no_time`). The reply says what
+        came of it and what it cost; the review decides what a failure means (L4-YOLO-096)."""
         first = [Msg("user", self.app.redactor.redact_text(subject.user))]
         messages = first
         system = _fill(SYSTEM_TEMPLATE, {"SUBJECT_KIND": subject.kind})
         cost = 0.0
         detail = ""
-        for _ in range(MAX_CALLS):
+        for attempt in range(MAX_CALLS):
+            if attempt and may_start is not None and not may_start():
+                return _Reply("no_time", cost)
             result: StructuredResult = self.judge.complete_structured(
                 system, messages, READINESS_SCHEMA, effort=None, max_tokens=0, timeout_s=timeout_s
             )
@@ -924,8 +929,12 @@ class _Walk:
             if self._no_time():
                 return _Outcome("none")
             calls = self.opened[name]
-            reply = calls.ask(call.subject, timeout_s=self.timeout_s, digest=call.digest)
+            reply = calls.ask(
+                call.subject, timeout_s=self.timeout_s, digest=call.digest, may_start=lambda: not self._no_time()
+            )
             self.cost += reply.cost
+            if reply.status == "no_time":  # the repair had no time left: the review stops, no judge failed
+                return _Outcome("none")
             if reply.verdict is not None:
                 return _Outcome("answered", replace(reply.verdict, digest=call.digest), name)
             if reply.status == "schema_invalid":
@@ -984,6 +993,27 @@ def _reusable(entry: Mapping[str, Any]) -> bool:
 
 
 def _reused(entry: Mapping[str, Any], key: str, digest: str | None) -> Verdict:
+    """A recorded entry as a verdict again. The `parts` rows of a batch judged in parts come with it (a row that was not
+    reused itself was judged when the entry was), so the entry the next `plan.reviewed` records still holds them and
+    `--fresh` still finds a batch judged in parts (L4-YOLO-098)."""
+    at = entry.get("at") or entry.get("reused_from")
+    rows = tuple(
+        (
+            str(row["part"]),
+            Verdict(
+                row["verdict"],
+                tuple(dict(f) for f in row.get("findings", ())),
+                tuple(row.get("assumptions", ())),
+                tuple(row.get("missing", ())),
+                None,
+                row.get("material"),
+                row.get("reused_from") or at,
+                row.get("judge"),
+            ),
+        )
+        for row in entry.get("parts") or ()
+        if isinstance(row, dict) and row.get("part") and row.get("verdict") is not None
+    )
     return Verdict(
         entry["verdict"],
         tuple(dict(f) for f in entry.get("findings", ())),
@@ -991,8 +1021,9 @@ def _reused(entry: Mapping[str, Any], key: str, digest: str | None) -> Verdict:
         tuple(entry.get("missing", ())),
         digest,
         key,
-        entry.get("at") or entry.get("reused_from"),
+        at,
         entry.get("judge"),
+        rows,
     )
 
 

@@ -70,7 +70,8 @@ Rules for every task:
     - with `ci.time_budget: 20m`, `ci.soft_deadline_margin: 10m` and `yolo.review.timeout: 15m`, CFG-012 warns with
       `yolo.review.timeout (15m) is not less than ci.time_budget (20m) minus ci.soft_deadline_margin (10m)`;
     - `yolo.review.timeout: 5m` passes;
-    - `time_budget: auto` passes.
+    - `time_budget: auto` passes when the job's timeout is unknown or fits (the review adds the case of a known job timeout
+      that does not fit).
   - In `tests/unit/doctor/test_checks_agents.py`: with `roles.plan_judges` set, LIVE-001 probes it, and a failure is
     a warning, not an error. With it empty, LIVE-001 is as before.
 

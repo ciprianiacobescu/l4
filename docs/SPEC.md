@@ -7881,10 +7881,12 @@ parts by the same judge (L4-YOLO-098). Any other timeout (a unit, a part, a batc
 review for this run without asking the next judge, which would spend its own time on the same material in the same job
 (as a timeout holds a round in L4-VER-075): the review does not finish (L4-YOLO-099, reason `timeout`), and the next run
 asks that call of the other judges first (L4-YOLO-096). In a CI job whose budget is known (L4-IMP-012), the plan step
-SHALL start a judge call only when the job's time left before its soft deadline is at least `yolo.review.timeout`, and
-else end the review for this run with reason `job_time`, keeping what it answered; the plan step runs before `l4 run`
+SHALL start a judge call only when the job's time left before its soft deadline is at least `yolo.review.timeout` (the
+repair prompt after a schema break is a call: it is checked too), and else end the review for this run with reason
+`job_time`, keeping what it answered; the plan step runs before `l4 run`
 arms the soft deadline that stops a unit's running steps (L4-IMP-068), so nothing else stops a review there. `l4 doctor` CFG-012 SHALL warn when
-`ci.time_budget` is a duration and `yolo.review.timeout` is not less than it minus `ci.soft_deadline_margin`. [V, the
+`yolo.review.timeout` is not less than the budget minus `ci.soft_deadline_margin`, the budget being `ci.time_budget`
+when it is a duration, else (`auto`) the job's timeout as L4-IMP-077 reads it (nothing is said when it is unknown). [V, the
 code: `readiness.DEFAULT_TIMEOUT_S` is 900 and no caller passes a timeout; a consumer's batch subject ran a judge past
 900 s and nothing was recorded.]
 
@@ -18626,11 +18628,15 @@ scenario is a spec defect (§26).
   `failures`; the second asks B of `j2` first, asks the batch, and does not ask A again
 
 #### SCN-YOLO-272 (−) No call starts that the job has no time for · L4-YOLO-097
-- **Given** a CI job with 10 minutes left before its soft deadline and `yolo.review.timeout: 15m`; and, for doctor,
-  `ci.time_budget: 20m`, `ci.soft_deadline_margin: 10m` and `yolo.review.timeout: 15m`
+- **Given** a CI job with 10 minutes left before its soft deadline and `yolo.review.timeout: 15m`; a job with 901
+  seconds left at its first call, a schema break, and 10 seconds left at the repair; and, for doctor,
+  `ci.time_budget: 20m`, `ci.soft_deadline_margin: 10m` and `yolo.review.timeout: 15m`, and `ci.time_budget: auto` in a
+  30-minute job with `ci.soft_deadline_margin: 20m`
 - **When** the plan step reviews a plan, and `l4 doctor` runs
-- **Then** no judge is asked and `plan.review_incomplete{reason: job_time}` is recorded; CFG-012 warns `yolo.review.timeout
-  (15m) is not less than ci.time_budget (20m) minus ci.soft_deadline_margin (10m)`
+- **Then** no judge is asked and `plan.review_incomplete{reason: job_time}` is recorded; the second job asks the first
+  call and not the repair, and records `job_time` with the subject in `left`; CFG-012 warns `yolo.review.timeout (15m) is
+  not less than ci.time_budget (20m) minus ci.soft_deadline_margin (10m)`, and, for the auto budget, `yolo.review.timeout
+  (15m) is not less than the job's timeout (30 min, <source>) minus ci.soft_deadline_margin (20m)`
 
 #### SCN-YOLO-273 (+) A large batch is reviewed in parts from the start · L4-YOLO-098
 - **Given** `yolo.review.max_batch_chars: 1000`, a batch of the units A, B and C whose batch material is longer than

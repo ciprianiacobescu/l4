@@ -320,17 +320,24 @@ CFG_012_FIX = "set ci.time_budget: auto (the job timeout), or a duration at leas
 CFG_012_REVIEW_FIX = "lower yolo.review.timeout, or raise ci.time_budget"
 
 
-def _review_timeout_warning(cfg) -> str | None:
+def _review_timeout_warning(cfg, job: tuple[int, str] | None = None) -> str | None:
     """L4-YOLO-097: the plan step starts a readiness call only with `yolo.review.timeout` left before the soft
-    deadline, so a timeout that is not below the budget minus the margin leaves no call that can start."""
+    deadline, so a timeout that is not below the budget minus the margin leaves no call that can start. With
+    `ci.time_budget: auto` the budget is the job's timeout (`job`, as `shortens_job` reads it); unknown: nothing is
+    said."""
     ci = cfg.ci
     if ci.time_budget == "auto":
-        return None
-    room = duration_seconds(ci.time_budget) - duration_seconds(ci.soft_deadline_margin)
+        if job is None:
+            return None
+        seconds, source = job
+        what = f"the job's timeout ({seconds // 60} min, {source})"
+    else:
+        seconds, what = duration_seconds(ci.time_budget), f"ci.time_budget ({ci.time_budget})"
+    room = seconds - duration_seconds(ci.soft_deadline_margin)
     if duration_seconds(cfg.yolo.review.timeout) < room:
         return None
     return (
-        f"yolo.review.timeout ({cfg.yolo.review.timeout}) is not less than ci.time_budget ({ci.time_budget}) minus "
+        f"yolo.review.timeout ({cfg.yolo.review.timeout}) is not less than {what} minus "
         f"ci.soft_deadline_margin ({ci.soft_deadline_margin}): no readiness call can start in a CI job"
     )
 
@@ -338,8 +345,9 @@ def _review_timeout_warning(cfg) -> str | None:
 def _cfg_012(ctx: DoctorContext) -> CheckResult:
     ci = ctx.cfg.ci
     error = too_short(ctx.cfg)
-    warning = shortens_job(ctx.cfg, job_timeout(ctx.env, read_workflow(ctx.repo)))
-    review = _review_timeout_warning(ctx.cfg)
+    job = job_timeout(ctx.env, read_workflow(ctx.repo))
+    warning = shortens_job(ctx.cfg, job)
+    review = _review_timeout_warning(ctx.cfg, job)
     warned = "; ".join(w for w in (warning, review) if w)
     fix = f"{CFG_012_FIX}; {CFG_012_REVIEW_FIX}" if review else CFG_012_FIX
     if error and warned:

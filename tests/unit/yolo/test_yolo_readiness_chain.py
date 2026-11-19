@@ -248,3 +248,25 @@ def test_the_judge_that_split_a_batch_does_not_come_first_again_for_a_part_it_fa
     call = _Call("batch:b1/summary", Subject("batch", "b1", ""), None, "k")
     assert walk.order(call, first="j1") == ["j2", "j1"]
     assert walk.order(_Call("other", Subject("batch", "b1", ""), None, "k2"), first="j2") == ["j2", "j1"]
+
+
+def test_the_repair_prompt_is_a_call_too_and_a_job_without_the_time_for_it_stops_the_review(world):
+    """L4-YOLO-097: a judge call starts only with `yolo.review.timeout` left, the repair after a schema break too."""
+    left = iter([901.0, 10.0])  # the first call has the time, the repair does not
+    j1 = FakeAdapter([bad(), ok()])
+    with pytest.raises(ReviewIncomplete) as err:
+        review(world, SINGLE, j1, FakeAdapter([]), time_left=lambda: next(left))
+    assert len(j1.requests) == 1  # no second call
+    assert err.value.reason == "job_time" and err.value.left == (A,) and err.value.failures == ()
+    again = FakeAdapter([bad(), ok()])
+    result, _ = review(world, SINGLE, again, FakeAdapter([]), time_left=lambda: 901.0)
+    assert len(again.requests) == 2 and result.units[A].verdict == "READY"  # with the time, the repair is asked
+
+
+def test_a_call_starts_with_exactly_the_timeout_left_and_not_with_a_second_less(world):
+    result, _ = review(world, SINGLE, FakeAdapter([ok()]), FakeAdapter([]), time_left=lambda: 900.0)
+    assert result.units[A].verdict == "READY"
+    j1 = FakeAdapter([ok()])
+    with pytest.raises(ReviewIncomplete) as err:
+        review(world, SINGLE, j1, FakeAdapter([]), time_left=lambda: 899.0)
+    assert err.value.reason == "job_time" and j1.requests == []

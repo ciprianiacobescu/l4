@@ -123,3 +123,29 @@ def test_a_failing_cfg_012_keeps_failing_with_the_review_warning_added(make_ctx)
     result = cc._cfg_012(ctx)
     assert result.status == "fail" and result.severity != "warn"
     assert ERROR in result.message and "yolo.review.timeout (15m) is not less than" in result.message
+
+
+def test_an_auto_budget_is_the_job_timeout_and_a_review_timeout_that_does_not_fit_it_warns(make_ctx):
+    ctx, _ = make_ctx(cfg=review_cfg("15m", budget="auto", margin="20m"), L4_JOB_TIMEOUT_MINUTES="30")
+    result = cc._cfg_012(ctx)
+    assert result.status == "fail" and result.severity == "warn"
+    assert (
+        "yolo.review.timeout (15m) is not less than the job's timeout (30 min, L4_JOB_TIMEOUT_MINUTES) minus "
+        "ci.soft_deadline_margin (20m): no readiness call can start in a CI job"
+    ) in result.message
+    assert "lower yolo.review.timeout" in (result.fix_hint or "")
+    assert exit_code([outcome(ctx)]) == 0
+
+
+def test_the_auto_budget_review_warning_is_exact_at_the_edge_and_silent_without_a_job_timeout(make_ctx):
+    ctx, _ = make_ctx(cfg=review_cfg("15m", budget="auto", margin="20m"), L4_JOB_TIMEOUT_MINUTES="35")
+    assert cc._cfg_012(ctx).status == "fail"  # 35 - 20 = 15: the timeout is not less than the room
+    ctx, _ = make_ctx(cfg=review_cfg("15m", budget="auto", margin="20m"), L4_JOB_TIMEOUT_MINUTES="36")
+    assert cc._cfg_012(ctx).status == "pass"
+    ctx, _ = make_ctx(cfg=review_cfg("15m", budget="auto", margin="20m"))
+    assert cc._cfg_012(ctx).status == "pass"  # the job's timeout is unknown: nothing is said
+
+
+def test_a_set_budget_is_still_the_budget_whatever_the_job_timeout(make_ctx):
+    ctx, _ = make_ctx(cfg=review_cfg("5m", budget="60m", margin="20m"), L4_JOB_TIMEOUT_MINUTES="30")
+    assert "yolo.review.timeout" not in cc._cfg_012(ctx).message
