@@ -93,6 +93,7 @@ class CycleWorld:
             "pass", revision, profile
         )
         self.judge = FakeAdapter([Step(structured=READY) for _ in range(20)])
+        self.adapters: dict[str, FakeAdapter] | None = None  # adapters by name, instead of the one `judge` as `fake`
 
     # --- git --------------------------------------------------------------------------------------------------------
 
@@ -298,7 +299,7 @@ class CycleWorld:
         try:
             return yolo_step(
                 self.app, self.cfg, self.git, self.found(snapshots), forge=kw.pop("forge", self.forge),
-                adapters={"fake": self.judge}, confirm_wait_s=0, **kw,
+                adapters=self.adapters or {"fake": self.judge}, confirm_wait_s=0, **kw,
             )  # fmt: skip
         finally:
             cycle.run_profile = original

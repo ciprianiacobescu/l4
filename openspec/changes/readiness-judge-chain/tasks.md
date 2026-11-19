@@ -231,7 +231,7 @@ Rules for every task:
 
   Then change `src/l4/yolo/findings.py`. Run the file and `tests/unit/yolo/test_yolo_findings*.py` (the ones that
   exist).
-- [ ] 5.2 Write the CI-step tests first, in a new `tests/unit/yolo/test_yolo_cycle_review_incomplete.py`, with
+- [x] 5.2 Write the CI-step tests first, in a new `tests/unit/yolo/test_yolo_cycle_review_incomplete.py`, with
   `CycleWorld`. Set `world.cfg` to a configuration with two judge profiles, and `world.judge` or the injected adapters
   to the scripts; if `CycleWorld.step` cannot take a second adapter, add an `adapters` attribute to `CycleWorld`.
   - SCN-YOLO-278:
@@ -270,7 +270,7 @@ Rules for every task:
   `test_a_judge_that_cannot_run_for_a_waiting_plan_does_not_starve_the_active_plan` raise a plain `JudgeFailed`,
   `RoleUnavailable` or `RoleLimit` through a monkeypatch. They must still pass unchanged: that path records nothing and
   logs `no judge could run`.
-- [ ] 5.3 Write the command tests first, in a new `tests/unit/yolo/test_yolo_review_incomplete_cli.py`. Follow how
+- [x] 5.3 Write the command tests first, in a new `tests/unit/yolo/test_yolo_review_incomplete_cli.py`. Follow how
   `tests/unit/yolo/test_yolo_review_worktree.py` drives `--local` and `--worktree` (its `real = review_plan_costed`
   wrapper injects the fake).
   - SCN-YOLO-281: `--local` records `plan.review_incomplete{source: local, by}` and the charge, and exits 12 with the

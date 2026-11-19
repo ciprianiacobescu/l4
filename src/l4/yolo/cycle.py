@@ -72,7 +72,16 @@ from l4.yolo import accept
 from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integrated, next_eligible, unit_blocker
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
-from l4.yolo.findings import finding_id, prior_entries
+from l4.yolo.findings import (
+    failed_before,
+    failure_line,
+    failure_rows,
+    finding_id,
+    judges_answering,
+    latest_incomplete,
+    prior_entries,
+    repeats_incomplete,
+)
 from l4.yolo.forbidden import tracked_tree
 from l4.yolo.limits import attempt_refs, charged_of, live_attempt, live_state, reached_at
 from l4.yolo.merge import NO_LONGER_ALLOWED, _is_ancestor, confirm_merged, merge_guarded, read_ci, remote_tip
@@ -93,7 +102,7 @@ from l4.yolo.model import (
 )
 from l4.yolo.plans import PlanFile, archived_at, holds_of, plan_files, plan_files_at, planned_ids, unit_infos
 from l4.yolo.postcheck import run_profile
-from l4.yolo.readiness import PROMPT_VERSION, delivered_on_target, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, ReviewIncomplete, delivered_on_target, review_plan_costed
 from l4.yolo.report import render_report
 from l4.yolo.staleness import frozen_rev, plan_change, unit_change, unit_revs
 from l4.yolo.state import fold_plan, is_unit_key
@@ -260,6 +269,10 @@ def _entry(v: Verdict, **extra: Any) -> dict[str, Any]:
         entry["material"] = v.material
     if v.reused_from is not None:
         entry["reused_from"] = v.reused_from
+    if v.judge is not None:
+        entry["judge"] = v.judge  # the profile that answered (L4-YOLO-096)
+    if v.parts:  # a batch reviewed in parts (L4-YOLO-098): one row per part, reusable by its own key
+        entry["parts"] = [{"part": name, **_entry(part)} for name, part in v.parts]
     return {**entry, **extra}
 
 
@@ -957,10 +970,8 @@ class _Step:
             self._write(ctx, [self._event("plan.refused", plan_digest=digest, findings=findings)])
             self._refusal_lines(ctx.plan_id, findings)
             return self._after_review(ctx)
-        judge: dict[str, str] = {}
 
-        def sandbox_for(adapter: str, profile: str) -> Sandbox:  # the step's own sandbox; the profile goes on the event
-            judge["profile"] = profile
+        def sandbox_for(adapter: str, profile: str) -> Sandbox:  # the step's own sandbox
             return self.sandbox or select_sandbox(self.cfg.sandbox, self.app.environ, repo=self.app.repo)
 
         try:
@@ -979,7 +990,12 @@ class _Step:
                 delivered=delivered_on_target(
                     archived_at(self.git, rev, self.cfg), {u: s.state.phase for u, s in self.snaps.items()}
                 ),
+                time_left=self.budget,
+                failed_before=failed_before(ctx.read.events, PROMPT_VERSION),
             )
+        except ReviewIncomplete as exc:  # what it answered is kept, the reason is recorded (L4-YOLO-099)
+            self._review_incomplete(ctx, exc, digest=digest, order=list(admission.order), merge=plan.merge, rev=rev)
+            return None
         except (RoleLimit, RoleUnavailable) as exc:  # `JudgeFailed` is a `RoleUnavailable`: nothing is recorded (R9)
             reason = self.app.redactor.redact_text(str(exc) or type(exc).__name__).splitlines()[0][:200]
             self._line(ctx.plan_id, f"the review waits, no judge could run ({reason}); a later run tries again")
@@ -996,7 +1012,12 @@ class _Step:
             bid: _entry(v, digests={u: current[u] for u in members.get(bid, ()) if u in current})
             for bid, v in batch_verdicts.items()
         }
-        extra = {"source": "ci", **({"judge": judge["profile"]} if "profile" in judge else {})}
+        answering = judges_answering([*result.units.values(), *batch_verdicts.values()])
+        extra: dict[str, Any] = {"source": "ci"}
+        if answering:
+            extra |= {"judge": answering[0], "judges": answering}  # `judge`: the first, as before
+        if result.failures:
+            extra["failures"] = failure_rows(result.failures, material=False)
         events.append(
             self._event(
                 "plan.reviewed",
@@ -1019,6 +1040,8 @@ class _Step:
             )  # fmt: skip
             events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
         self._write_review(ctx, events, digest)
+        for failure in result.failures:
+            self._line(ctx.plan_id, failure_line(failure))
         subjects = [*result.units.values(), *batch_verdicts.values()]
         held_keys = [*result.units, *(f"batch:{b}" for b in batch_verdicts)]
         ready = sum(v.verdict == "READY" for v in subjects)
@@ -1042,7 +1065,59 @@ class _Step:
         if len(findings) > _REFUSAL_LINES:
             self._line(plan_id, f"… and {len(findings) - _REFUSAL_LINES} more: l4 yolo check {plan_id}")
 
-    def _write_review(self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str) -> None:
+    def _review_incomplete(
+        self, ctx: _Ctx, exc: ReviewIncomplete, *, digest: str, order: list[str], merge: str, rev: str | None
+    ) -> None:
+        """A review with a call no judge answered (L4-YOLO-099): the log says why, and the ledger keeps what was
+        answered (`plan.review_incomplete`, with the admission when it is not recorded yet, and the cost). The plan's
+        state does not change. Nothing is written for a repeat that answered nothing and spent nothing."""
+        for failure in exc.failures:
+            self._line(ctx.plan_id, failure_line(failure))
+        self._line(
+            ctx.plan_id,
+            f"the review is incomplete ({exc.reason}): {len(exc.answered)} answered and kept, {len(exc.left)} left; "
+            "a later run asks the rest",
+        )
+        self._judge_down = True  # no other plan goes to the judge in this run
+        previous = latest_incomplete(ctx.read.events, PROMPT_VERSION)
+        if repeats_incomplete(
+            previous, plan_digest=digest, reason=exc.reason, failures=exc.failures, answered=exc.answered, cost=exc.cost
+        ):
+            return
+        state = ctx.state
+        events: list[PlanEvent] = []
+        if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
+            events.append(self._event("plan.admitted", plan_digest=digest, order=order, merge=merge))
+        events.append(
+            self._event(
+                "plan.review_incomplete",
+                plan_digest=digest,
+                prompt_version=PROMPT_VERSION,
+                source="ci",
+                target_rev=rev,
+                reason=exc.reason,
+                answered={
+                    name: _entry(v, **({} if name.startswith("batch:") else {"digest": v.digest}))
+                    for name, v in exc.answered.items()
+                },
+                left=list(exc.left),
+                failures=failure_rows(exc.failures, material=True),
+                cost_usd=round(exc.cost, 6),
+            )
+        )  # fmt: skip
+        if exc.cost > 0:
+            total = exc.cost + max(
+                (float(e.data.get("cost_usd") or 0) for e in ctx.read.events
+                 if e.type == "plan.charged" and e.data.get("unit") == REVIEW_KEY),
+                default=0.0,
+            )  # fmt: skip
+            events.append(self._event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(total, 6), runs=0))
+        self._write_review(ctx, events, digest, stale_on=("plan.reviewed", "plan.review_incomplete", "plan.refused"))
+
+    def _write_review(
+        self, ctx: _Ctx, events: Sequence[PlanEvent], digest: str,
+        stale_on: Sequence[str] = ("plan.reviewed", "plan.refused"),
+    ) -> None:  # fmt: skip
         """The review is paid for: when the lease is lost, the ref is read again and the same facts are appended once
         more, with no second judge call, unless the plan moved in a way that makes this review stale (another review,
         refusal or admission, a new plan digest, or a plan that can no longer be reviewed) (review #16)."""
@@ -1054,9 +1129,7 @@ class _Step:
             ctx.refresh(fresh)
             since = fresh.events[seen:]
             newer = any(
-                e.type in ("plan.reviewed", "plan.refused")
-                or (e.type == "plan.admitted" and e.data.get("plan_digest") != digest)
-                for e in since
+                e.type in stale_on or (e.type == "plan.admitted" and e.data.get("plan_digest") != digest) for e in since
             )
             if newer or not self._reviewable(ctx.state):
                 log.info("plan %s: the ref moved during the review and the review is stale: it is dropped", ctx.plan_id)

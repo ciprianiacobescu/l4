@@ -14,7 +14,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from l4.yolo.model import PlanEvent
+from l4.yolo.model import JudgeFailure, PlanEvent
 
 # A finding of these criteria is the harness saying that no review happened for the item (never reused, never a round).
 HARNESS_CRITERIA = frozenset({"schema", "unit_missing", "completeness"})
@@ -172,6 +172,52 @@ def latest_incomplete(events: Sequence[PlanEvent], prompt_version: int) -> PlanE
     """The newest `plan.review_incomplete` of the prompt version after the plan's latest `plan.reviewed`, else None."""
     found = _since_review(events, prompt_version)
     return found[-1] if found else None
+
+
+def failure_rows(failures: Sequence[JudgeFailure], *, material: bool) -> list[dict[str, str]]:
+    """`[{profile, subject, kind, detail}]` of L4-YOLO-096; a review that does not finish keeps the material key too,
+    which the next run reads to ask the other judges first (`failed_before`)."""
+    return [
+        {"profile": f.profile, "subject": f.subject, "kind": f.kind, "detail": f.detail}
+        | ({"material": f.material} if material and f.material else {})
+        for f in failures
+    ]
+
+
+def judges_answering(verdicts: Iterable[Any]) -> list[str]:
+    """The distinct profiles that answered the judged verdicts (a reuse names none), in the order they first answered; a
+    batch in parts carries its parts' profiles joined by `, `."""
+    names: list[str] = []
+    for verdict in verdicts:
+        if verdict.reused_from is None and verdict.judge:
+            names += [n for n in verdict.judge.split(", ") if n not in names]
+    return names
+
+
+def failure_line(failure: JudgeFailure) -> str:
+    """The log and command line of a judge that was skipped or discarded: `selection` where no subject was asked."""
+    return f"{failure.profile}: {failure.subject or 'selection'}: {failure.kind}: {failure.detail}"
+
+
+def repeats_incomplete(
+    previous: PlanEvent | None,
+    *,
+    plan_digest: str,
+    reason: str,
+    failures: Sequence[JudgeFailure],
+    answered: Mapping[str, Any],
+    cost: float,
+) -> bool:
+    """True when the newest incomplete review (`latest_incomplete`) has the same plan digest, reason and failures
+    (profile, subject and kind) and this run answered nothing and spent nothing: nothing is written (L4-YOLO-099)."""
+    if previous is None or answered or cost > 0:
+        return False
+    same = {(f.get("profile"), f.get("subject"), f.get("kind")) for f in previous.data.get("failures") or ()}
+    return (
+        previous.data.get("plan_digest") == plan_digest
+        and previous.data.get("reason") == reason
+        and same == {(f.profile, f.subject, f.kind) for f in failures}
+    )
 
 
 def judged(hist: Sequence[Mapping[str, Any]]) -> list[Entry]:
