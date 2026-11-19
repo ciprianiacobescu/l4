@@ -53,7 +53,7 @@ Unit verification already handles these cases:
   - CFG-012 warns when the timeout does not fit `ci.time_budget`.
 - **A batch reviewed in parts.** A batch subject with two or more units is reviewed in parts when:
   - its material is longer than `yolo.review.max_batch_chars` (default 160,000; `0`: no split before a call);
-  - a part of it was kept from an earlier run;
+  - an incomplete review kept a part of it since the latest finished review;
   - or its whole call stops at the output limit or times out.
 
   The parts are one per unit, that unit in full with the others read within 6,000 characters, and one summary part. The

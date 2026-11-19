@@ -1134,6 +1134,7 @@ def run_review(
             prior=fnd.prior_entries(read.events, PROMPT_VERSION, state.accepted),
             sandbox_for=sandbox_for,
             failed_before=fnd.failed_before(read.events, PROMPT_VERSION),
+            kept=fnd.kept_keys(read.events, PROMPT_VERSION),
         )
     except ReviewIncomplete as exc:
         _record_incomplete(

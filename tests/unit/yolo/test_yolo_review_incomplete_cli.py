@@ -3,6 +3,8 @@
 chain of judges (L4-YOLO-096, SCN-YOLO-269, SCN-YOLO-277). The judges are scripted `FakeAdapter`s, one per adapter
 name, behind the real `review_plan_costed`."""
 
+import json
+
 import yaml
 
 from l4.agents.base import ProbeResult
@@ -133,6 +135,23 @@ def test_scn_yolo_277_fresh_asks_every_part_of_a_batch_again(world, monkeypatch,
     judges(monkeypatch, again, FakeAdapter([]))
     assert world.l4("review", "p1", "--worktree", "--fresh", "batch:b1") == 0
     assert len(again.requests) == 3 and all("read in part" in r.prompt for r in again.requests)
+
+
+def test_a_part_in_the_dry_run_cache_still_splits_its_batch_with_the_bound_off(world, monkeypatch, capsys):
+    """The cache has no `plan.reviewed` to end it: a cached part splits the batch (and is reused), so `--fresh
+    batch:<id>` is how a dry run asks the batch whole again."""
+    ready_world(world)
+    configure(world, ["j1"], review={"max_batch_chars": 100})
+    judges(monkeypatch, FakeAdapter([ok() for _ in range(5)]), FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 0
+    path = next(world.root.glob("**/yolo/p1/review/verdicts.jsonl"))
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    path.write_text("".join(json.dumps(x) + "\n" for x in lines if x["kind"] != "batch"), encoding="utf-8")
+    configure(world, ["j1"], review={"max_batch_chars": 0})
+    again = FakeAdapter([])
+    judges(monkeypatch, again, FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 0
+    assert again.requests == []  # the cached parts are reused, none is asked and the batch is not asked whole
 
 
 def test_record_writes_judge_and_sandbox_per_entry_from_the_judge_that_answered_it(world, monkeypatch, capsys):

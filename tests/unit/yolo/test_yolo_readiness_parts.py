@@ -272,7 +272,7 @@ def test_scn_yolo_277_a_kept_part_is_reused_and_only_the_others_are_asked(world)
     kept = [f"batch:b1/{A}", "batch:b1/summary"]
     prior.update({parts[name].material: _entry(parts[name]) for name in kept})
     fake = FakeAdapter([ok(), ok()])
-    result, _ = review(world, THREE, fake, prior=prior)  # the bound is the default: the kept parts split the batch
+    result, _ = review(world, THREE, fake, cfg=cfg_of(0), prior=prior, kept=[parts[n].material for n in kept])
     assert len(fake.requests) == 2  # the two other parts, and no whole-batch request
     assert all("read in part" in r.prompt for r in fake.requests)
     verdict = result.batches["b1"]
@@ -280,6 +280,31 @@ def test_scn_yolo_277_a_kept_part_is_reused_and_only_the_others_are_asked(world)
     reused = {name: v.reused_from for name, v in verdict.parts}
     assert reused[kept[0]] is None and reused[kept[1]] is None  # the entries had no `at`: reuse is marked by the key
     assert [n for n, v in verdict.parts if v.judge is None] == kept
+
+
+def test_a_part_of_a_finished_review_does_not_split_the_batch_again(world):
+    """Parts in `prior` that no incomplete review kept (they come from a `plan.reviewed`) are reused when the batch is
+    split, but they do not split it: with the bound off the changed batch is asked whole."""
+    first = _first_review(world)
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    fake = FakeAdapter([ok()])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(0), prior=prior)
+    assert len(fake.requests) == 1 and "read in part" not in fake.requests[0].prompt
+    assert result.batches["b1"].parts == ()
+    only_units = FakeAdapter([ok()])
+    kept = [v.material for v in first.units.values()]  # a unit kept by an incomplete review is no part: still whole
+    review(world, THREE, only_units, cfg=cfg_of(0), prior=prior, kept=kept)
+    assert len(only_units.requests) == 1 and "read in part" not in only_units.requests[0].prompt
+
+
+def test_a_batch_split_for_its_size_reuses_the_parts_of_a_finished_review(world):
+    first = _first_review(world)
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    fake = FakeAdapter([])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(1000), prior=prior)
+    assert fake.requests == [] and len(result.batches["b1"].parts) == 4
 
 
 def test_scn_yolo_277_fresh_asks_every_part_again_and_a_whole_key_in_prior_reuses_the_batch(world):

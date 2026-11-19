@@ -147,8 +147,12 @@ code: `readiness.DEFAULT_TIMEOUT_S` is 900 and no caller passes a timeout; a con
 A batch subject that shows two or more units SHALL
 be reviewed in parts, and never asked as a whole in that review, when its material (the user text the judge would get)
 has more than `yolo.review.max_batch_chars` characters (default 160,000, two unit folders at the default folder budget;
-`0`: no split before a call), or when the review's prior entries hold one of its parts (L4-YOLO-099). It SHALL also be
-reviewed in parts, by the same judge first, when its whole call stops at the output limit or times out. The parts
+`0`: no split before a call), or when a `plan.review_incomplete` recorded after the plan's latest `plan.reviewed` holds
+one of its parts (L4-YOLO-099). A part that only a `plan.reviewed` recorded SHALL be reused when the batch is split, but
+SHALL NOT split it: once a review has finished, the next review of a changed batch starts whole again, so that `0`
+turns the size split off. It SHALL also be reviewed in parts, by the same judge first, when its whole call stops at the
+output limit or times out. (A `--worktree` dry run has no `plan.reviewed` to end its local cache: a part in the cache
+splits the batch, and `l4 yolo review --worktree --fresh batch:<id>` asks the batch again.) The parts
 SHALL be, in order: one part per unit the batch review shows, in plan order (`batch:<batch>/<unit>`), whose material is
 the batch's with that unit's folder in full as a subject's is shown (its budgets and its `material_cut`), the
 prerequisites outside the batch of that unit as a batch shows them, and each other unit of the batch read as a
@@ -219,7 +223,8 @@ a batch before its reply is cut.]
   of the four parts of the batch b2
 - **When** a later review runs on the same material, and then `l4 yolo review p1 --worktree --fresh batch:b1` runs
 - **Then** the first asks nothing about b1 and asks only the two other parts of b2; the second asks every part of b1
-  again
+  again; and when a prerequisite outside b1 changes after the review, with `yolo.review.max_batch_chars: 0`, the next
+  review asks b1 whole, and not in parts reused from the recorded review
 
 ### Requirement: L4-YOLO-099 A review that does not finish keeps what it answered and says why
 A review that ends with a call that

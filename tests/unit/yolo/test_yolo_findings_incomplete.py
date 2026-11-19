@@ -161,3 +161,20 @@ def test_a_selection_failure_has_no_material_and_still_repeats():
     assert fnd.repeats_incomplete(
         previous, plan_digest="p", reason="no_judge", failures=[skipped], answered={}, cost=0.0
     )
+
+
+def test_kept_keys_are_the_answered_materials_of_the_incomplete_reviews_after_the_latest_review():
+    schema = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: x"}
+    events = [
+        incomplete("2026-11-19T08:00:00Z", {"batch:b1/a": entry(material="old")}),
+        reviewed(
+            "2026-11-19T09:00:00Z", batches={"b1": entry(material="mb", parts=[{"material": "pp", "verdict": "READY"}])}
+        ),
+        incomplete(
+            "2026-11-19T10:00:00Z", {"batch:b1/a": entry(material="mp"), "b": entry("BLOCKED", "mh", findings=[schema])}
+        ),
+        incomplete("2026-11-19T11:00:00Z", {"c": entry(material="mc")}),
+        incomplete("2026-11-19T12:00:00Z", {"d": entry(material="md")}, version=3),
+    ]
+    assert fnd.kept_keys(events, 4) == {"mp", "mc"}  # a part a finished review recorded ("pp") is not kept
+    assert fnd.kept_keys([*events, reviewed("2026-11-19T13:00:00Z")], 4) == set()

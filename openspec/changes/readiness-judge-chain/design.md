@@ -242,7 +242,11 @@ job [I].
 **When.** A batch subject whose shown units (`left`, the units not done) are two or more is split in three cases:
 
 1. `yolo.review.max_batch_chars > 0` and `len(subject.user) > max_batch_chars`;
-2. any of its parts' material keys is a reusable entry of `prior` (the batch's own key is not);
+2. any of its parts' material keys was kept by a `plan.review_incomplete` after the plan's latest `plan.reviewed`
+   (`findings.kept_keys`, passed as `kept`; a `--worktree` dry run adds the parts of its local cache, which no
+   `plan.reviewed` ends). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
+   never splits it: without this a batch split once stays split, and `max_batch_chars: 0` would not turn the split off
+   after a prerequisite changed;
 3. its whole call ends `error` with `length_stop`, or `timeout`, and the same judge is asked the parts first.
 
 In cases 1 and 2 the whole batch is never asked. A batch whose whole key is in `prior` is reused whole, as today.

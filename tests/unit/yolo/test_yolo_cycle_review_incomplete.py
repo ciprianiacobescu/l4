@@ -192,3 +192,35 @@ def test_scn_yolo_280_a_timeout_on_an_edited_unit_is_recorded_again_and_the_next
     world.step()
     assert len(j2.requests) == 1  # A went to j2 first; B and the batch to j1
     assert last(world, "plan.reviewed").data["units"][A]["judge"] == "j2"
+
+
+def big_design(tail: str) -> dict[str, str]:
+    """A's design, longer than the 6,000 characters a part reads of a sibling: the tail is seen only by A's own part."""
+    return {"openspec/changes/a/design.md": "A-DESIGN-START\n" + "x" * 9000 + f"\nA-DESIGN-{tail}\n"}
+
+
+def test_a_batch_that_was_split_before_is_asked_whole_again_once_a_review_finished(world):
+    """A part kept from an earlier `plan.reviewed` does not split the batch again: only a part an incomplete review
+    kept after the latest `plan.reviewed` does (L4-YOLO-098). With `max_batch_chars: 0` the batch is asked whole."""
+    world.cfg = make_cfg(
+        forge={"type": "local", "base_branch": "main", "merge_policy": "auto"},
+        profiles=PROFILES,
+        roles={"implementer": ["impl"], "judges": ["j1", "j2"]},
+        yolo={"review": {"max_batch_chars": 0}},
+    )
+    world.commit(big_design("TAIL"))
+    world.push_main()
+    world.plan(deps={})
+    limit = Step(status="error", length_stop=True, detail="stopped at the output limit")
+    judges(world, FakeAdapter([ok(), ok(), limit, ok(), ok(), ok()]), FakeAdapter([]))
+    world.step()  # A, B, the whole batch (stops at the limit), the parts of A and B, the summary
+    first = last(world, "plan.reviewed").data["batches"]["b1"]
+    assert len(first["parts"]) == 3
+    world.commit(big_design("TAIX"), "change the tail of a")  # no part but A's own part reads it
+    world.push_main()
+    j1 = FakeAdapter([ok(), ok()])
+    judges(world, j1, FakeAdapter([]))
+    world.step()
+    assert len(j1.requests) == 2  # A, and the batch asked whole
+    assert "read in part" not in j1.requests[1].prompt
+    assert "parts" not in last(world, "plan.reviewed").data["batches"]["b1"]

@@ -1008,6 +1008,7 @@ def review_plan_costed(
     refuse_fresh_of_prior: bool = False,
     time_left: Callable[[], float | None] | None = None,
     failed_before: Mapping[str, Sequence[str]] = {},  # noqa: B006 - read only
+    kept: Collection[str] = (),
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judges reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
@@ -1024,7 +1025,10 @@ def review_plan_costed(
     when a call first reaches it (`sandbox_for(adapter, profile)` replaces `sandbox` and `select_sandbox`), and a
     call a judge cannot answer goes to the next one. `timeout_s` bounds each call (default `yolo.review.timeout`);
     `time_left` is the seconds a CI job has left, and a call starts only when it is at least `timeout_s`;
-    `failed_before` maps a material key to the judges that failed it in an earlier run, asked last. A review with
+    `failed_before` maps a material key to the judges that failed it in an earlier run, asked last. `kept` holds the
+    material keys an incomplete review kept after the plan's latest `plan.reviewed` (`findings.kept_keys`): a batch
+    with a part among them is reviewed in parts; a part that only a finished review recorded is reused when the batch is
+    split but never splits it (L4-YOLO-098). A review with
     a call no judge answered raises `ReviewIncomplete` (L4-YOLO-099). With `refuse_fresh_of_prior`, a subject
     named in `fresh` whose material is already in `prior` raises `FreshRefused` before any judge call (a recorded
     review is not re-rolled)."""
@@ -1163,11 +1167,11 @@ def review_plan_costed(
                     f"its material has {len(subject.user)} characters, over yolo.review.max_batch_chars "
                     f"({limits.batch})"
                 )
-            elif prior:
+            elif kept or subject.name in fresh:
                 parts = parts_of(subject)
                 whole = prior.get(key)  # `--fresh` on a batch an earlier run judged in parts asks every part again
                 redo = subject.name in fresh and whole is not None and bool(whole.get("parts"))
-                if redo or any(kept_part(subject, part, k) is not None for part, k in parts):
+                if redo or any(k in kept and kept_part(subject, part, k) is not None for part, k in parts):
                     cause = "an earlier review run answered a part of it"
         if cause is None:
             outcome = walk.ask(call, splittable=shown >= 2)

@@ -168,6 +168,18 @@ def failed_before(events: Sequence[PlanEvent], prompt_version: int) -> dict[str,
     return out
 
 
+def kept_keys(events: Sequence[PlanEvent], prompt_version: int) -> set[str]:
+    """The material keys of the `answered` entries of the `plan.review_incomplete` events after the plan's latest
+    `plan.reviewed` (of the prompt version, no harness finding). A batch with a part among them is reviewed in parts
+    (L4-YOLO-098); a part that only a finished review recorded splits nothing."""
+    return {
+        str(entry["material"])
+        for event in _since_review(events, prompt_version)
+        for entry in (event.data.get("answered") or {}).values()
+        if isinstance(entry, dict) and entry.get("material") and not _harness(entry)
+    }
+
+
 def latest_incomplete(events: Sequence[PlanEvent], prompt_version: int) -> PlanEvent | None:
     """The newest `plan.review_incomplete` of the prompt version after the plan's latest `plan.reviewed`, else None."""
     found = _since_review(events, prompt_version)

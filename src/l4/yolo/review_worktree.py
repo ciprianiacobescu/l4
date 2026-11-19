@@ -376,6 +376,11 @@ def run_review_worktree(
         **{k: {**line["entry"], "at": line.get("at")} for k, line in cached.items()},
         **ledger,
     }  # the ledger wins: it is the shared record
+    # a part kept by an incomplete review of the ledger, or any part of a dry run's cache, splits its batch: nothing
+    # ends the cache as a `plan.reviewed` ends the ledger's memory, and `--fresh batch:<id>` asks the batch again
+    kept = findings.kept_keys(read.events, PROMPT_VERSION) | {
+        k for k, line in cached.items() if line.get("kind") == "batch-part"
+    }
     sandboxes = _Sandboxes(ctx, ctx.say)
     ctx.say(f"plan {plan_id} at the working tree: plan digest {plan_digest(file.text)}")
     try:
@@ -394,6 +399,7 @@ def run_review_worktree(
             sandbox_for=sandboxes,
             refuse_fresh_of_prior=record,
             failed_before=findings.failed_before(read.events, PROMPT_VERSION),
+            kept=kept,
         )
     except ReviewIncomplete as exc:
         _incomplete(ctx, store, read, state, admission, exc, parsed, file.text, rev, record, cache_file, sandboxes)
