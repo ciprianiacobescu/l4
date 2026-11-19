@@ -379,7 +379,7 @@ EnvName = Annotated[str, AfterValidator(_secret_env_name)]
 
 class OpencodeModelLimits(_Strict):
     """`provider.<id>.models.<model>.limit`: OpenCode 1 asks the server for at most 32000 tokens whatever `output` says,
-    unless `options.max_output_tokens` (at most `output`) is set."""
+    unless `options.max_output_tokens` (at most `output`, below `context`) is set."""
 
     context: int = Field(ge=1)
     output: int = Field(ge=1)
@@ -476,11 +476,19 @@ def opencode_option_problems(options: dict[str, Any], model: str | None) -> list
         return ["options.provider.models must have an entry (context, output) for the profile's model"]
     if parsed.provider is not None and parsed.max_output_tokens is not None and model is not None:
         entry = parsed.provider.models[model.split("/", 1)[-1]]
+        found = []
         if parsed.max_output_tokens > entry.output:
-            return [
+            found.append(
                 "options.max_output_tokens is above the output of the model's entry in options.provider.models "
                 "(OpenCode asks for the smaller): raise the entry's output or lower the key"
-            ]
+            )
+        if parsed.max_output_tokens >= entry.context:  # OpenCode 1 compacts at `context - min(output, key)`
+            found.append(
+                "options.max_output_tokens must be below the context of the model's entry in options.provider.models "
+                "(the prompt and the reply share the window)"
+            )
+        if found:
+            return found
     return _cli_major_problems(parsed, model)
 
 

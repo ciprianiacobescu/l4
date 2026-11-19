@@ -15,12 +15,12 @@ def profile(model: str = MODEL, context_window: int | None = None, **options) ->
     return Profile(adapter="opencode", model=model, auth="api_key", context_window=context_window, options=options)
 
 
-def custom(output: int, **options) -> Profile:
+def custom(output: int, *, context: int = 262144, **options) -> Profile:
     provider = {
         "id": "magnitude",
         "base_url": "http://192.0.2.10:10100/inference/v1",
         "api_key_env": "MAGNITUDE_API_KEY",
-        "models": {CUSTOM_MODEL: {"context": 262144, "output": output}},
+        "models": {CUSTOM_MODEL: {"context": context, "output": output}},
     }
     return Profile(
         adapter="opencode",
@@ -69,6 +69,20 @@ def test_a_key_above_the_custom_providers_model_output_is_refused():
     assert custom(16384, max_output_tokens=16384).opencode_options().max_output_tokens == 16384
     assert custom(16384, max_output_tokens=1024).opencode_options().max_output_tokens == 1024
     assert custom(65536, max_output_tokens=65536).opencode_options().max_output_tokens == 65536
+
+
+def test_a_key_at_or_above_the_custom_providers_model_context_is_refused():
+    expected = (
+        "options.max_output_tokens must be below the context of the model's entry in options.provider.models "
+        "(the prompt and the reply share the window)"
+    )
+    for key in (65536, 70000):  # the entry's output (100000) is above both: only the context rule applies
+        found = messages(lambda key=key: custom(100000, context=65536, max_output_tokens=key))
+        assert found == [expected] and str(key) not in found[0]
+    assert custom(100000, context=65536, max_output_tokens=65535).opencode_options().max_output_tokens == 65535
+    both = messages(lambda: custom(16384, context=16384, max_output_tokens=20000))  # above the output and the context
+    assert len(both) == 1 and expected in both[0] and "above the output of the model's entry" in both[0]
+    assert custom(16384, context=16385, max_output_tokens=16384).opencode_options().max_output_tokens == 16384
 
 
 def test_a_key_at_or_above_context_window_is_refused():
