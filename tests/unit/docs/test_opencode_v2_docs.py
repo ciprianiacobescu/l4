@@ -29,7 +29,7 @@ def sections() -> dict[str, str]:
     runbook = read("docs", "runbook.md")
     return {
         "L4-OCV-013": spec.split("**L4-OCV-013 ", 1)[1].split("**L4-OCV-014 ", 1)[0],
-        "runbook 10.9": runbook.split("### 10.9 ", 1)[1].split("\n## 11. ", 1)[0],
+        "runbook 10.9": runbook.split("### 10.9 ", 1)[1].split("\n### 10.10 ", 1)[0].split("\n## 11. ", 1)[0],
     }
 
 

@@ -434,7 +434,7 @@ class OpencodeOptions(_Strict):
     @field_validator("max_output_tokens", mode="before")
     @classmethod
     def _max_output_tokens_is_in_range(cls, value: Any) -> Any:
-        """Only a whole number in the range: a `bool`, a float and a string are refused, and the message holds no value."""
+        """Only a whole number in the range (a `bool`, a float and a string are refused); the message holds no value."""
         low, high = MAX_OUTPUT_TOKENS_RANGE
         if value is not None and (type(value) is not int or not low <= value <= high):
             raise ValueFree(f"must be a whole number from {low} to {high}")

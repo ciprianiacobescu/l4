@@ -140,7 +140,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 7. Docs
 
-- [ ] 7.1 `docs/runbook.md`:
+- [x] 7.1 `docs/runbook.md`:
   - section 7.4, the bullet `Every judge was discarded in step 9 because its reply did not fit its output limit`: end it
     with `, or, on an opencode profile, set options.max_output_tokens to the model's maximum output (10.10)`, and say
     that the failure line of such a run now names the key;
@@ -161,13 +161,13 @@ fail, then write the code. Run only the test files named here, never the whole s
     `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`. End that slice at the next `\n### 10.` heading as well (in `sections()`:
     `.split("\n### 10.10 ", 1)[0]` before `.split("\n## 11. ", 1)[0]`), so the 10.9 tests still read only 10.9. Run
     `uv run --frozen pytest tests/unit/docs/test_opencode_v2_docs.py -q` after the edit.
-- [ ] 7.2 `plugins/l4/skills/l4/references/adopt.md`: a short `## 4h. An OpenCode profile's output limit` after 4g, in
+- [x] 7.2 `plugins/l4/skills/l4/references/adopt.md`: a short `## 4h. An OpenCode profile's output limit` after 4g, in
   the style of 4d: the key, that the default is OpenCode's own (32000 on v1), when to set it (a judge or reviewer whose
   replies stop with `length`), to use the model's real maximum, and that the pin must be 0.4.59 or later before the key
   is added (the schema is strict).
-- [ ] 7.3 `docs/SPEC.md` already holds L4-FAC-023, L4-OCV-020, the amendments of L4-OCV-005 and L4-VER-071, the §8.3
+- [x] 7.3 `docs/SPEC.md` already holds L4-FAC-023, L4-OCV-020, the amendments of L4-OCV-005 and L4-VER-071, the §8.3
   rows, the §3.2 example, SCN-FAC-52..58, SCN-OCV-49..52 and change-table row 131, and `CHANGELOG.md` its Unreleased
   entry. Check them against the code; fix the code or tell the orchestrator where they differ. Run
   `uv run --frozen python scripts/check_spec.py docs/SPEC.md`, `uv run --frozen pytest tests/unit/docs -q` and
   `openspec validate opencode-output-limit --strict`.
-- [ ] 7.4 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 7.4 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

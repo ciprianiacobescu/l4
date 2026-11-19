@@ -1625,7 +1625,9 @@ retry and the `l4 yolo resume`.
   `availability.judge_error` with `last reason: length` for each one. From 0.4.48 the harness first asks the same
   judge again with fewer criteria in each call (`judge.length_split`; at most `verifier.judge_length_splits` halvings),
   so this cause is rare. If it stays, the judge's thinking fills its limit: give the model a reasoning cap through
-  `options.provider`, or add a judge with a larger output limit to `roles.judges`.
+  `options.provider`, add a judge with a larger output limit to `roles.judges`, or, on an opencode profile, set
+  `options.max_output_tokens` to the model's maximum output ([10.10](#1010-the-output-limit-of-an-opencode-profile)).
+  The failure line of such a run names the key.
 
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
@@ -2583,7 +2585,7 @@ OpenCode 2 (`@opencode/cli`, binary `opencode2`) was checked live on `@opencode/
 run, with a paid `opencode-go/` key and a free `opencode/` model, in a Linux container with L4's sandbox and on macOS.
 A full L4 unit (the openspec-basic fixture's two-task change, `forge.type: local`, `sandbox.mode: bwrap`, implementer `opencode-go/deepseek-v4.1-flash` and judge `opencode/glm-5.3-flash-free`, both `cli_major: 2`) ran from intake to PASS and in_review in a Linux container, once on 0.4.55's adapter and once on 0.4.56 (one run, about 160 s), with the real data home's database untouched. Still watch the `verification.md` of the first unit you run on it in your repository. The rows that
 the check did not record sit on named fallbacks (the table at the end). It is in no default role chain and no `l4 init`
-output names it.
+output names it. For the output limit of an OpenCode 2 profile, see [10.10](#1010-the-output-limit-of-an-opencode-profile).
 
 OpenCode 2 is a different program under the same name. It rejects `--pure` and `--dir`, starts a shared per-user
 daemon unless told not to, ends most good runs without a final `step_finish`, and reports errors in another shape.
@@ -2689,6 +2691,71 @@ a unit test pin by name, and a later run replaces it only where it records the r
 | U9 | The cause of a leaked `…</think>` in a reply, and whether `steps: 1` makes step 1 the summary. | [V] in part: no leak in 24 runs, and `steps: 2` made step 2 the summary (`live-bounded`); [U] the cause and `steps: 1` | `strip_leading_think` (text through a leading `</think>` is dropped) and a judge bound of at least 2. |
 | U10 | The exit code after SIGINT. | [U] | `harness_interrupt`: the harness's own interrupt flag decides `cancelled`. |
 | U11 | How a multi-step run's export lays out its messages. | [V] one assistant message per finished step, summing to `info.tokens` (`live-implement`, `live-cli-disturbed`) | `sum_messages`: usage is the sum over the assistant messages. |
+
+### 10.10 The output limit of an OpenCode profile
+
+An opencode profile can say how many tokens its model may write in one reply. Use it when a judge, a reviewer or a
+clarifier on that profile ends with the finish reason `length` (the ledger shows `last reason: length`) and the model
+can write more.
+
+```yaml
+profiles:
+  judge-oc: {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu,
+             options: {max_output_tokens: 65536}}   # use the model's own maximum output, not a larger number
+```
+
+- **The key.** `options.max_output_tokens` is a whole number from 1024 to 256000. It applies to every request of the
+  profile: each role, each mode and the hello. A profile without the key runs as before.
+- **What each major asks for.** OpenCode 1 asks for the smaller of the key and the output limit that its catalog knows
+  for the model. When the catalog does not know the model, it asks for the key. Without the key it asks for at most
+  32000. So on OpenCode 1 the key is a ceiling: it cannot lift a request above the limit that the catalog knows.
+  OpenCode 2 asks for the key, at most 256000 and fitted to the context. Without the key it asks for the limit that
+  its catalog knows, or 32000 when the catalog does not know the model. So on OpenCode 2 the key replaces the
+  catalog's limit: it can raise a request and lower it.
+- **How the key reaches the CLI.** On OpenCode 1 the harness sets `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` for the run
+  and the hello. The harness sets it from the profile only: a value in your own environment never reaches the CLI. On
+  OpenCode 2 the harness writes `providers.<provider>.models.<model>.limit.output` into the configuration of the run,
+  its export and the hello. The `auth` step makes no model call and gets neither.
+- **The hello asks with the same limit.** A provider that refuses the value fails the hello. The profile is then
+  unavailable, and the chain goes to the next profile before a long reply is lost. The probe shows the HTTP 400.
+- **A custom provider on OpenCode 1.** OpenCode 1 asks for at most 32000 whatever the model entry of
+  `options.provider` says. A model entry with `output` above 32000 takes effect only when you also set the key to a
+  value up to that `output`.
+
+Load errors. They never print the value that you wrote.
+
+| Message | Fix |
+|---|---|
+| `options.max_output_tokens: must be a whole number from 1024 to 256000` | Write an integer in that range. A string, a decimal and `true` are refused. |
+| `options.max_output_tokens is above the output of the model's entry in options.provider.models (OpenCode asks for the smaller): raise the entry's output or lower the key` | Make the key equal to or lower than the `output` of the model entry, or raise that `output`. |
+| `options.max_output_tokens must be below context_window (the prompt and the reply share the window)` | Lower the key, or raise `context_window` when the model's window is larger. |
+
+Notes in the failure line of a run, and in the reason of a hello:
+
+| Text | Meaning |
+|---|---|
+| `; the reply stopped at its output limit: OpenCode 1 asks for at most 32000 output tokens unless options.max_output_tokens is set (up to the model's own maximum)` (OpenCode 2: `OpenCode 2 asks for the model's known output limit, else 32000 tokens, unless ...`) | The reply stopped with `length` and the profile has no key. If the stop came well below 32000 tokens, the model's own limit is the cause and the key cannot help. Otherwise set the key. |
+| `; the reply stopped at its output limit (options.max_output_tokens <n>, or less when the model or the context allows less)` | The profile has the key and the reply still stopped. The model, the catalog or the context allows less than the key, or the reply is longer than the key. Raise the key up to the model's maximum, or use a judge with a larger limit. |
+| `; options.max_output_tokens is set: a provider refuses a maximum output above the model's own (HTTP 400)` | The profile has the key and the provider answered HTTP 400. The key may be above the model's maximum. Lower it. A custom provider's `grammar binding failed` has another cause and gets no such text. |
+
+Risks:
+- A value above the model's maximum gets an HTTP 400 on OpenCode 2 for every model, and on OpenCode 1 for a model that
+  the catalog does not know. The hello shows it.
+- OpenRouter reserves credits for the whole maximum output. A raised key on a key with few credits can turn a call
+  into a 402, which L4 reads as out of credits, and the profile cools down. A recorded line reads `You requested up to
+  32000 tokens, but can only afford 7377`.
+- On OpenCode 1, for a model that has no input limit in the catalog, a raised key lowers the size at which OpenCode
+  compacts an implementer's session by the amount of the raise. Keep the key of an implementer profile well below its
+  `context_window`, or set the key on the judge profile only.
+- A larger limit lets a model that loops or explains too much spend more tokens for each call.
+- OpenCode 1 names the variable `EXPERIMENTAL`, and a later 1.x can drop it. The pin is fixed, and a move of the pin
+  re-reads the variable.
+- That an OpenCode 2 configuration for a built-in provider keeps the provider's own login and settings and reaches
+  the request is read from the loader's code. It is [I] until a live run records it.
+
+`l4 doctor` adds a note to PRV-001 for a custom-provider profile on OpenCode 1 whose model entry has an `output` above
+32000 and that has no key: `<profile> asks for at most 32000 output tokens although its model entry allows <output>
+(OpenCode 1's default): set options.max_output_tokens to use it`. The note does not change the status of the check.
 
 ## 11. Known limits of 0.4.58
 
