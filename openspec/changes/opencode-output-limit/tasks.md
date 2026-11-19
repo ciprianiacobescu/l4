@@ -5,7 +5,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 1. The key and its checks (D1, D2)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/config/test_opencode_output_limit.py`, built like
+- [x] 1.1 Write the tests first in a new `tests/unit/config/test_opencode_output_limit.py`, built like
   `tests/unit/config/test_opencode_cli_major.py` (its `profile`, `refused` and `messages` helpers):
   - SCN-FAC-54: `max_output_tokens` of `1024`, `32000` and `256000` load and `opencode_options().max_output_tokens`
     returns them, with `cli_major` 1 and 2; `1023`, `256001`, `0`, `-1`, `True`, `65536.0` and `"65536"` are refused with
@@ -22,7 +22,7 @@ fail, then write the code. Run only the test files named here, never the whole s
     `65535` loads; a profile without `context_window` is not checked;
   - the key on a profile of another adapter (`claude-code`, `options: {max_output_tokens: 1}`) still loads (other
     adapters' `options` are not read).
-- [ ] 1.2 Then, in `src/l4/config/schema.py`: add `max_output_tokens: int | None = None` to `OpencodeOptions` with a
+- [x] 1.2 Then, in `src/l4/config/schema.py`: add `max_output_tokens: int | None = None` to `OpencodeOptions` with a
   `field_validator("max_output_tokens", mode="before")` that accepts only `None` or a value whose `type(...) is int` and
   that lies in `MAX_OUTPUT_TOKENS_RANGE = (1024, 256000)` (a module constant with a comment: OpenCode 2's floor `QC` and
   clamp `KC`), else `raise ValueFree("must be a whole number from 1024 to 256000")`. Add the provider-entry rule to
