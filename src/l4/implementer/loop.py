@@ -21,6 +21,7 @@ from l4 import deadline
 from l4.availability.fallback import Constraint
 from l4.config.schema import Profile, duration_seconds
 from l4.gates.collection import ledger_excerpt
+from l4.gates.e2e import e2e_configured
 from l4.implementer.clauses import ClauseAsk
 from l4.implementer.discrimination import _test_file
 from l4.implementer.guardnotes import GuardNote, guard_note_text
@@ -529,6 +530,7 @@ def _check_step(wb: Workbench, phase: str, task: str, attempt: int) -> None:
     deadline.check(
         phase, task, attempt, None, read_events=lambda: _ledger_events(wb),
         gates_timeout_s=duration_seconds(wb.cfg.gates.timeout), fix_unit=wb.event_context.get("fix_unit"),
+        e2e=e2e_configured(wb.cfg),
     )  # fmt: skip
 
 

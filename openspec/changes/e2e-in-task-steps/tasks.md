@@ -15,7 +15,7 @@ has text (extend the stub with an optional `details` mapping if needed).
 
 ## 1. Which tests are the task's (D1)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/implementer/test_e2e_task_steps.py`:
+- [x] 1.1 Write the tests first in a new `tests/unit/implementer/test_e2e_task_steps.py`:
   - `task_browser_tests(wb, before, after)` after a red commit that added `e2e/test_layout.py::test_width` gives
     `(("e2e/test_layout.py", "test_width"),)`;
   - a red commit that changed only `e2e/conftest.py` and a unit test gives `()`; a `.ts` file under `e2e/` gives `()`;
@@ -23,7 +23,7 @@ has text (extend the stub with an optional `details` mapping if needed).
     where red changes a module-level constant `test_a` reads: `test_a` too (the closure);
   - `after=None` reads the work tree (an uncommitted new browser test is found).
   Run the file and see the tests fail (the name does not exist).
-- [ ] 1.2 Add `task_browser_tests` to `src/l4/implementer/tdd.py` (D1): `git diff --name-only --no-renames before after`
+- [x] 1.2 Add `task_browser_tests` to `src/l4/implementer/tdd.py` (D1): `git diff --name-only --no-renames before after`
   (or against the work tree), the paths under `e2e_test_dir(wb.cfg.gates.e2e, wb.worktree)`, `.py`, not `conftest.py`
   or `__init__.py`, matching no `tdd.test_support_globs` glob, no link on the way (`linked_component`), then
   `tamper.facts_of` of the file at `before` (`git show before:path`, empty when absent) and at `after` (`git show` or the
@@ -32,7 +32,7 @@ has text (extend the stub with an optional `details` mapping if needed).
 
 ## 2. Green runs them last (D3, D4, D5, D6)
 
-- [ ] 2.1 Write the tests first in `test_e2e_task_steps.py`, each driving `run_red` then `run_green` (as
+- [x] 2.1 Write the tests first in `test_e2e_task_steps.py`, each driving `run_red` then `run_green` (as
   `tests/unit/implementer/test_tdd_green.py` `red_green` does):
   - SCN-IMP-548: the stub reports `e2e.test_layout::test_width[chromium]` failed with message and detail
     `assert 1508 == 1500`: `GreenOutcome.status == "failed"`, the reason names `e2e.test_layout::test_width[chromium]`
@@ -57,7 +57,7 @@ has text (extend the stub with an optional `details` mapping if needed).
   - SCN-IMP-555: after `run_red`, build a new `RedOutcome` with `resume_red(bench.wb, TASK)` and run `run_green` with it:
     the stub is called.
   Run them and see them fail.
-- [ ] 2.2 Then implement in `src/l4/implementer/tdd.py`: `_task_e2e_reason(wb, task, base, tests, keep, freeze_phase)`
+- [x] 2.2 Then implement in `src/l4/implementer/tdd.py`: `_task_e2e_reason(wb, task, base, tests, keep, freeze_phase)`
   in the shape of `_e2e_chore_reason` (`_tree_state`, `run_build_only`, `run_e2e(wb, name="e2e-task")`,
   `ServerNotReady` -> `(f"the e2e server was not ready (see {name})", _log_tail(...))`, the judging of D4 in its order,
   `excerpter(wb)(report, failing)`, and `_drop_gate_output(..., freeze_phase=...)` in a `finally`); give
@@ -71,12 +71,12 @@ has text (extend the stub with an optional `details` mapping if needed).
 
 ## 3. The already-satisfied finish (D2)
 
-- [ ] 3.1 Write the test first (SCN-IMP-554), on the pattern of
+- [x] 3.1 Write the test first (SCN-IMP-554), on the pattern of
   `tests/unit/implementer/test_already_satisfied.py::test_tests_of_existing_behaviour_are_pre_satisfied_and_commit_as_already_satisfied`:
   the same red step plus `e2e/test_existing_ui.py` with a test function, and the stub reports it failed: `run_red`
   returns `failed` naming it, HEAD did not move, no `task.done`; with the stub reporting it passed, the task is done as
   already satisfied and the commit holds the browser test file. Run it and see it fail.
-- [ ] 3.2 Then, in `finish_already_satisfied` (`run_red`), after the restored test run and `tampered("restored test
+- [x] 3.2 Then, in `finish_already_satisfied` (`run_red`), after the restored test run and `tampered("restored test
   run")` and before `outside_links_reason`: `task_browser_tests(wb, base, None)`; when not empty and `e2e_configured`,
   `_task_e2e_reason(..., freeze_phase=None)`, then `tampered("e2e run")`; a reason discards the changes and returns
   `RedOutcome("failed", reason, excerpt=excerpt)`. Run the test and `tests/unit/implementer/test_already_satisfied.py`,
@@ -84,23 +84,23 @@ has text (extend the stub with an optional `details` mapping if needed).
 
 ## 4. The prompts (D7)
 
-- [ ] 4.1 Write the tests first in `test_e2e_task_steps.py` (or `tests/unit/implementer/test_prompt.py`, with
+- [x] 4.1 Write the tests first in `test_e2e_task_steps.py` (or `tests/unit/implementer/test_prompt.py`, with
   `render_prompt` and a `PromptContext`): a green context with `browser_tests=("e2e/test_layout.py::test_width",)`
   renders `# Browser tests of this task`, the sentence of D7 and the test in a `browser tests of this task` data block;
   without it, the green prompt is unchanged (compare with the text before the change); a red context with `e2e_dir`
   holds the new sentence (`frozen after this step`). Run and see them fail.
-- [ ] 4.2 Then add `PromptContext.browser_tests: tuple[str, ...] = ()` and the block (green only) and the sentence (red,
+- [x] 4.2 Then add `PromptContext.browser_tests: tuple[str, ...] = ()` and the block (green only) and the sentence (red,
   in the `ctx.e2e_dir` paragraph) in `src/l4/implementer/prompt.py`; `_prompt` in `tdd.py` passes `browser_tests` for
   the green role (`f"{path}::{name}"`). No template file changes. Run the prompt tests
   (`tests/unit/implementer/test_prompt.py`, `test_prompt_context.py`, `test_prompt_cap.py`).
 
 ## 5. The run deadline (D8)
 
-- [ ] 5.1 Write the test first in `tests/unit/test_deadline.py`: `cap_s("green", 600, 1800, e2e=True) == 3600`,
+- [x] 5.1 Write the test first in `tests/unit/test_deadline.py`: `cap_s("green", 600, 1800, e2e=True) == 3600`,
   `cap_s("green", 600, 1800) == 2400`, `cap_s("red", 600, 1800, e2e=True) == 2400`, and SCN-IMP-556 through
   `check_before` with a recorded green step of 3300 s: the mark's `estimate_s` is 3300 with the e2e cap and 2400
   without. Run and see it fail.
-- [ ] 5.2 Then add the keyword to `cap_s` and `deadline.check` (`src/l4/deadline.py`), and pass
+- [x] 5.2 Then add the keyword to `cap_s` and `deadline.check` (`src/l4/deadline.py`), and pass
   `e2e=e2e_configured(wb.cfg)` from `_check_step` in `src/l4/implementer/loop.py`. Run `tests/unit/test_deadline.py`
   and `tests/unit/implementer/test_step_deadline.py`.
 

@@ -101,6 +101,7 @@ class PromptContext:
     # single-phase chore answers. Both empty: the prompt is the one without them.
     gate_env_ci: tuple[str, ...] = ()
     ci_job: str | None = None
+    browser_tests: tuple[str, ...] = ()  # green only (L4-IMP-101): `path::name` of the browser tests the harness runs
 
 
 @dataclass(frozen=True)
@@ -325,6 +326,17 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             "fine). Every other test and support file stays frozen.\n"
             + data_block("files this task names", "\n".join(f"- {path}" for path in ctx.named))
         )
+    if role == "green" and ctx.browser_tests:
+        after.append(
+            "# Browser tests of this task\nAfter your step the harness builds the app, serves it and runs the e2e "
+            "gate; this task is green only when these browser tests, which its red step wrote, pass there. You "
+            "cannot run them in this sandbox. They are frozen like the other red tests: if one is wrong, report "
+            "status blocked with one technical question whose first option is the exact edit.\n"
+            + data_block(
+                "browser tests of this task",
+                "\n".join(f"- {one_line(t, MAX_REPAIR_LINE_CHARS)}" for t in ctx.browser_tests),
+            )
+        )
     if role == "red" and (ctx.named_existing or ctx.named_kept):
         after.append(_named_section(ctx))
     if role == "red" and ctx.stale_tests:
@@ -378,7 +390,10 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             f"\nBrowser (Playwright) tests are not run by that command: put each one in `{ctx.e2e_dir}/` (for example "
             f"`{ctx.e2e_dir}/test_<name>.py`), {elsewhere}, where the unit gate would run it without a "
             f"server and reject the attempt. The harness serves the app for `gates.e2e` and gives its address in "
-            f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other."
+            f"`{ctx.e2e_base_url_env}`; tag the test with the criterion id like any other. The green step of this task "
+            "runs them with the app served, and they are frozen after this step, so check what each one expects "
+            "against the spec: a page a test builds itself (`page.set_content`) has the browser's default styles, not "
+            "the app's."
         )
     after.append(gate)
     version = f"{contract.name}@{contract.version}+{phase.name}@{phase.version}"

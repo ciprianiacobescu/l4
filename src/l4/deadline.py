@@ -130,11 +130,14 @@ def stop_before_probe() -> None:
     raise DeadlineReached("before", reason="the soft deadline passed before the probe of the step's agent")
 
 
-def cap_s(phase: str, gates_timeout_s: float, agent_timeout_s: float = AGENT_TIMEOUT_S) -> float:
+def cap_s(phase: str, gates_timeout_s: float, agent_timeout_s: float = AGENT_TIMEOUT_S, *, e2e: bool = False) -> float:
     """The most a step of `phase` is expected to need: the agent's time limit plus one gate for red, green and single;
-    a verification round runs several gates and its judges, so four gates."""
+    a verification round runs several gates and its judges, so four gates. A green step with `gates.e2e` configured
+    (`e2e`) can also run the build and the e2e gate (L4-IMP-101): three gates."""
     if phase == "verify":
         return 4 * gates_timeout_s
+    if phase == "green" and e2e:
+        return agent_timeout_s + 3 * gates_timeout_s
     return agent_timeout_s + gates_timeout_s
 
 
@@ -235,6 +238,7 @@ def check(
     gates_timeout_s: float,
     stopped_last: bool = False,
     fix_unit: str | None = None,
+    e2e: bool = False,
 ) -> None:
     """`check_before` with its inputs read from the unit's events (only when a deadline is armed): the records of the
     phase, the records of every phase as the fallback, the phase's cap, and whether the newest event of this task and
@@ -244,7 +248,7 @@ def check(
     events = read_events()
     check_before(
         phase, task, attempt, round, recorded_seconds(events, phase),
-        stopped_last or last_is_stop(events, task, phase, fix_unit=fix_unit), cap_s(phase, gates_timeout_s),
+        stopped_last or last_is_stop(events, task, phase, fix_unit=fix_unit), cap_s(phase, gates_timeout_s, e2e=e2e),
         fallback=recorded_seconds(events),
     )  # fmt: skip
 

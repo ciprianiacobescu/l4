@@ -13,6 +13,7 @@ checkout of the red commit for green (a).
 import hashlib
 import logging
 import math
+import os
 import re
 import shlex
 import shutil
@@ -919,6 +920,8 @@ def _prompt(
     named: NamedTests | None = None,
     repair: Sequence[str] = (),
     carried: NearPass | None = None,
+    *,
+    browser_tests: Sequence[str] = (),
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -946,7 +949,7 @@ def _prompt(
         named=tuple(sorted({p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}))
         if unfreeze
         else (),
-        adds_tests=adds_tests, repair_tests=tuple(repair),
+        adds_tests=adds_tests, repair_tests=tuple(repair), browser_tests=tuple(browser_tests),
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
@@ -1023,7 +1026,7 @@ def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None,
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (),
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out. `carry`: a near pass (L4-IMP-100) whose changes
@@ -1046,7 +1049,19 @@ def agent_step(
         # grant, which `replay_step` computes before it applies a step too
         carried = apply_near_pass(wb, task.key, attempt, carry)  # no replay guard: the agent edits on top of it
         prompt = _prompt(
-            wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named, repair, carried
+            wb,
+            role,
+            task,
+            previous_failure,
+            unfreeze,
+            adds_tests,
+            stale,
+            attempt,
+            ci_job,
+            named,
+            repair,
+            carried,
+            browser_tests=browser_tests,
         )
         wb.publish_prompt(published, prompt)
         # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
@@ -1202,7 +1217,7 @@ def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None,
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (),
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question. A
@@ -1228,6 +1243,7 @@ def step_or_replay(
             named=named,
             repair=repair,
             carry=carry,
+            browser_tests=browser_tests,
         )
     drop_near_pass(wb, task.key, attempt, carry, "replay")  # a found step to replay, refused or not, comes first
     if isinstance(found, Refused):
@@ -1847,6 +1863,13 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     "defines (remove the unused import), or the stub is needed and the criterion is not "
                     "already satisfied",
                 )
+        if e2e_configured(wb.cfg) and (browser := task_browser_tests(wb, base, None)):  # L4-IMP-101: no green follows
+            why, shown = _task_e2e_reason(wb, task, base, browser, freeze_phase=None)
+            if (out := tampered("e2e run")) is not None:
+                return out
+            if why:
+                wb.discard_changes()
+                return RedOutcome("failed", why, excerpt=shown)
         if (out := tampered("before the already-satisfied commit")) is not None:
             return out
         if linked := outside_links_reason(wb, base, "red"):
@@ -2175,7 +2198,12 @@ def run_green(
             "task.unfrozen", task=task.key, paths=list(named.paths), reason="named_by_task", source=source,
             red_sha=red.manifest.red_sha, kept=[{"path": p, "why": why} for p, why in named.kept],
         )  # fmt: skip
-    step = step_or_replay(wb, "green", task, attempt, previous_failure, unfreeze, carry=carry)
+    # L4-IMP-101: the red commit's own browser tests, read from git so that a resumed red counts the same
+    browser = task_browser_tests(wb, f"{red.manifest.red_sha}^", red.manifest.red_sha) if e2e_configured(wb.cfg) else ()
+    step = step_or_replay(
+        wb, "green", task, attempt, previous_failure, unfreeze, carry=carry,
+        browser_tests=[f"{path}::{name}" for path, name in browser],
+    )  # fmt: skip
     if step.kind != "ok":
         wb.discard_changes()  # back to the red commit: it stays, the work of this attempt does not
         if step.kind == "held":
@@ -2222,6 +2250,9 @@ def run_green(
             wb.discard_changes()  # back to the red commit, which stays; the attempt is not counted
             return GreenOutcome("held", held=kept)
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
+    if not reason and not stuck and browser:  # last: a task that fails any other check pays for no build or e2e run
+        reason, excerpt = _task_e2e_reason(wb, task, base, browser, keep=unfreeze.paths, freeze_phase="green")
+        stuck = stuck or restore_replay(wb, "e2e run")
     reason = reason or stuck or restore_replay(wb, "before the green commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
@@ -2753,6 +2784,63 @@ def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     return E2eScope(ids, whole, parent, frozenset(str(i) for i in known) if isinstance(known, list) else frozenset())
 
 
+def _changed_between(wb: Workbench, before: str, after: str | None) -> list[str]:
+    """The paths that differ between `before` and `after` (None: the work tree, untracked files included)."""
+    args = ["diff", "--name-only", "-z", "--no-renames", before]
+    if after is not None:
+        args.append(after)
+    raw = wb.git.run_bytes(*args, "--", check=False)
+    names = {os.fsdecode(name) for name in raw.split(b"\0") if name}
+    if after is None:
+        names.update(wb.changed_files())  # `git diff` does not list a file git does not know yet
+    return sorted(names)
+
+
+def _source_at(wb: Workbench, rev: str | None, path: str) -> str:
+    """`path` at `rev` (None: in the work tree) as text; empty when it is absent or not a regular file."""
+    if rev is None:
+        if linked_component(wb.worktree, path) is not None:
+            return ""
+        try:
+            held = read_inside(wb.worktree, path, limit=MAX_SNAPSHOT_BYTES)
+        except UnsafeFile:
+            return ""
+        data = None if held is None else held[0]
+    else:
+        data = _regular_blob(wb, rev, path)
+    return "" if data is None else data.decode("utf-8", errors="replace")
+
+
+def task_browser_tests(wb: Workbench, before: str, after: str | None) -> tuple[tuple[str, str], ...]:
+    """The browser tests of a task (L4-IMP-101): `(path, name)` of the test functions of the Python files under the e2e
+    test directory that were added or changed between `before` and `after` (None: the work tree). A support file
+    (`conftest.py`, `__init__.py`, a `tdd.test_support_globs` file), a file of another language and a file under a link
+    add none; a test is changed when its definition or what it uses in its file differs (`tamper.facts_of`). A file
+    that does not parse at `after` gives none: the unit gate speaks for it."""
+    directory = e2e_test_dir(wb.cfg.gates.e2e, wb.worktree).rstrip("/")
+    found: list[tuple[str, str]] = []
+    for path in _changed_between(wb, before, after):
+        name = path.rsplit("/", 1)[-1]
+        if (
+            not path.startswith(f"{directory}/")
+            or not path.endswith(".py")
+            or name in ("conftest.py", "__init__.py")
+            or _matches(wb.cfg.tdd.test_support_globs, path)
+        ):
+            continue
+        now = facts_of(_source_at(wb, after, path))
+        if not now:
+            continue
+        old = facts_of(_source_at(wb, before, path)) or {}
+        for test, facts in now.items():
+            if not facts.test:
+                continue
+            was = old.get(test)
+            if was is None or (was.parts, was.closure) != (facts.parts, facts.closure):
+                found.append((path, test))
+    return tuple(sorted(found))
+
+
 MAX_SNAPSHOT_BYTES = 1_000_000  # an agent-edited file the gates may rewrite is kept this far, to be put back
 
 
@@ -2777,14 +2865,22 @@ def _tree_state(wb: Workbench) -> dict[str, tuple[str, bytes | None]]:
 
 
 def _drop_gate_output(
-    wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]], keep: Collection[str] = ()
+    wb: Workbench,
+    task: Task,
+    base: str,
+    before: dict[str, tuple[str, bytes | None]],
+    keep: Collection[str] = (),
+    *,
+    freeze_phase: str | None = "single",
 ) -> None:
     """A gate run is not part of the chore (build output, `test-results/`, a new snapshot baseline, a lock file the
     build rewrote): a path that is new since `before` goes back to `base`, a path the step had edited and a gate
     changed gets the step's content back, and the test-path freeze runs once more. A gate runs agent-written code with
     the tree writable, so a link it planted comes first (L4-SEC-020): it is removed and recorded as a planted link,
     which stops the unit like any other (`stop_on_unsafe`), and every write goes through `write_inside`, never through
-    a path a link stands on. `keep`: the test files a repair chore changed (L4-IMP-091), which the freeze leaves."""
+    a path a link stands on. `keep`: the test files a repair chore changed (L4-IMP-091), which the freeze leaves.
+    `freeze_phase`: the phase the test-path freeze runs as ("single" for a fix chore, "green" for a green step); None
+    skips it, for a red step whose test files are its own work (L4-IMP-101)."""
     after = _tree_state(wb)
     for path in dict.fromkeys([*after, *before]):
         if (link := linked_component(wb.worktree, path)) is not None:
@@ -2802,7 +2898,8 @@ def _drop_gate_output(
     for path in before:
         if path not in after and not _reusable_change(wb, path) and before[path][1] is not None:
             _put(wb, path, before[path][1], None, "e2e run")  # a gate deleted a file the step had written
-    touched += freeze_test_paths(wb, task, base, keep=keep, phase="single")
+    if freeze_phase is not None:
+        touched += freeze_test_paths(wb, task, base, keep=keep, phase=freeze_phase)
     release_replay(wb, touched)
 
 
@@ -2875,6 +2972,69 @@ def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
         if i in report.tests and report.tests[i].status in ("failed", "error")
     ]
     return reason, excerpter(wb)(report, named[:MAX_LISTED]) if named else ""
+
+
+def _module_of(name: str) -> str:
+    """`e2e/test_layout.py` and `e2e.test_layout` name one module."""
+    return name.removesuffix(".py").replace("/", ".")
+
+
+def _task_e2e_reason(
+    wb: Workbench,
+    task: Task,
+    base: str,
+    tests: Sequence[tuple[str, str]],
+    keep: Collection[str] = (),
+    freeze_phase: str | None = "green",
+) -> tuple[str, str]:
+    """After the checks of a step that completes a task (L4-IMP-101): `gates.build` when it is configured, then the e2e
+    gate, and the task's browser tests (`task_browser_tests`) must each have an id in the report and pass. Returns
+    (the reason the attempt fails, "" when it does not; the failure text of the tests that did not pass). A server that
+    is not ready is a failed attempt, not an error of the run. What the runs write into the tree is put away
+    afterwards, as for a fix chore, so that the commit holds the step's work only."""
+    before = _tree_state(wb)
+    try:
+        return _task_e2e_run(wb, tests)
+    finally:
+        _drop_gate_output(wb, task, base, before, keep, freeze_phase=freeze_phase)
+
+
+def _task_e2e_run(wb: Workbench, tests: Sequence[tuple[str, str]]) -> tuple[str, str]:
+    built = run_build_only(wb)
+    if not built.ok:
+        return f"gates.build failed before the e2e gate: {built.findings[0].detail}", ""
+    try:
+        run = run_e2e(wb, name="e2e-task")  # no `must_contain`: pytest-playwright adds `[chromium]` to every id
+    except ServerNotReady as exc:
+        name = exc.log_path.name if exc.log_path is not None else "the gate log"
+        return f"the e2e server was not ready (see {name})", _log_tail(wb, exc.log_path)
+    gate = run.gate
+    report = gate.report
+    if gate.timed_out:
+        return f"the e2e gate {gate.reason}", ""
+    if report is None:
+        return f"the e2e gate produced no readable report ({gate.reason})", ""
+    modules = {_module_of(path) for path, _ in tests}
+    uncollected = sorted({_module_of(e) for e in report.collection_errors} & modules)
+    if uncollected:
+        return f"browser tests not collected: {', '.join(uncollected)}", ""
+    unseen: list[str] = []
+    unpassed: list[str] = []
+    for path, name in tests:
+        ids = sorted(i for i in report.tests if names_test_id(i, path, name))
+        if not ids:
+            unseen.append(f"{path}::{name}")
+        elif any(report.tests[i].status in ("failed", "error") for i in ids):
+            unpassed += [i for i in ids if report.tests[i].status in ("failed", "error")]
+        elif not any(report.tests[i].status == "passed" for i in ids):
+            unpassed += ids  # every id was skipped
+    if unseen:
+        return f"the task's browser tests are not in the e2e report: {_list(unseen)}", ""
+    if unpassed:
+        failing = [i for i in unpassed if report.tests[i].status in ("failed", "error")]
+        shown = excerpter(wb)(report, failing[:MAX_LISTED]) if failing else ""
+        return f"the task's browser tests do not pass: {_list(unpassed)}", shown
+    return "", ""
 
 
 REPAIR_SCOPE_RULE = (
