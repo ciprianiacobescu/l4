@@ -7881,8 +7881,8 @@ review for this run without asking the next judge, which would spend its own tim
 (as a timeout holds a round in L4-VER-075): the review does not finish (L4-YOLO-099, reason `timeout`), and the next run
 asks that call of the other judges first (L4-YOLO-096). In a CI job whose budget is known (L4-IMP-012), the plan step
 SHALL start a judge call only when the job's time left before its soft deadline is at least `yolo.review.timeout`, and
-else end the review for this run with reason `job_time`, keeping what it answered; the plan step runs before the run's
-soft deadline is armed (L4-IMP-066), so nothing else stops a review there. `l4 doctor` CFG-012 SHALL warn when
+else end the review for this run with reason `job_time`, keeping what it answered; the plan step runs before `l4 run`
+arms the soft deadline that stops a unit's running steps (L4-IMP-068), so nothing else stops a review there. `l4 doctor` CFG-012 SHALL warn when
 `ci.time_budget` is a duration and `yolo.review.timeout` is not less than it minus `ci.soft_deadline_margin`. [V, the
 code: `readiness.DEFAULT_TIMEOUT_S` is 900 and no caller passes a timeout; a consumer's batch subject ran a judge past
 900 s and nothing was recorded.]

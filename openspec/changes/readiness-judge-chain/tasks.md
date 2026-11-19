@@ -18,8 +18,8 @@ Rules for every task:
   `tests/unit/llm/test_agent_judge_roles.py::test_a_failing_probe_is_unavailable` does. For example,
   `adapters={"fake": ok, "claude-code": other}` with the profile `j1: {adapter: claude-code, vendor: anthropic}`.
 - A failing hello is `FakeAdapter([], probes={"hello": ProbeResult("hello", False, reason="hello refused")})`.
-- A usage limit is `Step(status="quota", limit=LimitSignal(...))`. See `l4.agents.base.LimitSignal` and
-  `tests/unit/availability` for the fields.
+- A usage limit is `Step(status="quota", limit=LimitSignal(tool, model, kind, resets_at, source, raw_excerpt))`
+  (`l4.agents.base.LimitSignal`; `kind="usage_limit"`, `resets_at` tz-aware UTC).
 - Assert which judge answered through the entry's `judge`, and through which `FakeAdapter.requests` grew.
 
 ## 1. Configuration and the judge roles (D1, D3; L4-YOLO-095, L4-YOLO-097)
@@ -91,14 +91,13 @@ Rules for every task:
   - A profile whose hello fails raises `RoleUnavailable` whose text holds the hello's reason.
   - A name that is not in the role's chain raises `ValueError`.
 
-  Also write a test in `tests/unit/agents/test_fake_adapter.py` (create it if there is none) that
-  `Step(status="error", length_stop=True)` gives `RunResult.length_stop`. Run them and see them fail.
+  Also write a test in `tests/unit/agents/test_fake.py` that `Step(status="error", length_stop=True)` gives
+  `RunResult.length_stop`. Run them and see them fail.
 - [ ] 2.2 Then add `for_profile` to `src/l4/agents/factory.py`. It runs `self._selector().select(role, [name],
   required=False, serves=serves, record_unavailable=False)`, builds the `Selected` as `for_role` does with
   `request=SelectionRequest(role, unit, serves, ())`, and appends `availability.selected` when there is an event sink.
   Add `length_stop: bool = False` to `l4.agents.fake.Step` and pass it to `RunResult`. Run the two files and
-  `uv run --frozen pytest tests/unit/agents/test_factory.py -q` (or the factory tests that exist, found with
-  `ls tests/unit/agents | grep factory`).
+  `uv run --frozen pytest tests/unit/agents/test_factory_select.py tests/unit/agents/test_factory_next_profile.py -q`.
 
 ## 3. The walk of the chain (D2, D3, D4, D5; L4-YOLO-095, -096, -097)
 
@@ -118,7 +117,8 @@ Rules for every task:
   - SCN-YOLO-265: j1's two replies to A break the schema (`Step(final_text="x")` twice) and j1 answers B; j2 answers A.
   - SCN-YOLO-266, all three cases. The third raises `ReviewIncomplete` with `reason == "no_judge"`, `left` holding A,
     and `answered` empty. Check that it is a `JudgeFailed` and a `RoleUnavailable`.
-  - SCN-YOLO-267: j1's call on A ends `quota` with a `LimitSignal` whose reset is in two hours. Check:
+  - SCN-YOLO-267: j1's call on A ends `Step(status="quota", limit=LimitSignal("fake", None, "usage_limit", <now + 2h>,
+    "test", ""))`. Check:
     - the factory's availability store (pass an `AvailabilityStore` on a temp path through the cache root, or read
       `$L4_CACHE/availability.json`) holds j1's cool-down;
     - j2 answers A and B;
