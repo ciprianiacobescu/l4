@@ -125,7 +125,9 @@ The judge of a call is the first name in `order(call)` that is not in `unusable`
   the one-element chain `[name]` with `required=False` and `record_unavailable=False`, and returns a `Selected` with
   `request` set, so `cool_limited` works.
   - On `RoleUnavailable` the name goes to `unusable` with kind `unusable` and the exception's text as the detail.
-  - On `SandboxUnavailable` from `sandbox_for` it goes there with kind `sandbox`.
+  - On `SandboxUnavailable` from `sandbox_for` it goes there with kind `sandbox`. When the review ends with a call that
+    has no answer and every failure is of kind `sandbox`, nothing was answered and no stop (`timeout`, `job_time`) was
+    reached, the first `SandboxUnavailable` is raised (exit 3, SCN-YOLO-61); otherwise the review is incomplete.
 
 `order(call)` is the chain with the names in `failed_before[call.material]` moved to the end, keeping chain order among
 them (D5).

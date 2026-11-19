@@ -241,3 +241,26 @@ def test_a_batch_reused_whole_keeps_its_part_rows_in_the_next_review(world):
     assert nothing.requests == []
     again = last(world, "plan.reviewed").data["batches"]["b1"]
     assert again["reused_from"] and [r["material"] for r in again["parts"]] == [r["material"] for r in first["parts"]]
+
+
+def test_a_lost_lease_drops_the_incomplete_record_when_another_run_recorded_one(world, monkeypatch):
+    """The lease is lost while the record is written and the ref now holds another `plan.review_incomplete`: this
+    run's record is stale and is dropped, not appended again (L4-YOLO-099)."""
+    from l4.yolo.model import PlanMoved
+    from l4.yolo.store import PlanStore
+
+    world.plan(deps={})
+    judges(world, FakeAdapter([Step(status="timeout")]), FakeAdapter([]))
+    real, calls = PlanStore.append, []
+
+    def moved(self, events, *, files=None, expect):
+        calls.append(1)
+        if len(calls) == 1:  # another run wins the race with its own incomplete record
+            other = [e for e in events if e.type == "plan.review_incomplete"]
+            real(self, other, files=files, expect=expect)
+            raise PlanMoved("moved")
+        return real(self, events, files=files, expect=expect)
+
+    monkeypatch.setattr(PlanStore, "append", moved)
+    world.step()  # the step ends its plan quietly on a stale write
+    assert world.kinds().count("plan.review_incomplete") == 1 and len(calls) == 1

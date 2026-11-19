@@ -7850,7 +7850,10 @@ SHALL keep the verdict of every call a judge answered, so a later judge is asked
 finishes SHALL be recorded once, as one `plan.reviewed`. A judge SHALL be usable when the factory's selection succeeds
 for that one profile (its probes, cool-down, `serves` and login gate, as `Factory.for_role` checks each profile) and
 its sandbox can be made; one that is not usable SHALL be skipped for the rest of the review, as a failure of kind
-`unusable` with its probe step and reason, or `sandbox` with the `SandboxUnavailable` text. After a call of a judge:
+`unusable` with its probe step and reason, or `sandbox` with the `SandboxUnavailable` text. When every judge of the chain is refused its sandbox, the review SHALL
+exit 3 with the refusal (L4-YOLO-026, SCN-YOLO-61); a review that ended for the job's time or on a
+timeout, or that answered anything, has a judge it could use and SHALL be incomplete (L4-YOLO-099), not that refusal.
+After a call of a judge:
 `error` without a length stop SHALL discard the judge for the rest of the review (kind `error`); `error` with a length
 stop (`StructuredResult.length_stop`) of a call that is not split (L4-YOLO-098) SHALL discard the judge for that call
 only (kind `length`); `schema_invalid` after the one repair prompt SHALL discard the judge for that call only (kind
@@ -18612,7 +18615,8 @@ scenario is a spec defect (§26).
 - **Given** a machine without a usable bwrap, `sandbox.mode: auto`, and the review chain `[codex-judge, claude-judge]`
 - **When** `l4 yolo review p1 --worktree` runs, and then runs with the chain `[codex-judge]` alone
 - **Then** the first skips `codex-judge` with `kind: sandbox` and its reason, and `claude-judge` answers; the second
-  exits 3 with the refusal of SCN-YOLO-61
+  exits 3 with the refusal of SCN-YOLO-61; and with `claude-judge` usable but the job out of time, the review is
+  incomplete (`job_time`) and keeps its answers, and does not exit 3
 
 #### SCN-YOLO-270 (+) The configured time bounds each call · L4-YOLO-097
 - **Given** `yolo.review.timeout: 30m`, a configuration without the key, and one with `yolo.review.timeout: 30s`

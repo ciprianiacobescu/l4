@@ -1272,8 +1272,15 @@ def review_plan_costed(
         if verdict is not None:
             (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
     if left_over:
-        if walk.sandbox_errors and not answered and all(f.kind == "sandbox" for f in walk.failures):
-            raise walk.sandbox_errors[0]  # every judge was refused its sandbox: exit 3, as with one judge (SCN-YOLO-61)
+        # every judge refused its sandbox: exit 3, as with one judge (SCN-YOLO-61); a review that ran out of time or
+        # timed out had a judge it could use, and one that answered something keeps it: both are incomplete
+        if (
+            walk.sandbox_errors
+            and walk.stop is None
+            and not answered
+            and all(f.kind == "sandbox" for f in walk.failures)
+        ):
+            raise walk.sandbox_errors[0]
         reason = walk.stop or "no_judge"
         raise ReviewIncomplete(reason, answered, left_over, walk.failures, walk.cost)
     for batch in plan.batches:  # a batch with a unit that cannot be reviewed is not reviewed as a whole either

@@ -12,6 +12,7 @@ from l4.availability.cooldown import AvailabilityStore, cooldown_key
 from l4.availability.errors import RoleUnavailable
 from l4.config.defaults import cache_root
 from l4.config.schema import Profile
+from l4.sandbox.base import SandboxUnavailable
 from l4.yolo.model import UnitInfo
 from l4.yolo.readiness import (
     JudgeFailed,
@@ -270,3 +271,63 @@ def test_a_call_starts_with_exactly_the_timeout_left_and_not_with_a_second_less(
     with pytest.raises(ReviewIncomplete) as err:
         review(world, SINGLE, j1, FakeAdapter([]), time_left=lambda: 899.0)
     assert err.value.reason == "job_time" and j1.requests == []
+
+
+def test_a_unit_that_stops_at_the_output_limit_discards_the_judge_for_that_unit_only(world):
+    limit = Step(status="error", length_stop=True, detail="stopped at the output limit")
+    j1 = FakeAdapter([limit, ok(), ok()])  # A stops, B and the batch are answered by the same judge
+    j2 = FakeAdapter([ok()])
+    result, _ = review(world, BATCH, j1, j2)
+    assert (len(j1.requests), len(j2.requests)) == (3, 1)
+    assert [result.units[A].judge, result.units[B].judge, result.batches["b1"].judge] == ["j2", "j1", "j1"]
+    assert [(f.profile, f.subject, f.kind) for f in result.failures] == [("j1", A, "length")]
+
+
+def refuse_sandbox(*names):
+    def sandbox_for(adapter, profile):
+        if profile in names:
+            raise SandboxUnavailable(f"no sandbox for {profile}")
+        return None  # the world's config runs without one
+
+    return sandbox_for
+
+
+def test_a_judge_refused_its_sandbox_does_not_take_the_answers_of_a_run_that_ran_out_of_time(world):
+    """j1 is refused its sandbox, j2 answers A, and then the job has no time: the review is incomplete and keeps A; it
+    is not the exit 3 of a chain of judges that cannot be sandboxed (L4-YOLO-096)."""
+    left = iter([2000.0, 10.0])
+    with pytest.raises(ReviewIncomplete) as err:
+        review(
+            world, BATCH, FakeAdapter([]), FakeAdapter([ok()]), sandbox_for=refuse_sandbox("j1"),
+            time_left=lambda: next(left),
+        )  # fmt: skip
+    assert err.value.reason == "job_time" and list(err.value.answered) == [A] and err.value.left == (B, "batch:b1")
+    assert [(f.profile, f.kind) for f in err.value.failures] == [("j1", "sandbox")]
+
+
+def test_a_run_out_of_time_with_a_usable_judge_is_not_the_sandbox_refusal(world):
+    left = iter([10.0])
+    with pytest.raises(ReviewIncomplete) as err:
+        review(
+            world, SINGLE, FakeAdapter([]), FakeAdapter([ok()]), sandbox_for=refuse_sandbox("j1"),
+            time_left=lambda: next(left),
+        )  # fmt: skip
+    assert err.value.reason == "job_time" and err.value.answered == {} and err.value.left == (A,)
+
+
+def test_every_judge_refused_its_sandbox_is_the_refusal_and_exit_3(world):
+    with pytest.raises(SandboxUnavailable):
+        review(world, SINGLE, FakeAdapter([]), FakeAdapter([]), sandbox_for=refuse_sandbox("j1", "j2"))
+    with pytest.raises(ReviewIncomplete) as err:  # a judge that answered nothing else keeps the review incomplete
+        review(world, SINGLE, FakeAdapter([]), FakeAdapter([Step(status="error", detail="boom")]),
+               sandbox_for=refuse_sandbox("j1"))  # fmt: skip
+    assert err.value.reason == "no_judge"
+
+
+def test_a_verdict_with_a_harness_finding_is_not_kept_for_the_next_run(world):
+    """A reply that broke the schema twice is BLOCKED with the harness's `schema` finding: it is no review and is not
+    among the answers an incomplete review keeps."""
+    j1 = FakeAdapter([bad(), bad(), Step(status="timeout")])  # A: BLOCKED after the repair; B: a timeout
+    with pytest.raises(ReviewIncomplete) as err:
+        review(world, BATCH, j1, FakeAdapter([]), cfg=cfg_of(judges=("j1",)))
+    assert err.value.answered == {} and err.value.left == (B, "batch:b1")

@@ -100,3 +100,28 @@ def test_status_says_nothing_of_parts_for_a_batch_asked_whole(world, capsys):
     world.seed("p1", world.reviewed())
     world.l4("status", "p1", "--json")
     assert "in_parts" not in json.loads(capsys.readouterr().out)["plans"][0]["review"]
+
+
+def test_an_incomplete_review_is_shown_while_a_stale_review_is_not_current_and_not_when_it_is_older(world, capsys):
+    """Only while the review is not current, and only an incomplete review newer than the latest `plan.reviewed`."""
+    seeded(world)
+    stale = world.reviewed()
+    stale.data["plan_digest"] = "an older plan file"  # the review is for another plan file: stale
+    world.seed("p1", incomplete(world, at="2026-10-14T09:00:00Z"), stale)
+    world.l4("status", "p1")
+    out = capsys.readouterr().out
+    assert "review: stale" in out and "incomplete " not in out  # the incomplete review is older than the review
+    world.seed("p1", incomplete(world, at="2026-10-14T12:00:00Z"))
+    world.l4("status", "p1")
+    out = capsys.readouterr().out
+    assert "review: stale" in out and " ago (ci, no_judge): 2 answered and kept, 1 left" in out
+
+
+def test_a_current_review_shows_no_incomplete_even_when_one_follows_it_in_the_ledger(world, capsys):
+    seeded(world)
+    world.seed("p1", world.reviewed(), incomplete(world, at="2026-10-14T12:00:00Z"))
+    world.l4("status", "p1")
+    out = capsys.readouterr().out
+    assert "review: current" in out and "incomplete " not in out
+    world.l4("status", "p1", "--json")
+    assert "incomplete" not in json.loads(capsys.readouterr().out)["plans"][0]["review"]

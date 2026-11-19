@@ -448,3 +448,74 @@ def test_the_summary_part_names_every_prerequisite_outside_the_batch_on_its_own_
     review(world, plan, fake, cfg=cfg_of(1000))
     summary = fake.requests[-1].prompt
     assert '<l4:data source="batch prerequisites outside it">\n- openspec:x\n- openspec:y\n</l4:data>' in summary
+
+
+# --- the bound, the first judge of the parts, the harness findings, and the kept batch ------------------------------
+
+
+def test_the_size_bound_splits_a_batch_longer_than_it_and_not_one_exactly_as_long(world, monkeypatch):
+    from l4.yolo import readiness
+
+    sizes = {}
+    real = readiness._Calls.ask
+
+    def spy(self, subject, **kw):
+        sizes[subject.name] = len(subject.user)
+        return real(self, subject, **kw)
+
+    monkeypatch.setattr(readiness._Calls, "ask", spy)
+    review(world, TWO, FakeAdapter([ok(), ok(), ok()]), cfg=cfg_of(0))
+    length = sizes["batch:b1"]  # the material of the batch asked whole
+    equal = FakeAdapter([ok(), ok(), ok()])
+    result, _ = review(world, TWO, equal, cfg=cfg_of(length))
+    assert len(equal.requests) == 3 and result.batches["b1"].parts == ()
+    shorter = FakeAdapter([ok() for _ in range(5)])
+    result, _ = review(world, TWO, shorter, cfg=cfg_of(length - 1))
+    assert len(shorter.requests) == 5 and len(result.batches["b1"].parts) == 3
+
+
+def test_the_parts_start_with_the_judge_that_split_the_batch_even_when_it_is_not_first_in_the_chain(world):
+    key = _whole_key(world, TWO)
+    limit = Step(status="error", length_stop=True, detail="stopped at the output limit")
+    j1 = FakeAdapter([ok(), ok()])  # A and B; j1 failed the whole batch in an earlier run, so j2 is asked first
+    j2 = FakeAdapter([limit, ok(), ok(), ok()])  # the whole batch (stops), then the parts, which stay with j2
+    result, _ = review(world, TWO, j1, j2, failed_before={key: ["j1"]})
+    assert (len(j1.requests), len(j2.requests)) == (2, 4)
+    assert "read in part" not in j2.requests[0].prompt and all("read in part" in r.prompt for r in j2.requests[1:])
+    assert result.batches["b1"].judge == "j2"
+
+
+def part_prior(first):
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    prior.update({v.material: _entry(v) for _, v in first.batches["b1"].parts})
+    return prior
+
+
+def test_a_kept_part_with_a_harness_finding_is_asked_again(world):
+    first = _first_review(world)
+    prior = part_prior(first)
+    name, part = first.batches["b1"].parts[1]
+    schema = {"criterion": "schema", "severity": "blocking", "text": "schema_invalid: x"}
+    prior[part.material] = {**_entry(part), "verdict": "BLOCKED", "findings": [schema]}
+    kept = [v.material for _, v in first.batches["b1"].parts]
+    fake = FakeAdapter([ok()])
+    result, _ = review(world, THREE, fake, cfg=cfg_of(0), prior=prior, kept=kept)
+    assert len(fake.requests) == 1  # that part only: the others are reused
+    assert dict(result.batches["b1"].parts)[name].verdict == "READY"
+
+
+def test_the_merged_batch_and_every_part_are_kept_when_a_later_call_has_no_answer(world):
+    """Two batches: the first is judged in parts and merged, then a part of the second times out. The incomplete review
+    keeps the first batch (merged and by part) and the parts of the second that were answered."""
+    d = "openspec:d"
+    world.units = {**world.units, d: UnitInfo(d, f"{ROOT}/d")}
+    world.commit({f"{ROOT}/d/proposal.md": "Why: D.\n", f"{ROOT}/d/specs/x/spec.md": SPEC_B})
+    world.rev = world.git.rev_parse("HEAD")
+    plan = plan_of({A: [], B: [], C: [], d: []}, batches=[("b1", [A, B]), ("b2", [C, d])])
+    fake = FakeAdapter([ok() for _ in range(4)] + [ok() for _ in range(3)] + [ok(), Step(status="timeout")])
+    with pytest.raises(ReviewIncomplete) as err:
+        review(world, plan, fake, cfg=cfg_of(1))  # every batch is over the bound of 1: all in parts
+    answered = err.value.answered
+    assert "batch:b1" in answered and len(answered["batch:b1"].parts) == 3
+    assert {f"batch:b1/{A}", f"batch:b1/{B}", "batch:b1/summary", f"batch:b2/{C}"} <= set(answered)
+    assert err.value.left[0] == "batch:b2" and f"batch:b2/{d}" in err.value.left
