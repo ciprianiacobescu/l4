@@ -9,7 +9,8 @@ import yaml
 
 from l4.agents.base import ProbeResult
 from l4.agents.fake import FakeAdapter, Step
-from l4.yolo.readiness import review_plan_costed
+from l4.yolo.model import PlanEvent
+from l4.yolo.readiness import PROMPT_VERSION, review_plan_costed
 
 from .test_yolo_review_worktree import cache_lines, push_edit, ready_world
 from .yolo_cmd_world import A, B, forge, world  # noqa: F401
@@ -169,6 +170,27 @@ def test_the_parts_an_incomplete_dry_run_cached_split_the_batch_and_are_reused(w
     judges(monkeypatch, again, FakeAdapter([]))
     assert world.l4("review", "p1", "--worktree") == 0
     assert len(again.requests) == 2 and all("read in part" in r.prompt for r in again.requests)  # B's part, the summary
+
+
+def test_a_finished_review_on_the_ledger_ends_the_cached_parts_so_the_dry_run_asks_the_batch_whole(
+    world, monkeypatch, capsys
+):
+    """A dry run kept a part of the batch; a later `plan.reviewed` on the ledger (a CI or `--local` review that
+    finished) ended that incomplete review, so the dry run passes the ledger's events and the part splits nothing
+    (L4-YOLO-099)."""
+    ready_world(world)
+    configure(world, ["j1"], review={"max_batch_chars": 100})
+    first = FakeAdapter([ok(), ok(), ok(), Step(status="timeout")])  # A, B, the part of A, the part of B times out
+    judges(monkeypatch, first, FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 12
+    assert "batch-part" in {line["kind"] for line in cache_lines(world)}
+    finished = PlanEvent("plan.reviewed", "2099-01-01T00:00:00Z", {"prompt_version": PROMPT_VERSION})
+    world.seed("p1", finished)  # later than the cached part
+    configure(world, ["j1"], review={"max_batch_chars": 0})
+    again = FakeAdapter([ok(), ok()])
+    judges(monkeypatch, again, FakeAdapter([]))
+    assert world.l4("review", "p1", "--worktree") == 0
+    assert len(again.requests) == 1 and "read in part" not in again.requests[0].prompt
 
 
 def test_record_writes_judge_and_sandbox_per_entry_from_the_judge_that_answered_it(world, monkeypatch, capsys):

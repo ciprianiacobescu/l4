@@ -440,7 +440,7 @@ def resolve(
         )
     if criterion == "verdict":
         return (
-            "The judge said NEEDS_REVISION and named no finding: read the missing list, "
+            "The judge named no finding: read the missing list, "
             f"or ask again with l4 yolo review {plan_id} --worktree --fresh {subject}."
         )
     return "Read the finding and change the specification it points to, then run the review again."

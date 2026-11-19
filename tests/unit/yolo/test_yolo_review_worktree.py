@@ -695,3 +695,5 @@ def test_a_cached_part_older_than_the_latest_plan_reviewed_does_not_split_its_ba
     assert _kept_in_cache(cached, reviewed) == {"new"}
     assert _kept_in_cache(cached, []) == {"old", "new"}  # no finished review on the ledger: both are kept
     assert _kept_in_cache(cached, [PlanEvent("plan.activated", "2026-11-01T13:00:00Z")]) == {"old", "new"}
+    same = {"same": _cached_part("2026-11-01T11:00:00Z", "same")}  # cached in the second the review finished
+    assert _kept_in_cache(same, reviewed) == set()  # not newer than the review: it ended that incomplete one

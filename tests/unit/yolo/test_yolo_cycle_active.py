@@ -569,6 +569,21 @@ def test_a_later_run_of_the_current_unit_and_a_preview_carry_the_same_items(worl
     assert preview.allow == frozenset({A}) and preview.accepted == first.accepted
 
 
+PARTS_NOTE = {
+    "criterion": "parts",
+    "severity": "minor",
+    "text": "this batch was reviewed in parts: no judge saw two units' full text together",
+}
+
+
+def test_a_dispatch_does_not_carry_an_item_of_the_parts_note_alone(world):
+    """L4-YOLO-098: the note is no defect, so an item of it alone has nothing to carry to the unit run."""
+    active(world)
+    _reactivate_with(world, {"batch:b1": _accepted("batch:b1", "x") | {"findings": [PARTS_NOTE]}})
+    step = world.step()
+    assert step.allow == frozenset({A}) and A not in step.accepted
+
+
 FORCE_ITEM = {
     "findings": [],
     "reason": "the judge is down; build as written",
