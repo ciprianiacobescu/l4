@@ -84,7 +84,7 @@ Rules for every task:
 
 ## 2. The factory and the fake (D2)
 
-- [ ] 2.1 Write the tests first, in a new `tests/unit/agents/test_factory_for_profile.py`:
+- [x] 2.1 Write the tests first, in a new `tests/unit/agents/test_factory_for_profile.py`:
   - `Factory.for_profile("judges", "plan:p1", "j2", serves=JUDGE_ADAPTERS)` on the chain `[j1, j2]` returns `j2`. It
     never probes `j1`: the `FakeAdapter` under j1's adapter name records no probe.
   - It sets `request`, so `factory.cool_limited(selected, run)` works on its result.
@@ -93,7 +93,7 @@ Rules for every task:
 
   Also write a test in `tests/unit/agents/test_fake.py` that `Step(status="error", length_stop=True)` gives
   `RunResult.length_stop`. Run them and see them fail.
-- [ ] 2.2 Then add `for_profile` to `src/l4/agents/factory.py`. It runs `self._selector().select(role, [name],
+- [x] 2.2 Then add `for_profile` to `src/l4/agents/factory.py`. It runs `self._selector().select(role, [name],
   required=False, serves=serves, record_unavailable=False)`, builds the `Selected` as `for_role` does with
   `request=SelectionRequest(role, unit, serves, ())`, and appends `availability.selected` when there is an event sink.
   Add `length_stop: bool = False` to `l4.agents.fake.Step` and pass it to `RunResult`. Run the two files and

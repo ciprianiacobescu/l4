@@ -140,3 +140,9 @@ def test_the_fake_honours_the_interrupt_and_the_deadline(tmp_path):
         deadline.disarm()
     # neither: unchanged
     assert FakeAdapter([Step(idle_s=600)]).run(request(tmp_path)).status == "timeout"
+
+
+def test_a_step_can_end_at_the_output_limit(tmp_path):
+    result = FakeAdapter([Step(status="error", length_stop=True)]).run(request(tmp_path))
+    assert result.status == "error" and result.length_stop is True
+    assert FakeAdapter([Step(status="error")]).run(request(tmp_path)).length_stop is False
