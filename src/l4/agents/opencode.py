@@ -157,6 +157,54 @@ def mask_instruction_files(root: Path) -> list[Path]:
     return removed
 
 
+# OpenCode 1 reads this as `flags.outputTokenMax`: `maxOutputTokens = min(model.limit.output, value) || value`, default
+# 32000 [V src, 1.18.33]. Re-read it when the pin moves: the variable is named EXPERIMENTAL.
+OUTPUT_TOKEN_ENV = "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"
+_HINT_LENGTH_V1 = (
+    "the reply stopped at its output limit: OpenCode 1 asks for at most 32000 output tokens unless "
+    "options.max_output_tokens is set (up to the model's own maximum)"
+)
+_HINT_LENGTH_V2 = (
+    "the reply stopped at its output limit: OpenCode 2 asks for the model's known output limit, else 32000 tokens, "
+    "unless options.max_output_tokens is set (up to the model's own maximum)"
+)
+_HINT_LENGTH_KEY = (
+    "the reply stopped at its output limit (options.max_output_tokens {limit}, or less when the model or the context "
+    "allows less)"
+)
+HINT_400_KEY = "options.max_output_tokens is set: a provider refuses a maximum output above the model's own (HTTP 400)"
+
+
+def output_limit_env(options: OpencodeOptions | None) -> dict[str, str]:
+    """The profile's output limit as the variable OpenCode 1 reads; nothing without the key (L4-FAC-023). The profile
+    is the only source: the host's own value never reaches the CLI (the child environment is built, not inherited)."""
+    if options is None or options.max_output_tokens is None:
+        return {}
+    return {OUTPUT_TOKEN_ENV: str(options.max_output_tokens)}
+
+
+def _with_hint(detail: str | None, hint: str) -> str:
+    return f"{detail}; {hint}" if detail else hint
+
+
+def output_limit_hint(result: RunResult, options: OpencodeOptions | None, major: int) -> RunResult:
+    """Name `options.max_output_tokens` in the detail of a run that stopped at its output limit, and in the detail of a
+    400 on a profile that sets it. Called by each adapter's `run()` after `parse()`, which stays pure (L4-FAC-023)."""
+    limit = options.max_output_tokens if options is not None else None
+    if result.length_stop:
+        hint = (
+            _HINT_LENGTH_KEY.format(limit=limit)
+            if limit is not None
+            else _HINT_LENGTH_V2
+            if major == 2
+            else _HINT_LENGTH_V1
+        )
+        result.detail = _with_hint(result.detail, hint)
+    elif limit is not None and result.api_status == 400:
+        result.detail = _with_hint(result.detail, HINT_400_KEY)
+    return result
+
+
 def isolation_env(config_dir: Path, content: str) -> dict[str, str]:
     return {
         "XDG_CONFIG_HOME": str(config_dir), **{name: "1" for name in DISABLE_SWITCHES},
@@ -310,6 +358,7 @@ class OpenCodeAdapter:
             env = {
                 **req.env,
                 **isolation_env(config_dir, config_content(req.permission_policy, step_dir, model, options, key_path)),
+                **output_limit_env(options),
             }
             argv = self.build_command(req, exe=exe, workdir=workdir)
             with credential_loader(req) as load:  # OPENCODE_API_KEY (L4-PRV-028): a 0600 file, never env or argv
@@ -323,7 +372,7 @@ class OpenCodeAdapter:
         finally:
             if key_path is not None:
                 key_path.unlink(missing_ok=True)  # the credential does not outlive the step
-        return self.parse(
+        result = self.parse(
             req.raw_events_path.read_text(encoding="utf-8", errors="replace").splitlines(),
             exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
             interrupted=outcome.interrupted,
@@ -331,6 +380,7 @@ class OpenCodeAdapter:
             schema=req.result_schema, judge=judge, read_only=read_only, model=req.profile.model,
             raw_events_path=req.raw_events_path, stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
         )  # fmt: skip
+        return output_limit_hint(result, options, 1)
 
     def parse(
         self,
@@ -514,7 +564,9 @@ def _hello_once(
         config_dir.mkdir(mode=0o700)  # the scratch directory is 0700 already (tempfile); the key's own is too
         key_path = write_key_file(config_dir, key) if key is not None else None
         content = config_content(PermissionPolicy("judge"), work, model, options, key_path)
-        env = probe_env(ctx, {**credential_env(profile, ctx)[1], **isolation_env(config_dir, content)})
+        env = probe_env(
+            ctx, {**credential_env(profile, ctx)[1], **isolation_env(config_dir, content), **output_limit_env(options)}
+        )
         argv = [exe, "run", "--pure", "--format", "json", "-m", model, "--title", "l4 hello", ctx.hello_prompt]
         done, millis = _timed(ctx, argv, env, work)
     stream = _scan((done.stdout or "").splitlines())
@@ -531,6 +583,8 @@ def _hello_once(
             failure, kind = "opencode authentication failed (login expired or rejected)", "auth"
         else:
             failure = "opencode reported an error" + (f" (status {status})" if status else "")
+            if status == 400 and output_limit_env(options) and not _GRAMMAR.search(message):
+                failure += f"; {HINT_400_KEY}"
             kind = error_class(status, message)
             unreachable = bool(_UNREACHABLE.search(message))  # a custom provider that is down: not asked again (D2)
     elif done.returncode not in (0, 124):

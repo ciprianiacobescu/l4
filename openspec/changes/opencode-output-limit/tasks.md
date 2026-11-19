@@ -33,7 +33,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 2. OpenCode 1: the variable (D4)
 
-- [ ] 2.1 Write the tests first in a new `tests/unit/agents/test_opencode_output_limit.py`, with the `request`,
+- [x] 2.1 Write the tests first in a new `tests/unit/agents/test_opencode_output_limit.py`, with the `request`,
   `FakeProc` and fixture paths of `tests/unit/agents/test_opencode.py` (import or copy them):
   - SCN-FAC-52: a profile `Profile(adapter="opencode", model="opencode-go/deepseek-v4.1-flash", vendor="deepseek",
     options={"max_output_tokens": 65536})` run in implement, judge and read-only mode: each call's `env` holds
@@ -47,7 +47,7 @@ fail, then write the code. Run only the test files named here, never the whole s
     `tests/unit/availability/test_probes_opencode.py` uses them), the `hello` step of the profile with the key runs with
     the variable in its environment, and the `auth` step of a profile on `google/gemini-3.5-flash` with the key does not
     (`run.calls[-1][2]` is the environment).
-- [ ] 2.2 Then, in `src/l4/agents/opencode.py`: add `OUTPUT_TOKEN_ENV = "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"` (a
+- [x] 2.2 Then, in `src/l4/agents/opencode.py`: add `OUTPUT_TOKEN_ENV = "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"` (a
   comment: OpenCode 1 reads it as `flags.outputTokenMax`, `maxOutputTokens = min(model.limit.output, value) || value`,
   default 32000 [V src, 1.18.33]; re-read it when the pin moves) and `output_limit_env(options: OpencodeOptions | None)
   -> dict[str, str]`. Merge it in `run()` after `isolation_env(...)` and in `_hello_once` into the `probe_env` extra.
@@ -57,7 +57,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 3. OpenCode 2: the model's limit.output (D5)
 
-- [ ] 3.1 Write the tests first in `tests/unit/agents/test_opencode_output_limit.py` (or a separate
+- [x] 3.1 Write the tests first in `tests/unit/agents/test_opencode_output_limit.py` (or a separate
   `test_opencode_v2_output_limit.py`), calling `config_content_v2` as `tests/unit/agents/test_opencode_v2_command.py`
   does:
   - SCN-OCV-49: `options={"cli_major": 2, "max_output_tokens": 65536}` on `opencode-go/deepseek-v4.1-flash`, in implement
@@ -74,7 +74,7 @@ fail, then write the code. Run only the test files named here, never the whole s
     step's `OPENCODE_CONFIG_CONTENT` equals the one of the same profile without the key; the run (with the `V2Proc` of
     `tests/unit/agents/test_opencode_v2_run.py`) carries the block in the run's and the export's configuration; no
     environment holds `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`.
-- [ ] 3.2 Then, in `src/l4/agents/opencode_v2.py`, append the block in `config_content_v2` after `agents` when
+- [x] 3.2 Then, in `src/l4/agents/opencode_v2.py`, append the block in `config_content_v2` after `agents` when
   `options is not None and options.max_output_tokens is not None`, splitting `model` on the first `/`. In the `auth`
   step of `probe_opencode_v2`, pass `options.model_copy(update={"max_output_tokens": None})` (when `options` is not
   None) so the listing's configuration stays as without the key. Nothing else changes. Run the new tests and `uv run --frozen pytest tests/unit/agents/test_opencode_v2_command.py
@@ -83,7 +83,7 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 4. The hints (D6)
 
-- [ ] 4.1 Write the tests first in `tests/unit/agents/test_opencode_output_limit.py`:
+- [x] 4.1 Write the tests first in `tests/unit/agents/test_opencode_output_limit.py`:
   - SCN-FAC-56, unit level: `output_limit_hint(result, options, major)` on a `RunResult(status="error",
     length_stop=True, detail=D)` appends exactly the texts of L4-FAC-023 for (major 1, no key), (major 2, no key) and
     (either major, key 65536), joined to the detail by `; `; a result with `length_stop=False` is unchanged; with
@@ -100,7 +100,7 @@ fail, then write the code. Run only the test files named here, never the whole s
     likewise; without the key, or with status 500 or 402, no clause; a v1 and a v2 hello whose stream is that error
     event end their `reason` with the clause when the key is set, and a v1 hello whose 400 message says `grammar binding
     failed` does not.
-- [ ] 4.2 Then add `output_limit_hint` to `src/l4/agents/opencode.py` (the three length texts and the 400 clause as
+- [x] 4.2 Then add `output_limit_hint` to `src/l4/agents/opencode.py` (the three length texts and the 400 clause as
   module constants, the texts exactly as in L4-FAC-023) and call it in `OpenCodeAdapter.run()` and
   `OpenCodeV2Adapter.run()` on the result of `parse()` before returning it (the v1 run's 400 is the generic branch of
   `_classify_error`, which sets `api_status`; `provider_unavailable` sets none and gets no clause); add the 400 clause

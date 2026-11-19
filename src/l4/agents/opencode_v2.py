@@ -47,15 +47,18 @@ from l4.agents.contract import attach_file_result, attach_judge_reply
 from l4.agents.credentials import OPENCODE_API_KEY, credential_loader, no_stored_login, profile_credential_variable
 from l4.agents.opencode import (
     _AUTH_FAILED,
+    _GRAMMAR,
     CONFIG_DIR,
     DISABLE_SWITCHES,
     FREE_PREFIX,
     GIT_WRITES,
+    HINT_400_KEY,
     _Stream,
     _tail,
     _unsupported_version,
     error_class,
     error_status,
+    output_limit_hint,
 )
 from l4.agents.proc import ProcRunner
 from l4.availability.limits import normalise_limit
@@ -202,13 +205,18 @@ def config_content_v2(
 ) -> str:
     """`OPENCODE_CONFIG_CONTENT` in the native v2 shape (L4-OCV-005): `$schema`, `snapshots`, `share`, `update`, the
     ordered `permissions` and `agents.build.steps`. No v1 key (`permission`, `tools`, `snapshot`, `autoupdate`) and no
-    `list` or `doom_loop` rule, which are not v2 actions. A read-only policy raises (amendment E4)."""
+    `list` or `doom_loop` rule, which are not v2 actions. A read-only policy raises (amendment E4). With
+    `options.max_output_tokens` the model's `limit.output` follows `agents` as `providers.<provider>.models.<id>`: the
+    loader merges it over the catalog's limit and nothing else of the provider changes (L4-OCV-020)."""
     steps = step_bound(policy, options)
     refuse = "ask" if model.startswith(FREE_PREFIX) else "deny"
     config: dict[str, Any] = {
         "$schema": "https://opencode.ai/config.json", "snapshots": False, "share": "disabled", "update": "disable",
         "permissions": _permissions(policy, result_dir, refuse, options), "agents": {"build": {"steps": steps}},
     }  # fmt: skip
+    if options is not None and options.max_output_tokens is not None and "/" in model:
+        provider, _, model_id = model.partition("/")
+        config["providers"] = {provider: {"models": {model_id: {"limit": {"output": options.max_output_tokens}}}}}
     return json.dumps(config, separators=(",", ":"))
 
 
@@ -443,13 +451,14 @@ class OpenCodeV2Adapter:
                 export, problem = self._export(req, exe, session, environment(EXPORT_STATE_DIR, export_config), workdir)
             else:
                 problem = "an unsafe session id"  # never an argv word
-        return self.parse(
+        result = self.parse(
             lines, exit_code=outcome.returncode, timed_out=outcome.timed_out or outcome.stalled,
             interrupted=outcome.interrupted, step_bound=bound, export=export, export_problem=problem,
             result_text=None if judge else read_result_file(req.result_path), schema=req.result_schema, judge=judge,
             model=model, raw_events_path=req.raw_events_path,
             stderr_tail=_tail(req.raw_events_path.with_suffix(".stderr")),
         )  # fmt: skip
+        return output_limit_hint(result, options, 2)
 
     def _export(
         self, req: RunRequest, exe: str, session: str, env: Mapping[str, str], workdir: Path
@@ -580,7 +589,8 @@ def probe_opencode_v2(profile: Profile, step: ProbeStep, ctx: ProbeCtx) -> Probe
             config_dir, state = Path(scratch) / "config", Path(scratch) / "state"
             config_dir.mkdir(mode=0o700)  # `~/.config/opencode` is writable by agent runs and this runs on the host:
             state.mkdir(mode=0o700)  # empty config and state of its own; `XDG_DATA_HOME` stays (the credentials)
-            content = config_content_v2(PermissionPolicy("judge"), Path(scratch), model, options)
+            listing = options.model_copy(update={"max_output_tokens": None}) if options is not None else None
+            content = config_content_v2(PermissionPolicy("judge"), Path(scratch), model, listing)  # no model call here
             env = probe_env(ctx, isolation_env_v2(config_dir, state, content))
             done = step_run(ctx, "opencode2", "auth", v2_argv(exe, "auth list", "--format", "json"), env)
         if done.returncode != 0:
@@ -694,6 +704,9 @@ def _hello_v2_once(
                 failure += f"; {_STORED_LOGIN_UNUSED}"  # a free model without the key: the way out (L4-OCV-017)
         else:
             failure = "opencode2 reported an error" + (f" (status {status})" if status else "")
+            keyed = options is not None and options.max_output_tokens is not None
+            if status == 400 and keyed and not _GRAMMAR.search(message):
+                failure += f"; {HINT_400_KEY}"
             kind = error_class(status, message)
     elif done.returncode not in (0, 124):
         failure, kind = f"opencode2 exited with code {done.returncode}", "transient"
