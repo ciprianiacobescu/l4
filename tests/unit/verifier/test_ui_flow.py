@@ -445,3 +445,23 @@ def test_the_verdict_of_a_failed_e2e_gate_records_the_failing_test_with_its_gate
         verdict["failures"][test_id]["message"].startswith("assert ")
         and "\n" not in verdict["failures"][test_id]["message"]
     )
+    # L4-VER-078 through the real ladder: the record also holds the lines the retry prompt would show, bounded
+    excerpt = verdict["failures"][test_id]["excerpt"]
+    assert "assert" in excerpt and len(excerpt.splitlines()) <= 8 and len(excerpt) <= 600
+    assert str(run.tdd.cache) not in excerpt  # paths are relative to the worktree
+
+
+def test_the_verdict_records_the_excerpt_of_a_module_the_e2e_gate_could_not_collect(run_l4, valid_spec, web_repo):
+    """L4-VER-078 through the real ladder (the `collection_excerpt` argument of `failure_records`): a module of the e2e
+    gate that fails to import is a `collection` record whose excerpt holds the `E` lines of its error. The module holds
+    no test function, so it is no browser test of the task and the green step's own e2e run does not meet it."""
+    import json
+
+    red = red_step()
+    red.writes = {**red.writes, "e2e/test_unimportable.py": "import no_such_module_for_the_excerpt\n"}
+    run = run_l4([red, web_green()], **web_repo)
+    verdict = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    records = {i: r for i, r in verdict["failures"].items() if r["kind"] == "collection" and r["gate"] == "e2e"}
+    assert records, verdict["failures"]
+    [excerpt] = [r["excerpt"] for r in records.values()]
+    assert "no_such_module_for_the_excerpt" in excerpt and len(excerpt.splitlines()) <= 8 and len(excerpt) <= 600

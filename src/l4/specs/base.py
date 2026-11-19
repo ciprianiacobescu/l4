@@ -226,6 +226,9 @@ class Finding:
     code: str = ""
     retake: bool = False  # the item was taken before (the marker's `retakes`): "nothing left to change" completes it
     repair: bool = False  # a chore that may repair the unit's own failing new tests (marker `repairs`)
+    # L4-IMP-102: the failure block of the tests the task's findings name (`verifier.failures.failure_block`), written
+    # indented under the finding in the fix unit's proposal or design, never into `tasks.md`
+    failures: str = ""
 
 
 @dataclass(frozen=True)

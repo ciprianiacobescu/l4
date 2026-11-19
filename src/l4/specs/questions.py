@@ -64,6 +64,10 @@ class NewQuestion:
     asked: str  # one line: when, by whom, run id, task
     options: tuple[str, ...] = ()
     criteria: tuple[Criterion, ...] = ()
+    # harness-written notes (L4-IMP-102): failure text and why the previous attempt was rejected. Their own
+    # `### Harness notes` subsection, never part of the Context: what an accepted suggestion may unfreeze is judged
+    # against the question's title, Context and Options (L4-IMP-015), and text from a test's output must not widen it
+    notes: str = ""
 
 
 _COMMENT_ENTITY = re.compile(r"&((?:amp;)*)lt;!--")
@@ -136,6 +140,8 @@ def _render_section(qid: str, q: NewQuestion, redactor: Redactor) -> tuple[list[
     lines += ["", "### Context", *_block(q.context or "(no context given)", redactor), ""]
     if q.options:
         lines += ["### Options", *(f"{n}. {_one_line(o, redactor)}" for n, o in enumerate(q.options, 1)), ""]
+    if q.notes:
+        lines += ["### Harness notes", *_block(q.notes, redactor), ""]
     lines += ["### Answer", "<!-- write below this line -->"]
     return lines, f"| {qid} | open | {_cell(tasks)} | {q.kind.value} | {_cell(title)} |"
 
@@ -234,6 +240,7 @@ class Question:
     answer_text: str  # comments removed, stripped
     context_text: str = ""  # the `### Context` and `### Options` bodies as written (neutralised, see `unescape_text`)
     options_text: str = ""
+    notes_text: str = ""  # the `### Harness notes` body (L4-IMP-102): never part of what the question asks
     restarted: bool = False  # the Status is `superseded by restart`: no successor, and nothing is held
     superseded_round: int | None = None  # the Status is `superseded by round <n>`: a later round replaced it
     answered_by: str = ""  # the text after `**Answered by:**` (the delegate's answer, L4-DLG-006)
@@ -250,9 +257,11 @@ class QuestionIssue:
     detail: str = ""
 
 
-_SUBSECTIONS = ("context", "options", "clarifier suggestion", "answer")
+_SUBSECTIONS = ("context", "options", "harness notes", "clarifier suggestion", "answer")
 _HEADING = re.compile(rb"^## (?:Q-(\d+):[ \t]*(.*?)|.*?)[ \t]*\r?$")
-_SUBHEADING = re.compile(rb"^###[ \t]+(Context|Options|Clarifier suggestion|Answer)[ \t]*\r?$", re.IGNORECASE)
+_SUBHEADING = re.compile(
+    rb"^###[ \t]+(Context|Options|Harness notes|Clarifier suggestion|Answer)[ \t]*\r?$", re.IGNORECASE
+)
 _FIELD = re.compile(
     rb"^-[ \t]+\*\*(Status|Blocking tasks|Kind|Asked|Criteria|Answered by|Escalated by):\*\*[ \t]*(.*?)[ \t]*\r?$",
     re.IGNORECASE,
@@ -368,7 +377,7 @@ def _parse_section(
     except ValueError:
         kind = None
     suggestion, answer = blocks.get("clarifier suggestion"), blocks.get("answer")
-    context, options = blocks.get("context"), blocks.get("options")
+    context, options, notes = blocks.get("context"), blocks.get("options"), blocks.get("harness notes")
     tasks, readable = _tasks_of(fields.get("blocking tasks", ""))
     if kind is QuestionKind.VERDICT and fields.get("blocking tasks", "").strip("`*_ ").lower() in ("", NO_TASKS):
         tasks, readable = (), True
@@ -383,6 +392,7 @@ def _parse_section(
         answer_text=_visible(data[answer.body.start : answer.body.end]) if answer else "",
         context_text=_visible(data[context.body.start : context.body.end]) if context else "",
         options_text=_visible(data[options.body.start : options.body.end]) if options else "",
+        notes_text=_visible(data[notes.body.start : notes.body.end]) if notes else "",
         restarted=bool(_RESTART_SUPERSEDED.search(fields.get("status", ""))) and not successor,
         superseded_round=int(later.group(1)) if (later := _ROUND_SUPERSEDED.search(fields.get("status", ""))) else None,
         answered_by=fields.get("answered by", ""), escalated_by=fields.get("escalated by", ""),

@@ -1,6 +1,7 @@
 """Kiro fix units are bugfix specs (L4-FBK-008, L4-KSP-005; SCN-FBK-20, SCN-FBK-21)."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -376,3 +377,21 @@ def test_the_fix_spec_carries_the_ci_excerpt(parent):
     assert "failed in step `tests`" in requirements
     assert "FAILED tests/test_cli.py::test_help - AssertionError" in requirements
     assert "Error: Process completed with exit code 1." in requirements and "##(" not in requirements
+
+
+def test_design_md_holds_the_failure_block_as_an_indented_block_and_tasks_md_is_unchanged(parent):
+    repo, ref = parent
+    block = "e2e.test_layout::test_width[chromium] (assertion, e2e):\n  E   assert 1508 == 1500\n\n  ## Heading"
+    plain = provider_of(repo).create_fix_unit(ref, 1, FINDINGS, None)
+    shown = [replace(FINDINGS[0], failures=block), FINDINGS[1]]
+    fix = provider_of(repo).create_fix_unit(ref, 2, shown, None)
+    design = (fix.path / "design.md").read_text()
+    after_detail = design.split("the check is inverted\n", 1)[1]
+    assert after_detail.startswith(
+        "\n    Failing tests as the verifier recorded them:\n"
+        "    e2e.test_layout::test_width[chromium] (assertion, e2e):\n      E   assert 1508 == 1500\n\n      ## Heading"
+    ), after_detail[:300]
+    assert "Failing tests" not in (plain.path / "design.md").read_text()
+    assert [h for h in design.splitlines() if h == "## Heading"] == []  # indented: no section
+    assert (fix.path / "tasks.md").read_bytes() == (plain.path / "tasks.md").read_bytes()
+    assert provider_of(repo).validate(fix, strict=True).valid

@@ -50,7 +50,11 @@ class QuestionView:
         )
         return cls(
             id=question.id, title=question.title, status=question.status, kind=question.kind,
-            blocking=question.blocking_tasks, context=unescape_text(question.context_text), options=options,
+            blocking=question.blocking_tasks,
+            context="\n\n".join(
+                part for part in (unescape_text(question.context_text), unescape_text(question.notes_text)) if part
+            ),  # the notes (L4-IMP-102) are read with the Context by the clarifier and the delegate
+            options=options,
             answer_text=effective_answer(question) or "", suggestion_text=unescape_text(question.suggestion_text),
             by=answered_by(question) if is_answered(question) else None,
         )  # fmt: skip

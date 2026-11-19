@@ -114,6 +114,26 @@ def test_the_cap_is_per_phase() -> None:
     assert deadline.estimate_s("verify", [7000], deadline.cap_s("verify", 1800)) == 7000
 
 
+def test_the_cap_of_a_green_step_counts_the_e2e_gate_when_it_is_configured() -> None:
+    """L4-IMP-067 (amendment): the test gate, the build and the e2e gate."""
+    assert deadline.cap_s("green", 600, 1800, e2e=True) == 3600
+    assert deadline.cap_s("green", 600, 1800) == 2400
+    assert deadline.cap_s("red", 600, 1800, e2e=True) == 2400
+    assert deadline.cap_s("single", 600, 1800, e2e=True) == 2400
+    assert deadline.cap_s("verify", 600, 1800, e2e=True) == 2400
+
+
+def test_the_deadline_counts_a_green_steps_e2e_gate() -> None:
+    """SCN-IMP-556."""
+    events = [SimpleNamespace(type="step.timed", data={"phase": "green", "seconds": 3300})]
+    for e2e, expected in ((True, 3300), (False, 2400)):
+        dl = _arm(FakeClock(START), 9000)
+        dl.started = 1
+        deadline.check("green", "1.1", 1, None, read_events=lambda: events, gates_timeout_s=600, e2e=e2e)
+        assert dl.step is not None and dl.step.estimate_s == expected
+        deadline.disarm()
+
+
 def test_the_first_step_always_starts() -> None:
     """SCN-IMP-336."""
     clock = FakeClock(START)

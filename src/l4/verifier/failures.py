@@ -10,6 +10,9 @@ GATE_FINDING_GATES = {"test gate failed": "test", "e2e gate failed": "e2e"}  # t
 TESTS_RAN_TITLES = ("new tests failed", "new tests errored")  # `check_tests_ran`: the new tests that did not pass
 COLLECTION_KIND = "collection"  # the `kind` of a module the gate could not collect
 _CUT_LIST = re.compile(r" and \d+ more$")
+MAX_SHOWN_FAILURES = 8  # tests a failure block shows (L4-IMP-102); the rest are counted
+MAX_FAILURE_BLOCK_CHARS = 6000  # the whole block, the closing count included
+MORE_LINE_RESERVE = 80  # room kept for the line that counts the tests left out
 
 
 def failing_ids(failures: Any, gate: str) -> set[str]:
@@ -86,3 +89,51 @@ def e2e_ids_of(verdict: Mapping[str, Any] | None, finding_ids: Sequence[str]) ->
             named, whole = named_known_ids(str(stored.get("detail") or ""), e2e | unit)
             found |= e2e & named if whole and named else e2e
     return sorted(found)
+
+
+def shown_failure_ids(failures: Any, title: str, detail: str) -> list[str]:
+    """L4-IMP-102: the tests a finding is about, for the failure block of its fix task, sorted. `test gate failed` /
+    `e2e gate failed`: every record of that gate, collection records included; `new tests failed` / `new tests
+    errored`: the recorded ids its detail names (the part that matches, even when the list was cut); any other title,
+    and a verdict that predates the `failures` map: none."""
+    if not isinstance(failures, Mapping):
+        return []
+    records = {str(i): r for i, r in failures.items() if isinstance(r, Mapping)}
+    if (gate := GATE_FINDING_GATES.get(title)) is not None:
+        return sorted(i for i, r in records.items() if r.get("gate") == gate)
+    if title in TESTS_RAN_TITLES:
+        return sorted(named_known_ids(detail, set(records))[0])
+    return []
+
+
+def failure_block(failures: Any, ids: Collection[str]) -> str:
+    """L4-IMP-102: the failure text of `ids` from a round's `failures` map. Each test as `<id> (<kind>, <gate>):` and
+    the lines of its `excerpt` (its `message` when it has none) indented by two spaces; at most `MAX_SHOWN_FAILURES`
+    tests and `MAX_FAILURE_BLOCK_CHARS` characters, whole tests only, and a last line that counts the rest. Empty when
+    no id has a record. Plain text: whoever puts it in a file or a prompt fences it."""
+    if not isinstance(failures, Mapping):
+        return ""
+    blocks: list[str] = []
+    for test_id in sorted(set(ids)):
+        record = failures.get(test_id)
+        if not isinstance(record, Mapping):
+            continue
+        body = str(record.get("excerpt") or record.get("message") or "")
+        lines = [f"{test_id} ({record.get('kind', '')}, {record.get('gate', '')}):"]
+        lines += [f"  {line}" for line in body.splitlines() if line.strip()]
+        blocks.append("\n".join(lines))
+    room = MAX_FAILURE_BLOCK_CHARS - MORE_LINE_RESERVE  # the closing count of the rest always fits
+    shown: list[str] = []
+    size = 0
+    for block in blocks[:MAX_SHOWN_FAILURES]:
+        if size + len(block) + 1 > room:
+            if not shown:  # one test alone over the bound (an excerpt is bounded, so only a hand-made record): cut it
+                shown.append(block[:room])
+            break
+        shown.append(block)
+        size += len(block) + 1
+    if not shown:
+        return ""
+    if rest := len(blocks) - len(shown):
+        shown.append(f"and {rest} more failing tests (the round's verdict.json)")
+    return "\n".join(shown)

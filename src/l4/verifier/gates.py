@@ -22,7 +22,7 @@ from l4.ci.failing_step import STEP_GATE_PREFIX, ChoreCiStep
 from l4.config.schema import L4Config
 from l4.gates.collection import deepest_repo_frame, repo_frames
 from l4.gates.e2e import run_e2e
-from l4.gates.junit import TestReport
+from l4.gates.junit import TestCase, TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.workbench import Workbench
 from l4.verifier.failures import COLLECTION_KIND
@@ -31,6 +31,7 @@ from l4.verifier.types import Finding, GateLine, Severity
 MAX_NAMED = 5
 MAX_TEST_FAILURES = 200  # records of the `test` gate in the verdict's `failures`; the rest is counted
 MAX_FRAMES = 20  # repository files of a traceback a failure record lists
+MAX_EXCERPT_RECORDS = 20  # failing tests per gate whose record carries an `excerpt` (L4-VER-078)
 MAX_FAILURE_CHARS = 200  # the first line of a failing test's message in the verdict's `failures` (L4-VER-069)
 ALTERED = "the test report was altered"  # the reason `Workbench._cross_check` gives (L4-VER-039)
 
@@ -179,7 +180,12 @@ def _first_line(redact: Callable[[str], str], text: str) -> str:
 
 
 def failure_records(
-    unit: TestReport | None, browser: TestReport | None, redact: Callable[[str], str]
+    unit: TestReport | None,
+    browser: TestReport | None,
+    redact: Callable[[str], str],
+    *,
+    excerpt: Callable[[TestCase], str] | None = None,
+    collection_excerpt: Callable[[str], str] | None = None,
 ) -> tuple[dict[str, dict[str, str]], int]:
     """L4-VER-069: for each test id that failed or errored, the gate it failed in (`test` for the unit report, `e2e` for
     the browser report, which wins for an id both hold), the kind the JUnit reader gave (`error` for an error of no
@@ -188,7 +194,9 @@ def failure_records(
     through (one per line), when the traceback tells them (L4-IMP-091). A module a
     report could not collect has a record too, with the kind `collection`. The `test` side holds at most
     `MAX_TEST_FAILURES` records (the first ids in order) and the second value counts the ones left out; the `e2e` side
-    is whole, because a fix chore asks for those tests."""
+    is whole, because a fix chore asks for those tests. With `excerpt` (L4-VER-078) the first `MAX_EXCERPT_RECORDS`
+    records of each gate in id order, a module that did not collect among them, also get an `excerpt` when it is not
+    empty: `excerpt(case)` for a test, `collection_excerpt(detail)` for a module."""
     out: dict[str, dict[str, str]] = {}
     dropped = 0
     for gate, report in (("test", unit), ("e2e", browser)):
@@ -218,6 +226,16 @@ def failure_records(
         if gate == "test" and len(found) > MAX_TEST_FAILURES:
             dropped = len(found) - MAX_TEST_FAILURES
             found = {i: found[i] for i in sorted(found)[:MAX_TEST_FAILURES]}
+        if excerpt is not None:
+            for test_id in sorted(found)[:MAX_EXCERPT_RECORDS]:
+                if test_id in report.tests and found[test_id]["kind"] != COLLECTION_KIND:
+                    shown = excerpt(report.tests[test_id])
+                elif collection_excerpt is not None and test_id in report.collection_errors:
+                    shown = collection_excerpt(report.collection_details.get(test_id) or "")
+                else:
+                    shown = ""
+                if shown:
+                    found[test_id]["excerpt"] = shown
         out.update(found)
     return out, dropped
 

@@ -1,7 +1,8 @@
 import pytest
 
+from l4.redact import Redactor
 from l4.specs.base import Criterion, Framework
-from l4.verifier.fixunit import MAX_FIX_TASKS, plan_fix_unit, when_then
+from l4.verifier.fixunit import MAX_FIX_TASKS, plan_fix_unit, redact_plan, when_then
 from l4.verifier.preconditions import ci_detail
 from l4.verifier.types import CriterionOutcome, Finding, HumanVerdict, Severity, Verdict, VerifyResult
 
@@ -491,3 +492,45 @@ def test_the_fix_spec_carries_the_excerpt():
     first = group.detail[:600]
     assert "failed in step `tests`" in first and "FAILED tests/test_cli.py::test_help - AssertionError" in first
     assert "Error: Process completed with exit code 1." in first and "##(" not in group.detail
+
+
+# L4-IMP-102: the failure block of a fix task
+
+TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
+E2E_ID = "e2e.test_layout::test_width[chromium]"
+
+
+def failing_round(failures: dict, *found: Finding) -> VerifyResult:
+    r = result(Verdict.FAIL, list(found))
+    r.failures = failures
+    return r
+
+
+def test_a_gate_finding_task_carries_the_failure_block_of_its_gates_tests():
+    failures = {E2E_ID: {"gate": "e2e", "kind": "assertion", "message": "m", "excerpt": "E   assert 1508 == 1500"}}
+    found = Finding(Severity.MAJOR, "e2e gate failed", "`pytest e2e` failed", "deterministic", None)
+    plan = plan_fix_unit(FAMILY, failing_round(failures, found), [], ordinal=1, fix_minor=False)
+    [group] = plan.groups
+    assert group.failures == f"{E2E_ID} (assertion, e2e):\n  E   assert 1508 == 1500"
+
+
+def test_a_task_whose_findings_name_no_test_has_no_failure_block():
+    failures = {E2E_ID: {"gate": "e2e", "kind": "assertion", "message": "m"}}
+    plan = plan_fix_unit(
+        FAMILY, failing_round(failures, det("An undeclared suppression")), [], ordinal=1, fix_minor=False
+    )
+    assert [g.failures for g in plan.groups] == [""]
+
+
+def test_a_round_without_failures_gives_no_failure_block():
+    found = Finding(Severity.MAJOR, "e2e gate failed", "`pytest e2e` failed", "deterministic", None)
+    plan = plan_fix_unit(FAMILY, failing_round({}, found), [], ordinal=1, fix_minor=False)
+    assert [g.failures for g in plan.groups] == [""]
+
+
+def test_redact_plan_redacts_the_failure_block():
+    failures = {E2E_ID: {"gate": "e2e", "kind": "assertion", "message": "m", "excerpt": f"E   token {TOKEN}"}}
+    found = Finding(Severity.MAJOR, "e2e gate failed", "`pytest e2e` failed", "deterministic", None)
+    plan = plan_fix_unit(FAMILY, failing_round(failures, found), [], ordinal=1, fix_minor=False)
+    assert TOKEN in plan.groups[0].failures
+    assert TOKEN not in redact_plan(plan, Redactor({}).redact_text).groups[0].failures
