@@ -13,10 +13,11 @@ checkout of the red commit for green (a).
 import hashlib
 import logging
 import math
+import os
 import re
 import shlex
 import shutil
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -50,6 +51,14 @@ from l4.gates.trace import trace_env
 from l4.implementer import resultalias
 from l4.implementer.base_run import VIA as BASE_VIA
 from l4.implementer.base_run import BaseRunResult, combine, confirmed_by_base_run
+from l4.implementer.browser_tests import (
+    collectable_tests,
+    is_pytest_file,
+    match_task_tests,
+    module_files,
+    selecting_option,
+    shared_with_unit_gate,
+)
 from l4.implementer.clauses import (
     ClauseAsk,
     clause_question,
@@ -78,7 +87,7 @@ from l4.implementer.discrimination import (
     vacuity_check,
 )
 from l4.implementer.earlier_red import VIA, EarlierRed, confirmed_by_earlier_red
-from l4.implementer.excerpt import failure_excerpt, lint_excerpt
+from l4.implementer.excerpt import _redact_keys, failure_excerpt, lint_excerpt
 from l4.implementer.gateconfig import config_files, revert_gate_config
 from l4.implementer.guards import (
     IGNORE_FILE_GLOBS,
@@ -162,7 +171,7 @@ from l4.specs.tasks_text import task_context
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.errors import GitError
 from l4.vcs.secretscan import step_secret_reason, worktree_secrets
-from l4.verifier.failures import e2e_ids_of, finding_test_ids
+from l4.verifier.failures import e2e_ids_of, failure_block, finding_test_ids, shown_failure_ids
 from l4.verifier.gates import judge_e2e, run_build_only
 from l4.verifier.repairs import RepairTest, repair_candidates
 from l4.verifier.scan import has_human_tag
@@ -919,6 +928,9 @@ def _prompt(
     named: NamedTests | None = None,
     repair: Sequence[str] = (),
     carried: NearPass | None = None,
+    *,
+    browser_tests: Sequence[str] = (),
+    failing: str = "",
 ) -> str:
     answers = _answers(wb, task)
     changed = [*wb.branch_changed_files(), *wb.changed_files()]
@@ -941,12 +953,15 @@ def _prompt(
         context_budget_tokens=inputs.budget_tokens, window_tokens=inputs.window_tokens,
         static_gate_commands=(*wb.cfg.gates.lint, *wb.cfg.gates.typecheck), run_ledger=wb.ledger_rel,
         e2e_dir=e2e_test_dir(wb.cfg.gates.e2e, wb.worktree) if e2e_configured(wb.cfg) else None,
+        e2e_frozen=e2e_configured(wb.cfg)
+        and _matches(wb.cfg.tdd.test_globs, f"{e2e_test_dir(wb.cfg.gates.e2e, wb.worktree).rstrip('/')}/test_probe.py"),
         e2e_base_url_env=wb.cfg.verifier.playwright.base_url_env,
         unfrozen=tuple((p, g.question) for g in unfreeze.grants if g.question for p in g.paths) if unfreeze else (),
         named=tuple(sorted({p for g in unfreeze.grants if g.reason == "named_by_task" for p in g.paths}))
         if unfreeze
         else (),
-        adds_tests=adds_tests, repair_tests=tuple(repair),
+        adds_tests=adds_tests, repair_tests=tuple(repair), browser_tests=tuple(browser_tests),
+        failing_tests=failing if role == "single" else "",
         gate_env_ci=tuple(f"{name}={value}" for name, value in sorted(gate_ci_env(wb.host_env).items())),
         ci_job=ci_job if role == "single" else None,
         stale_tests=tuple(sorted(stale.tests)) if stale else (), stale_changes=tuple(stale.changes) if stale else (),
@@ -1023,7 +1038,7 @@ def agent_step(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None,
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (), failing: str = "",
 ) -> StepOutcome:  # fmt: skip
     """Run the implementer once in the agent sandbox, put protected paths back, and read its result. Raises
     `RoleLimit` when the agent says it is out of quota or logged out. `carry`: a near pass (L4-IMP-100) whose changes
@@ -1046,7 +1061,20 @@ def agent_step(
         # grant, which `replay_step` computes before it applies a step too
         carried = apply_near_pass(wb, task.key, attempt, carry)  # no replay guard: the agent edits on top of it
         prompt = _prompt(
-            wb, role, task, previous_failure, unfreeze, adds_tests, stale, attempt, ci_job, named, repair, carried
+            wb,
+            role,
+            task,
+            previous_failure,
+            unfreeze,
+            adds_tests,
+            stale,
+            attempt,
+            ci_job,
+            named,
+            repair,
+            carried,
+            browser_tests=browser_tests,
+            failing=failing,
         )
         wb.publish_prompt(published, prompt)
         # L4-IMP-019: a prompt-contract adapter hands over the object as written; the harness alone validates it
@@ -1202,7 +1230,7 @@ def step_or_replay(
     wb: Workbench, role: Phase, task: Task, attempt: int, previous_failure: str | None,
     unfreeze: Unfreeze | None = None, *, adds_tests: bool = False, stale: StaleTests | None = None,
     ci_job: str | None = None, named: NamedTests | None = None, repair: Sequence[str] = (),
-    carry: NearPass | None = None,
+    carry: NearPass | None = None, browser_tests: Sequence[str] = (), failing: str = "",
 ) -> StepOutcome:  # fmt: skip
     """The step of `role`: an agent step, or, when a person accepted the question that held this step, the saved step
     replayed without an agent (L4-IMP-065). A saved step that cannot be replayed is a hold with a new question. A
@@ -1228,6 +1256,8 @@ def step_or_replay(
             named=named,
             repair=repair,
             carry=carry,
+            browser_tests=browser_tests,
+            failing=failing,
         )
     drop_near_pass(wb, task.key, attempt, carry, "replay")  # a found step to replay, refused or not, comes first
     if isinstance(found, Refused):
@@ -1847,6 +1877,14 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
                     "defines (remove the unused import), or the stub is needed and the criterion is not "
                     "already satisfied",
                 )
+        browser = task_browser_tests(wb, base, None) if e2e_configured(wb.cfg) else ()  # L4-IMP-101: no green follows
+        if browser := _runnable_browser_tests(wb, task, "red", browser, report.tests):
+            why, shown = _task_e2e_reason(wb, task, base, browser, freeze_phase=None, phase="red")
+            if (out := tampered("e2e run")) is not None:
+                return out
+            if why:
+                wb.discard_changes()
+                return RedOutcome("failed", why, excerpt=shown)
         if (out := tampered("before the already-satisfied commit")) is not None:
             return out
         if linked := outside_links_reason(wb, base, "red"):
@@ -2175,7 +2213,13 @@ def run_green(
             "task.unfrozen", task=task.key, paths=list(named.paths), reason="named_by_task", source=source,
             red_sha=red.manifest.red_sha, kept=[{"path": p, "why": why} for p, why in named.kept],
         )  # fmt: skip
-    step = step_or_replay(wb, "green", task, attempt, previous_failure, unfreeze, carry=carry)
+    # L4-IMP-101: the red commit's own browser tests, read from git so that a resumed red counts the same
+    browser = task_browser_tests(wb, f"{red.manifest.red_sha}^", red.manifest.red_sha) if e2e_configured(wb.cfg) else ()
+    browser = _runnable_browser_tests(wb, task, "green", browser, [*red.base_report.tests, *red.new_ids])
+    step = step_or_replay(
+        wb, "green", task, attempt, previous_failure, unfreeze, carry=carry,
+        browser_tests=[f"{path}::{name}" for path, name in browser],
+    )  # fmt: skip
     if step.kind != "ok":
         wb.discard_changes()  # back to the red commit: it stays, the work of this attempt does not
         if step.kind == "held":
@@ -2222,6 +2266,11 @@ def run_green(
             wb.discard_changes()  # back to the red commit, which stays; the attempt is not counted
             return GreenOutcome("held", held=kept)
         _accept(wb, task, "at_red", {t: overrides[t] for t in held.tests}, key="tests")
+    if not reason and not stuck and browser and gate.report is not None:  # the unit report may show a shared directory
+        browser = _runnable_browser_tests(wb, task, "green", browser, gate.report.tests)
+    if not reason and not stuck and browser:  # last: a task that fails any other check pays for no build or e2e run
+        reason, excerpt = _task_e2e_reason(wb, task, base, browser, keep=unfreeze.paths, freeze_phase="green")
+        stuck = stuck or restore_replay(wb, "e2e run")
     reason = reason or stuck or restore_replay(wb, "before the green commit")
     reason = stop_on_unsafe(wb) or reason or outside_links_reason(wb, base, "green")
     if reason:
@@ -2736,6 +2785,21 @@ def _parent_verdict(wb: Workbench) -> dict[str, Any] | None:
     return read_verdict(wb.worktree / Path(wb.ledger_rel).parents[2], round_no)
 
 
+def fix_failure_text(wb: Workbench, findings: Sequence[str]) -> str:
+    """L4-IMP-102: the failure block (`failure_block`) of the tests that the stored findings `findings` of the round
+    that spawned this fix unit name, for a fix chore's prompt and questions. Empty when the round is not on record (a
+    recovered fix unit) or its verdict has no `failures` (an older harness)."""
+    verdict = _parent_verdict(wb)
+    failures = (verdict or {}).get("failures")
+    if not isinstance(failures, dict):
+        return ""
+    ids: set[str] = set()
+    for stored in (verdict or {}).get("findings") or []:
+        if isinstance(stored, dict) and stored.get("id") in findings:
+            ids.update(shown_failure_ids(failures, str(stored.get("title") or ""), str(stored.get("detail") or "")))
+    return failure_block(failures, ids)
+
+
 def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     """The e2e duty of a fix chore, or None when the gate is not configured or no finding of the task is about it. The
     round is `fix.spawned.verify_round` of this fix unit in the parent's ledger, its verdict is read from the parent's
@@ -2751,6 +2815,70 @@ def _e2e_chore_scope(wb: Workbench, findings: Sequence[str]) -> E2eScope | None:
     parent = {str(i): str(st) for i, st in tests.items()} if isinstance(tests, dict) else {}
     known = (verdict or {}).get("e2e_tests")
     return E2eScope(ids, whole, parent, frozenset(str(i) for i in known) if isinstance(known, list) else frozenset())
+
+
+def _changed_between(wb: Workbench, before: str, after: str | None) -> list[str]:
+    """The paths that differ between `before` and `after` (None: the work tree, untracked files included). A git error
+    is raised: the caller says so, it does not read it as "nothing changed"."""
+    args = ["diff", "--name-only", "-z", "--no-renames", before]
+    if after is not None:
+        args.append(after)
+    raw = wb.git.run_bytes(*args, "--")
+    names = {os.fsdecode(name) for name in raw.split(b"\0") if name}
+    if after is None:
+        names.update(wb.changed_files())  # `git diff` does not list a file git does not know yet
+    return sorted(names)
+
+
+def _source_at(wb: Workbench, rev: str | None, path: str) -> str:
+    """`path` at `rev` (None: in the work tree) as text; empty when it is absent or not a regular file."""
+    if rev is None:
+        if linked_component(wb.worktree, path) is not None:
+            return ""
+        try:
+            held = read_inside(wb.worktree, path, limit=MAX_SNAPSHOT_BYTES)
+        except UnsafeFile:
+            return ""
+        data = None if held is None else held[0]
+    else:
+        data = _regular_blob(wb, rev, path)
+    return "" if data is None else data.decode("utf-8", errors="replace")
+
+
+def task_browser_tests(wb: Workbench, before: str, after: str | None) -> tuple[tuple[str, str], ...]:
+    """The browser tests of a task (L4-IMP-101): `(path, name)` of the test functions that pytest would collect from the
+    Python files under the e2e test directory (`python_files` `test_*.py` or `*_test.py`; a fixture or a helper named
+    `test*`, a method of a class that is not `Test*` or that has an `__init__`, and a file of another language are no
+    tests) and that were added or whose own definition changed between `before` and `after` (None: the work tree). What
+    a test reads (an autouse fixture, `pytestmark`, a constant) does not make it the task's. A support file
+    (`conftest.py`, `__init__.py`, a `tdd.test_support_globs` file) and a file under a link add none; a file that does
+    not parse at `after` gives none: the unit gate speaks for it. A git error gives none and a ledger note
+    (`e2e.task_tests_unread`), so that nothing runs for a task whose tests could not be read, and the step goes on."""
+    directory = e2e_test_dir(wb.cfg.gates.e2e, wb.worktree).rstrip("/")
+    found: list[tuple[str, str]] = []
+    try:
+        for path in _changed_between(wb, before, after):
+            if (
+                not path.startswith(f"{directory}/")
+                or not is_pytest_file(path)
+                or path.rsplit("/", 1)[-1] == "conftest.py"
+                or _matches(wb.cfg.tdd.test_support_globs, path)
+            ):
+                continue
+            text = _source_at(wb, after, path)
+            now = facts_of(text)
+            if not now:
+                continue
+            old = facts_of(_source_at(wb, before, path)) or {}
+            for test in sorted(collectable_tests(text) & now.keys()):
+                was = old.get(test)
+                if was is None or was.parts != now[test].parts:
+                    found.append((path, test))
+    except GitError as exc:
+        log.warning("%s: the task's browser tests could not be read from git: %s", wb.ref.id, exc)
+        wb.emit("e2e.task_tests_unread", before=before, after=after, reason=str(exc)[:300])
+        return ()
+    return tuple(sorted(found))
 
 
 MAX_SNAPSHOT_BYTES = 1_000_000  # an agent-edited file the gates may rewrite is kept this far, to be put back
@@ -2777,14 +2905,22 @@ def _tree_state(wb: Workbench) -> dict[str, tuple[str, bytes | None]]:
 
 
 def _drop_gate_output(
-    wb: Workbench, task: Task, base: str, before: dict[str, tuple[str, bytes | None]], keep: Collection[str] = ()
+    wb: Workbench,
+    task: Task,
+    base: str,
+    before: dict[str, tuple[str, bytes | None]],
+    keep: Collection[str] = (),
+    *,
+    freeze_phase: str | None = "single",
 ) -> None:
     """A gate run is not part of the chore (build output, `test-results/`, a new snapshot baseline, a lock file the
     build rewrote): a path that is new since `before` goes back to `base`, a path the step had edited and a gate
     changed gets the step's content back, and the test-path freeze runs once more. A gate runs agent-written code with
     the tree writable, so a link it planted comes first (L4-SEC-020): it is removed and recorded as a planted link,
     which stops the unit like any other (`stop_on_unsafe`), and every write goes through `write_inside`, never through
-    a path a link stands on. `keep`: the test files a repair chore changed (L4-IMP-091), which the freeze leaves."""
+    a path a link stands on. `keep`: the test files a repair chore changed (L4-IMP-091), which the freeze leaves.
+    `freeze_phase`: the phase the test-path freeze runs as ("single" for a fix chore, "green" for a green step); None
+    skips it, for a red step whose test files are its own work (L4-IMP-101)."""
     after = _tree_state(wb)
     for path in dict.fromkeys([*after, *before]):
         if (link := linked_component(wb.worktree, path)) is not None:
@@ -2802,7 +2938,8 @@ def _drop_gate_output(
     for path in before:
         if path not in after and not _reusable_change(wb, path) and before[path][1] is not None:
             _put(wb, path, before[path][1], None, "e2e run")  # a gate deleted a file the step had written
-    touched += freeze_test_paths(wb, task, base, keep=keep, phase="single")
+    if freeze_phase is not None:
+        touched += freeze_test_paths(wb, task, base, keep=keep, phase=freeze_phase)
     release_replay(wb, touched)
 
 
@@ -2813,7 +2950,10 @@ def _log_tail(wb: Workbench, path: Path | None) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
-    return wb.redactor.redact_text(text[-MAX_LOG_EXCERPT:])
+    # redact the whole log, then cut: a block the cut would split is already gone, and one that the log itself holds
+    # half is removed to the edge by the excerpt rule (the same rule as every failure excerpt)
+    redact = wb.redactor.redact_text
+    return _redact_keys(redact, redact(text)[-MAX_LOG_EXCERPT:])
 
 
 MAX_LOG_EXCERPT = 2000
@@ -2875,6 +3015,120 @@ def _e2e_chore_run(wb: Workbench, scope: E2eScope) -> tuple[str, str]:
         if i in report.tests and report.tests[i].status in ("failed", "error")
     ]
     return reason, excerpter(wb)(report, named[:MAX_LISTED]) if named else ""
+
+
+def _py_files(wb: Workbench) -> frozenset[str]:
+    """Every Python file of the tree (tracked or new, not ignored): what a report's modules are resolved against."""
+    raw = wb.git.run_bytes("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.py", check=False)
+    return frozenset(os.fsdecode(name) for name in raw.split(b"\0") if name)
+
+
+def _e2e_skip_reason(wb: Workbench, unit_ids: Iterable[str]) -> str:
+    """Why the e2e gate cannot tell a task's browser tests from the other tests of its directory (L4-IMP-101), else "":
+    the e2e command selects tests with `-m` or `-k`, so its report holds only part of the directory, or the unit gate
+    reports tests of the same directory (`pytest tests -m browser`), so every unit test would be a browser test."""
+    if option := selecting_option(wb.cfg.gates.e2e.command):
+        return f"the e2e command selects tests with `{option}`, so its report holds only part of the e2e directory"
+    directory = e2e_test_dir(wb.cfg.gates.e2e, wb.worktree).rstrip("/")
+    if shared := shared_with_unit_gate(directory, unit_ids, _py_files(wb)):
+        return f"the e2e directory `{directory}/` also holds tests of the unit gate ({_list(shared)})"
+    return ""
+
+
+def _runnable_browser_tests(
+    wb: Workbench, task: Task, phase: str, tests: tuple[tuple[str, str], ...], unit_ids: Iterable[str]
+) -> tuple[tuple[str, str], ...]:
+    """`tests`, or none when the task-step e2e run is skipped (`_e2e_skip_reason`): no build and no e2e run is paid for,
+    the reason is a ledger note (`e2e.task_run_skipped`) and a log line, and step 3 runs the browser tests as before."""
+    if not tests or not (why := _e2e_skip_reason(wb, unit_ids)):
+        return tests
+    log.warning("%s: task %s: no e2e run in the %s step, verification step 3 runs the browser tests: %s",
+                wb.ref.id, task.key, phase, why)  # fmt: skip
+    wb.emit("e2e.task_run_skipped", task=task.key, phase=phase, reason=why, tests=[f"{p}::{n}" for p, n in tests])
+    return ()
+
+
+def task_runs_e2e(wb: Workbench, red_sha: str, unit_ids: Iterable[str] = ()) -> bool:
+    """Whether the green step that follows the red commit `red_sha` will run the build and the e2e gate (L4-IMP-101):
+    the gate is configured, the red commit has browser tests, and the run is not skipped (`_e2e_skip_reason`).
+    `unit_ids`: the ids of the unit gate's report before the step; the shared-directory test of this very step is not
+    known yet, so the answer may be true for a step that then skips the run (the run deadline's cap is then a little
+    high)."""
+    return (
+        e2e_configured(wb.cfg)
+        and bool(task_browser_tests(wb, f"{red_sha}^", red_sha))
+        and not _e2e_skip_reason(wb, unit_ids)
+    )
+
+
+def _task_e2e_reason(
+    wb: Workbench,
+    task: Task,
+    base: str,
+    tests: Sequence[tuple[str, str]],
+    keep: Collection[str] = (),
+    freeze_phase: str | None = "green",
+    phase: str = "green",
+) -> tuple[str, str]:
+    """After the checks of a step that completes a task (L4-IMP-101): `gates.build` when it is configured, then the e2e
+    gate. The attempt fails only when a browser test of the task (`task_browser_tests`) is in the e2e report as failed
+    or errored, the gate timed out, the report cannot be read, a module of the task did not collect, the build failed
+    or the server was not ready. A task test that the report does not show (not collected, a module name two files
+    fit, only skipped) does not block: it is a ledger note (`e2e.task_tests_unseen`) and a log line, and verification
+    step 3 runs it as before. Returns (the reason the attempt fails, "" when it does not; the failure text of the tests
+    that failed). What the runs write into the tree is put away afterwards, as for a fix chore, so that the commit
+    holds the step's work only."""
+    before = _tree_state(wb)
+    try:
+        return _task_e2e_run(wb, task, tests, phase)
+    finally:
+        _drop_gate_output(wb, task, base, before, keep, freeze_phase=freeze_phase)
+
+
+def _task_e2e_run(wb: Workbench, task: Task, tests: Sequence[tuple[str, str]], phase: str) -> tuple[str, str]:
+    built = run_build_only(wb)
+    if not built.ok:
+        return f"gates.build failed before the e2e gate: {built.findings[0].detail}", ""
+    try:
+        run = run_e2e(wb, name="e2e-task")  # no `must_contain`: pytest-playwright adds `[chromium]` to every id
+    except ServerNotReady as exc:
+        name = exc.log_path.name if exc.log_path is not None else "the gate log"
+        return f"the e2e server was not ready (see {name})", _log_tail(wb, exc.log_path)
+    gate = run.gate
+    report = gate.report
+    if gate.timed_out:
+        return f"the e2e gate {gate.reason}", ""
+    if report is None:
+        return f"the e2e gate produced no readable report ({gate.reason})", ""
+    files = _py_files(wb)
+    task_files = {path for path, _ in tests}
+    directory = e2e_test_dir(wb.cfg.gates.e2e, wb.worktree)  # the report holds only tests under it
+    uncollected = sorted(
+        name for name, file in module_files(report.collection_errors, files, directory).items() if file in task_files
+    )
+    if uncollected:
+        return f"browser tests not collected: {', '.join(uncollected)}", ""
+    match = match_task_tests(report.tests, tests, files, directory)
+    failing: list[str] = []
+    unseen: list[str] = []
+    for path, name in tests:
+        ids = match.found.get((path, name), [])
+        if bad := [i for i in ids if report.tests[i].status in ("failed", "error")]:
+            failing += bad
+        elif not any(report.tests[i].status == "passed" for i in ids):
+            unseen.append(f"{path}::{name}")  # no id, or every id skipped
+    if unseen:
+        ambiguous = f"; ambiguous module name: {_list(match.ambiguous)}" if match.ambiguous else ""
+        log.warning(
+            "%s: task %s: browser tests not seen in the e2e report (verification step 3 runs them as before): %s%s",
+            wb.ref.id, task.key, _list(unseen), ambiguous,
+        )  # fmt: skip
+        wb.emit(
+            "e2e.task_tests_unseen", task=task.key, phase=phase, tests=unseen, ambiguous=match.ambiguous[:MAX_LISTED]
+        )
+    if failing:
+        return f"the task's browser tests do not pass: {_list(failing)}", excerpter(wb)(report, failing[:MAX_LISTED])
+    return "", ""
 
 
 REPAIR_SCOPE_RULE = (
@@ -3334,7 +3588,10 @@ def run_single(
     ci_job = chore_ci_job(_ledger_events(wb), findings)
     e2e_scope = _e2e_chore_scope(wb, findings) if kind == "fix" else None
     guard_notes_before = len(wb.guard_notes)
-    step = step_or_replay(wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job)
+    failing = fix_failure_text(wb, findings) if kind == "fix" else ""  # L4-IMP-102: read once, before the step
+    step = step_or_replay(
+        wb, "single", task, attempt, previous_failure, adds_tests=adds_tests, ci_job=ci_job, failing=failing
+    )
     if step.kind != "ok":
         wb.discard_changes()
         if step.kind == "held":

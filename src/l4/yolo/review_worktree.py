@@ -13,7 +13,7 @@ import logging
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from l4.availability.errors import RoleUnavailable
 from l4.ci.detect import ci_like
@@ -28,6 +28,7 @@ from l4.vcs.names import unit_branch
 from l4.yolo import accept, findings, judge_sandbox, staleness, worktree
 from l4.yolo.admit import done_units
 from l4.yolo.commands import (
+    INCOMPLETE_FIX,
     _admit_worktree,
     _append,
     _entry_of,
@@ -37,6 +38,7 @@ from l4.yolo.commands import (
     _open,
     _plan_id,
     _print_findings,
+    _record_incomplete,
     _stamp,
     _sync,
     _valid,
@@ -47,7 +49,7 @@ from l4.yolo.cycle import REVIEW_KEY, review_batches
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, plan_digest, unit_digest
 from l4.yolo.model import Plan, PlanEvent, ReviewResult, Verdict
 from l4.yolo.plans import plan_files, unit_infos
-from l4.yolo.readiness import PROMPT_VERSION, FreshRefused, delivered_on_target, review_plan_costed
+from l4.yolo.readiness import PROMPT_VERSION, FreshRefused, ReviewIncomplete, delivered_on_target, review_plan_costed
 from l4.yolo.staleness import unit_revs
 from l4.yolo.state import fold_plan
 
@@ -196,7 +198,7 @@ def run_findings_worktree(
     lines = findings.render(plan_id, ctx.target, review, history_of, **options)
     for line in lines:
         ctx.say(line)
-    if not lines:
+    if not lines or (subject is None and not show_all and findings.all_ready(review)):
         ctx.say(f"{plan_id}: every subject of the latest dry run is READY (--all lists them)")
     return ExitCode.OK
 
@@ -205,25 +207,28 @@ def run_findings_worktree(
 
 
 class _Sandboxes:
-    """`sandbox_for` for `review_plan_costed`: `judge_sandbox.choose`, remembering the label and the profile that the
-    recorded event carries, and saying so when the judge runs without bwrap."""
+    """`sandbox_for` for `review_plan_costed`: `judge_sandbox.choose`, remembering the label of each profile that the
+    recorded entries carry, and saying so when a judge runs without bwrap."""
 
     def __init__(self, ctx: Any, say: Any) -> None:
         self.ctx, self.say = ctx, say
-        self.label: str | None = None
-        self.profile: str | None = None
+        self.labels: dict[str, str] = {}  # profile -> the sandbox label its judge ran under
 
     def __call__(self, adapter: str, profile: str) -> Sandbox:
         app, cfg = self.ctx.app, self.ctx.cfg
         sandbox, label = judge_sandbox.choose(
             cfg, app.environ, app.repo, adapter=adapter, in_ci=ci_like(app.environ), profile=profile
         )
-        self.label, self.profile = label, profile
+        self.labels[profile] = label
         if label == "none" and cfg.sandbox.mode == "auto":
             why = judge_sandbox.unsandboxed_reason(app.environ, app.repo)
             if why:
                 self.say(f"judge unsandboxed ({why}): it has no tools and runs in an empty folder")
         return sandbox
+
+    def label_of(self, judge: str | None) -> str | None:
+        """The label of the judge that answered an entry; of the first of them for a batch in parts."""
+        return next((self.labels[n] for n in (judge or "").split(", ") if n in self.labels), None)
 
 
 def _subject_names(plan: Plan) -> set[str]:
@@ -371,6 +376,7 @@ def run_review_worktree(
         **{k: {**line["entry"], "at": line.get("at")} for k, line in cached.items()},
         **ledger,
     }  # the ledger wins: it is the shared record
+    kept = findings.kept_keys(read.events, PROMPT_VERSION) | _kept_in_cache(cached, read.events)
     sandboxes = _Sandboxes(ctx, ctx.say)
     ctx.say(f"plan {plan_id} at the working tree: plan digest {plan_digest(file.text)}")
     try:
@@ -388,7 +394,11 @@ def run_review_worktree(
             revs=dict.fromkeys(infos, snap),
             sandbox_for=sandboxes,
             refuse_fresh_of_prior=record,
+            failed_before=findings.failed_before(read.events, PROMPT_VERSION),
+            kept=kept,
         )
+    except ReviewIncomplete as exc:
+        _incomplete(ctx, store, read, state, admission, exc, parsed, file.text, rev, record, cache_file, sandboxes)
     except FreshRefused as exc:
         raise L4Exit(
             ExitCode.USAGE_ERROR,
@@ -403,6 +413,8 @@ def run_review_worktree(
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: no judge could answer, nothing was recorded: {exc}") from None
     except RevisionMissing as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"review: {exc}") from None
+    for failure in result.failures:  # a judge skipped or discarded on the way (L4-YOLO-096)
+        ctx.say(findings.failure_line(failure))
     batches = review_batches(parsed, result)
     subjects: dict[str, tuple[str, Verdict]] = {
         **{u: ("unit", v) for u, v in result.units.items()},
@@ -411,23 +423,7 @@ def run_review_worktree(
     judged_now = {s: v for s, (_, v) in subjects.items() if v.material and not v.reused_from}
     reused = {s: v for s, (_, v) in subjects.items() if v.reused_from}
     stamp = _stamp()
-    append_cache(
-        cache_file,
-        [
-            {
-                "material": v.material,
-                "prompt_version": PROMPT_VERSION,
-                "judge": sandboxes.profile,
-                "sandbox": sandboxes.label,
-                "kind": subjects[s][0],
-                "subject": s,
-                "entry": _entry(v),
-                "at": stamp,
-            }
-            for s, v in judged_now.items()
-            if not _no_review(v)
-        ],
-    )
+    append_cache(cache_file, _cache_lines({s: (subjects[s][0], v) for s, v in judged_now.items()}, stamp, sandboxes))
     append_run(
         runs_path(ctx.app, plan_id),
         {
@@ -443,18 +439,17 @@ def run_review_worktree(
     limit = f"${shown:.2f}" if shown is not None else "no limit"
     if record:
         ctx.say(f"cost: ${cost:.2f} ({len(judged_now)} judged, {len(reused)} reused)")
-        labels = [sandboxes.label] if sandboxes.label else []
-        judges = [sandboxes.profile] if sandboxes.profile else []
+        answering = findings.judges_answering([*result.units.values(), *batches.values()])
+        labels = [lab for n in (answering or list(sandboxes.labels)) if (lab := sandboxes.labels.get(n))]
         digest = plan_digest(file.text)
-        provenance = {"source": "worktree", "judge": sandboxes.profile, "sandbox": sandboxes.label}
         reviewed: dict[str, Any] = {
             "plan_digest": digest,
             "prompt_version": PROMPT_VERSION,
             "source": "worktree",
             "cost_usd": cost,
             "by": ctx.who(),
-            "units": {u: _recorded(v, ledger, provenance) for u, v in result.units.items()},
-            "batches": batch_entries(parsed, result, batches, lambda v: _recorded(v, ledger, provenance)),
+            "units": {u: _recorded(v, ledger, sandboxes) for u, v in result.units.items()},
+            "batches": batch_entries(parsed, result, batches, lambda v: _recorded(v, ledger, sandboxes)),
             "target_rev": rev,
             "unit_revs": unit_revs(
                 ctx.git, ctx.cfg, parsed.unit_ids(), ctx.target_ref, {u: i.folder for u, i in infos.items()}
@@ -462,8 +457,12 @@ def run_review_worktree(
         }
         if labels:
             reviewed["sandbox"] = "none" if "none" in labels else labels[0]
-        if judges:
-            reviewed["judge"] = judges[0]
+        if answering:
+            reviewed["judge"], reviewed["judges"] = answering[0], answering
+        elif sandboxes.labels:  # no entry names its judge: the first opened
+            reviewed["judge"] = next(iter(sandboxes.labels))
+        if result.failures:
+            reviewed["failures"] = findings.failure_rows(result.failures, material=False)
         events = [
             _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
             _event("plan.reviewed", **reviewed),
@@ -506,15 +505,99 @@ def _entry(verdict: Verdict) -> dict[str, Any]:
     return entry
 
 
-def _recorded(verdict: Verdict, ledger: Mapping[str, Any], provenance: Mapping[str, Any]) -> dict[str, Any]:
+def _recorded(verdict: Verdict, ledger: Mapping[str, Any], sandboxes: _Sandboxes) -> dict[str, Any]:
     """The ledger entry of a verdict. A reuse of a recorded entry keeps `reused_from`. Anything else was judged by this
-    run (`--record` reads no local cache), so the entry says where: `source`, the judge profile and the sandbox."""
+    run (`--record` reads no local cache), so the entry says where: `source`, the judge profile that answered it and
+    the sandbox that judge ran under."""
     entry = _entry(verdict)
     if verdict.reused_from and verdict.material in ledger:
         return entry
     entry.pop("reused_from", None)
+    provenance = {"source": "worktree", "judge": verdict.judge, "sandbox": sandboxes.label_of(verdict.judge)}
     entry.update({k: v for k, v in provenance.items() if v})
     return entry
+
+
+def _kind_of(name: str) -> str:
+    """`unit`, `batch` or `batch-part` (`batch:<id>/<unit or summary>`): the kind of a cache line."""
+    if not name.startswith("batch:"):
+        return "unit"
+    return "batch-part" if "/" in name else "batch"
+
+
+def _cache_lines(judged: Mapping[str, tuple[str, Verdict]], stamp: str, sandboxes: _Sandboxes) -> list[dict[str, Any]]:
+    """One cache line per call judged in this run (L4-YOLO-099): a unit, a batch, and each part of a batch in parts, so
+    the next dry run reuses them by their material keys."""
+    rows: list[tuple[str, str, Verdict]] = []
+    for name, (kind, verdict) in judged.items():
+        rows.append((name, kind, verdict))
+        rows += [(part, "batch-part", pv) for part, pv in verdict.parts if pv.reused_from is None and pv.judge]
+    seen: set[str | None] = set()
+    rows = [r for r in rows if r[2].material not in seen and not seen.add(r[2].material)]  # a part may be listed twice
+    return [
+        {
+            "material": v.material, "prompt_version": PROMPT_VERSION, "judge": v.judge,
+            "sandbox": sandboxes.label_of(v.judge), "kind": kind, "subject": name, "entry": _entry(v), "at": stamp,
+        }
+        for name, kind, v in rows
+        if v.material and not _no_review(v)
+    ]  # fmt: skip
+
+
+def _kept_in_cache(cached: Mapping[str, Mapping[str, Any]], events: Sequence[PlanEvent] = ()) -> set[str]:
+    """The keys of the cached parts that split their batch (L4-YOLO-098): the parts of a dry run that did not finish. A
+    dry run that finished writes the whole-batch line of the batch as well, with the same `at`, so a part counts only
+    when no cached line of its batch is as new as it. A part is also ignored when it is not newer than the plan's
+    latest `plan.reviewed`: a review that finished in CI or with `--local` ended the incomplete one, as it does for the
+    ledger's own parts (`findings.kept_keys`), so the dry run splits the same batches CI does."""
+    reviewed = max((e.at for e in events if e.type == "plan.reviewed"), default="")
+    whole: dict[str, str] = {}
+    for line in cached.values():
+        if line.get("kind") == "batch":
+            subject = str(line.get("subject"))
+            whole[subject] = max(whole.get(subject, ""), str(line.get("at") or ""))
+    return {
+        key
+        for key, line in cached.items()
+        if line.get("kind") == "batch-part"
+        and str(line.get("at") or "") > whole.get(str(line.get("subject")).split("/")[0], "")
+        and str(line.get("at") or "") > reviewed
+    }
+
+
+def _incomplete(
+    ctx: Any,
+    store: Any,
+    read: Any,
+    state: Any,
+    admission: Any,
+    exc: ReviewIncomplete,
+    parsed: Plan,
+    text: str,
+    rev: str,
+    record: bool,
+    cache_file: Path,
+    sandboxes: _Sandboxes,
+) -> NoReturn:
+    """A review that does not finish (L4-YOLO-099): what was answered goes to the local cache, whatever the mode, so the
+    next dry run asks only the rest. `--record` also records `plan.review_incomplete`; a dry run does not move the
+    plan ref. Exit 12 either way."""
+    append_cache(cache_file, _cache_lines({n: (_kind_of(n), v) for n, v in exc.answered.items()}, _stamp(), sandboxes))
+    if record:
+        _record_incomplete(
+            ctx, store, read, state, admission, exc, plan_id=parsed.plan_id, source="worktree",
+            digest=plan_digest(text), merge=parsed.merge, rev=rev, entry=_entry,
+        )  # fmt: skip
+    for failure in exc.failures:
+        ctx.say(findings.failure_line(failure))
+    kept = f"{len(exc.answered)} answered and kept in the local cache, {len(exc.left)} left"
+    ctx.say(f"{parsed.plan_id}: the review is incomplete ({exc.reason}): {kept}")
+    if fix := INCOMPLETE_FIX.get(exc.reason):
+        ctx.say(f"fix: {fix}")
+    raise L4Exit(
+        ExitCode.WAITING_CAPACITY,
+        f"review: the review is incomplete ({exc.reason}): {kept}; nothing was recorded, run it again to ask the rest",
+    )
 
 
 def _review_data(result: ReviewResult, batches: Mapping[str, Verdict]) -> dict[str, Any]:

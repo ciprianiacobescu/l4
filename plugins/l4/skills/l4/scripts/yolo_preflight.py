@@ -40,7 +40,7 @@ PLAN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MAP_KEY = re.compile(r"""^(?:"([^"\\]+)"|'([^']+)'|([A-Za-z0-9_.-]+)):(?:\s+(.*))?$""")
 # Constants held equal to the harness by a test (`l4.config.roles`, `l4.actor`, `l4.provision.catalog`).
 JUDGE_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "fake")
-JUDGE_ROLES = ("judges", "verifier_agent", "clarifier", "s1_judge")
+JUDGE_ROLES = ("judges", "plan_judges", "verifier_agent", "clarifier", "s1_judge")
 HARNESS_ADAPTERS = ("claude-code", "codex", "opencode", "kiro-cli", "copilot-cli", "command", "fake")
 AGENT_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")
 OPENCODE_PIN = "1.18.34"
@@ -330,7 +330,8 @@ def judge_role_message(name: str, role: str, adapter: str) -> str:
     known = adapter if adapter in HARNESS_ADAPTERS else "(not one the harness knows)"
     return (
         f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no tools): an "
-        f"adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of "
+        f"adapter profile in roles.judges, roles.plan_judges, roles.verifier_agent, roles.clarifier or "
+        f"roles.s1_judge must use one of "
         f"{', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
     )
 

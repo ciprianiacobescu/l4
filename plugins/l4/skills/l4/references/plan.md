@@ -105,7 +105,10 @@ Before the person reviews the plan, run the same review yourself and fix what it
    units are judged again, so repeat it after each fix. Exit 0 means every subject is READY.
 3. `l4 yolo findings <id> --worktree --json` (the dry run records nothing, so without `--worktree` it is empty). For each subject read `findings` (`id`, `criterion`, `severity`, `text`, `resolve`)
    and `persistent`. A persistent criterion means the same concern is coming back: fix its cause in the spec, not its
-   wording.
+   wording. A batch with a minor finding of criterion `parts` was reviewed in parts (no judge saw two units' full text
+   together): it is a note, not work, and a READY batch with it needs nothing. If the batch was split because an opencode
+   judge stopped at its output limit, set `options.max_output_tokens` on that judge's profile to the model's maximum
+   output and the batch can often be judged whole (runbook 10.10).
 4. Fix the specs or the plan as each `Resolve:` line says, then go to step 2. Write and fix specs by `references/spec.md`.
 5. When every subject is READY, commit and push, then run `l4 yolo review <id> --worktree --record` (it refuses while
    HEAD is not `origin/<base>`; anything not already on the ledger is judged again, and that verdict is the one
@@ -128,6 +131,12 @@ When no judge can run, first ask CI: `l4 yolo review <id>`. Never run `--force` 
 not even when `accept_by_agents` is true: it accepts the plan with no model review and is a person's decision. Print
 the command for the person:
 `l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
+
+A review that says `the review is incomplete (<reason>)` kept the subjects it answered (`plan.review_incomplete`) and
+asks only the rest at the next run: `l4 yolo status <id>` shows the failures and a `fix:` line (`no_judge`: fix the
+judges named or set `roles.plan_judges`; `timeout`: raise `yolo.review.timeout` or put another judge first in
+`roles.plan_judges`; `job_time`: more job time). Those keys are a person's change on the base branch. Do not review
+again in a loop: one run per cause.
 
 `l4 yolo waive <id> <F-id> --reason "..."` follows the same rule. It is for a plan that waits with
 `accepted_finding_open` on a finding the judge found not addressed. Never waive a finding the judge did not answer:

@@ -378,7 +378,8 @@ EnvName = Annotated[str, AfterValidator(_secret_env_name)]
 
 
 class OpencodeModelLimits(_Strict):
-    """`provider.<id>.models.<model>.limit`: without `output` OpenCode asks the server for 32000 tokens."""
+    """`provider.<id>.models.<model>.limit`: OpenCode 1 asks the server for at most 32000 tokens whatever `output` says,
+    unless `options.max_output_tokens` (at most `output`, below `context`) is set."""
 
     context: int = Field(ge=1)
     output: int = Field(ge=1)
@@ -415,6 +416,9 @@ class OpencodeSteps(_Strict):
 _V2_PROVIDER_RENAMES = {"azure-cognitive-services": "azure", "google-vertex-anthropic": "google-vertex"}
 
 
+MAX_OUTPUT_TOKENS_RANGE = (1024, 256000)  # OpenCode 2's floor when it fits a request to the context, and its clamp
+
+
 class OpencodeOptions(_Strict):
     model_config = ConfigDict(
         extra="ignore", strict=True
@@ -425,6 +429,16 @@ class OpencodeOptions(_Strict):
     reasoning: Literal["none", "minimal", "low", "medium", "high"] | None = None  # the model's `reasoningEffort`
     cli_major: Literal[1, 2] = 1  # which OpenCode CLI the profile runs; 2 is opt-in, never automatic (L4-OCV-001)
     steps: OpencodeSteps | None = None  # the step bounds, `cli_major: 2` only
+    max_output_tokens: int | None = None  # the model's output limit for every request of the profile (L4-FAC-023)
+
+    @field_validator("max_output_tokens", mode="before")
+    @classmethod
+    def _max_output_tokens_is_in_range(cls, value: Any) -> Any:
+        """Only a whole number in the range (a `bool`, a float and a string are refused); the message holds no value."""
+        low, high = MAX_OUTPUT_TOKENS_RANGE
+        if value is not None and (type(value) is not int or not low <= value <= high):
+            raise ValueFree(f"must be a whole number from {low} to {high}")
+        return value
 
     @field_validator("cli_major", mode="before")
     @classmethod
@@ -460,6 +474,21 @@ def opencode_option_problems(options: dict[str, Any], model: str | None) -> list
         return ["options.provider.id must equal the provider part of model (provider/model)"]
     if parsed.provider is not None and model is not None and model.split("/", 1)[-1] not in parsed.provider.models:
         return ["options.provider.models must have an entry (context, output) for the profile's model"]
+    if parsed.provider is not None and parsed.max_output_tokens is not None and model is not None:
+        entry = parsed.provider.models[model.split("/", 1)[-1]]
+        found = []
+        if parsed.max_output_tokens > entry.output:
+            found.append(
+                "options.max_output_tokens is above the output of the model's entry in options.provider.models "
+                "(OpenCode asks for the smaller): raise the entry's output or lower the key"
+            )
+        if parsed.max_output_tokens >= entry.context:  # OpenCode 1 compacts at `context - min(output, key)`
+            found.append(
+                "options.max_output_tokens must be below the context of the model's entry in options.provider.models "
+                "(the prompt and the reply share the window)"
+            )
+        if found:
+            return found
     return _cli_major_problems(parsed, model)
 
 
@@ -550,7 +579,16 @@ class Profile(_Strict):
 
     @model_validator(mode="after")
     def _opencode_options(self) -> "Profile":
-        if self.adapter == "opencode" and (problems := opencode_option_problems(self.options, self.model)):
+        if self.adapter != "opencode":
+            return self
+        problems = opencode_option_problems(self.options, self.model)
+        if not problems and self.context_window is not None and self.options:
+            limit = OpencodeOptions.model_validate(self.options).max_output_tokens
+            if limit is not None and limit >= self.context_window:
+                problems.append(
+                    "options.max_output_tokens must be below context_window (the prompt and the reply share the window)"
+                )
+        if problems:
             raise ValueFree("; ".join(problems))
         return self
 
@@ -572,6 +610,9 @@ class RolesCfg(_Strict):
     clarifier: list[str] = Field(default_factory=list)
     verifier_agent: list[str] = Field(default_factory=list)
     judges: list[str] = Field(default_factory=list)
+    plan_judges: list[str] = Field(
+        default_factory=list
+    )  # optional (L4-YOLO-095): the readiness review's chain; empty: judges
     s1_judge: list[str] = Field(default_factory=list)
     spec_writer: list[str] = Field(default_factory=list)
     delegate: list[str] = Field(default_factory=list)  # optional (L4-AVL-010): answers the questions of units in scope
@@ -912,6 +953,17 @@ class YoloReviewCfg(_Strict):
     max_dependency_chars: int = Field(default=20_000, ge=0)
     accept_after_rounds: int = Field(default=2, ge=1)
     accept_by_agents: bool = False
+    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0 (default): no split before a call,
+    # only after a length stop, a timeout or a part kept by an incomplete review
+    max_batch_chars: int = Field(default=0, ge=0)
+    timeout: Duration = "15m"  # each judge call of the review (L4-YOLO-097)
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout(cls, value: str) -> str:
+        if duration_seconds(value) < DELEGATE_MIN_TIMEOUT_S:
+            raise ValueFree("yolo.review.timeout must be at least 1m")
+        return value
 
 
 class YoloMergeCfg(_Strict):
@@ -1040,8 +1092,9 @@ class L4Config(_Strict):
                 known = profile.adapter if profile.adapter in HARNESS_ADAPTERS else "(not one the harness knows)"
                 raise ValueFree(
                     f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
-                    f"tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or "
-                    f"roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                    f"tools): an adapter profile in roles.judges, roles.plan_judges, roles.verifier_agent, "
+                    f"roles.clarifier or roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; "
+                    f"remove {name} from roles.{role}"
                 )
         return self
 

@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.58 && l4 skills install   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.59 && l4 skills install   # or @<sha>
 l4 --version
 ```
 
@@ -34,9 +34,9 @@ commit it for the team, `--agent NAME` for one agent); run it again after an upg
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.58 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.59 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.58
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.59
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -45,7 +45,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.58`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.59`; that line
   is the only pin. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex characters).
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -79,7 +79,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.58`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.59`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -172,9 +172,13 @@ implementer:
 - A judge of every implementer vendor is vetoed. The harness does not move a task to a profile when no judge of another
   vendor is left (the independence rule). With the judge `claude-judge` alone, a move to `claude-sonnet` is skipped.
   Keep one judge of another vendor, here `codex-judge`.
+- `roles.plan_judges` is the chain of the plan readiness review. Leave it out and the review asks `roles.judges`; list
+  it to put other judges, or another first judge, on the plan review without reordering the judges of your units. A
+  list there replaces `judges` for the review only, and a judge of `judges` that you want in the review goes in it too.
+  The review moves a subject to the next judge when one fails, and keeps what it answered.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.58`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.59`) before you
   edit the config: the schema is strict.
 
 ## 4c. A polyglot repository
@@ -270,6 +274,25 @@ roles:
   <id> (the account does not offer it: ...)`, and `l4 probe` skips it with that reason.
 - `l4 doctor --ci --fix` installs the pinned `copilot 1.0.102` and warms its cache; a Copilot CLI 2 is refused. The
   first 429 ends the step (`rate_limited`) and the next profile takes it. Details: `docs/runbook.md` 10.8.
+
+## 4h. An OpenCode profile's output limit
+
+An opencode profile can say how many tokens its model may write in one reply (harness 0.4.59):
+
+```yaml
+profiles:
+  judge-oc: {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu, options: {max_output_tokens: 65536}}
+```
+
+- **The default is OpenCode's own.** Without the key, OpenCode 1 asks for at most 32000 output tokens, and OpenCode 2
+  asks for the limit its catalog knows for the model, else 32000.
+- **When to set it.** A judge or reviewer whose replies stop with `length` (the ledger shows `last reason: length`, and
+  the failure line now names the key). Set it on that profile, not on every profile.
+- **Use the model's real maximum.** A whole number from 1024 to 256000. A larger value gets an HTTP 400 from the
+  provider (the hello shows it), OpenRouter reserves credits for it, and on OpenCode 1 an implementer's session compacts
+  earlier. The key may not exceed a custom provider's model `output`, must be below its `context` and below `context_window`.
+- **The pin must be 0.4.59 or later before you add the key.** An older harness ignores the key without an error: check
+  the pin is 0.4.59 or later first. Details: `docs/runbook.md` 10.10.
 
 ## 5. Upgrades
 
