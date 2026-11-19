@@ -3,6 +3,7 @@
 L4-OCV-020). No binary is started."""
 
 import json
+import re
 
 from l4.agents.opencode import OUTPUT_TOKEN_ENV, OpenCodeAdapter
 from l4.agents.opencode_v2 import OpenCodeV2Adapter
@@ -29,6 +30,12 @@ def v2(key: bool, model: str = GO_MODEL) -> Profile:
     return Profile(adapter="opencode", model=model, vendor="deepseek", options=options)
 
 
+def normalised(env: dict) -> str:
+    """The hello's configuration text with its scratch directory (a fresh temporary one per call) made equal."""
+    text = env["OPENCODE_CONFIG_CONTENT"]
+    return re.sub(r"l4-opencode2?-probe-[A-Za-z0-9_]+", "l4-probe-X", text)
+
+
 def call_of(run, name: str):
     return next(c for c in reversed(run.calls) if c[0][1] == name)
 
@@ -47,6 +54,11 @@ def v2_error_event(status: int) -> str:
     return json.dumps({"type": "error", "sessionID": "ses_x", "error": {"type": "x", "status": status}}) + "\n"
 
 
+def v2_error_event_with(status: int, message: str) -> str:
+    error = {"type": "x", "status": status, "message": message}
+    return json.dumps({"type": "error", "sessionID": "ses_x", "error": error}) + "\n"
+
+
 # --- OpenCode 1 ---
 
 
@@ -58,12 +70,15 @@ def test_a_v1_hello_runs_with_the_variable_and_the_unchanged_configuration(make_
     _, plain = hello(OpenCodeAdapter(), v1(False), {**V1_VERSION, ("run",): OK}, make_ctx)
     plain_env = call_of(plain, "run")[2]
     assert OUTPUT_TOKEN_ENV not in plain_env
-    assert json.loads(env["OPENCODE_CONFIG_CONTENT"]).keys() == json.loads(plain_env["OPENCODE_CONFIG_CONTENT"]).keys()
+    assert normalised(env) == normalised(plain_env)  # SCN-FAC-52: the hello's configuration equals the run's, whole
+
+
+HOST_VALUE = "99999"
 
 
 def test_the_hosts_own_value_never_reaches_the_hello(make_ctx):
     ctx, run = make_ctx({**V1_VERSION, ("run",): OK})
-    ctx.environ[OUTPUT_TOKEN_ENV] = "99999"
+    ctx.environ[OUTPUT_TOKEN_ENV] = HOST_VALUE
     assert OpenCodeAdapter().probe(v1(False), "hello", ctx).ok
     assert OUTPUT_TOKEN_ENV not in call_of(run, "run")[2]
     assert OpenCodeAdapter().probe(v1(True), "hello", ctx).ok
@@ -76,6 +91,15 @@ def test_the_v1_auth_step_does_not_get_the_variable(make_ctx):
     ctx, run = make_ctx({**V1_VERSION, ("auth", "list"): listing})
     assert OpenCodeAdapter().probe(profile, "auth", ctx).ok
     assert run.calls[-1][0][1:] == ["auth", "list"] and OUTPUT_TOKEN_ENV not in run.calls[-1][2]
+
+
+def test_the_hosts_own_value_never_reaches_the_v1_auth_step(make_ctx):
+    listing = CmdResult(0, (OC / "auth_list.stdout.txt").read_text(), "")
+    for key in (True, False):
+        ctx, run = make_ctx({**V1_VERSION, ("auth", "list"): listing})
+        ctx.environ[OUTPUT_TOKEN_ENV] = HOST_VALUE
+        assert OpenCodeAdapter().probe(v1(key, "google/gemini-3.5-flash", "google"), "auth", ctx).ok
+        assert run.calls[-1][0][1:] == ["auth", "list"] and OUTPUT_TOKEN_ENV not in run.calls[-1][2]
 
 
 def test_a_v1_hello_400_with_the_key_names_the_key(make_ctx):
@@ -123,10 +147,26 @@ def test_the_v2_auth_list_step_keeps_the_configuration_without_the_overlay(make_
     rules = {**V2_VERSION, ("auth", "list"): listing}
     ctx, run = make_ctx(rules)
     assert OpenCodeV2Adapter().probe(v2(True), "auth", ctx).ok
-    keyed = run.calls[-1][2]["OPENCODE_CONFIG_CONTENT"]
+    keyed_env = run.calls[-1][2]
+    assert run.calls[-1][0][1:3] == ["auth", "list"]
     ctx, run = make_ctx(rules)
     assert OpenCodeV2Adapter().probe(v2(False), "auth", ctx).ok
+    keyed = keyed_env["OPENCODE_CONFIG_CONTENT"]
     assert keyed == run.calls[-1][2]["OPENCODE_CONFIG_CONTENT"] and "providers" not in keyed
+    assert OUTPUT_TOKEN_ENV not in keyed_env and OUTPUT_TOKEN_ENV not in run.calls[-1][2]  # no variable in either
+
+
+def test_the_hosts_own_value_never_reaches_a_v2_hello_or_auth_step(make_ctx):
+    for key in (True, False):
+        ctx, run = make_ctx({**V2_VERSION, ("run",): V2_OK})
+        ctx.environ[OUTPUT_TOKEN_ENV] = HOST_VALUE
+        assert OpenCodeV2Adapter().probe(v2(key), "hello", ctx).ok
+        assert all(OUTPUT_TOKEN_ENV not in call[2] for call in run.calls)
+        listing = CmdResult(0, (OC2 / "auth-list-env-key.json").read_text(), "")
+        ctx, run = make_ctx({**V2_VERSION, ("auth", "list"): listing})
+        ctx.environ[OUTPUT_TOKEN_ENV] = HOST_VALUE
+        assert OpenCodeV2Adapter().probe(v2(key), "auth", ctx).ok
+        assert all(OUTPUT_TOKEN_ENV not in call[2] for call in run.calls)
 
 
 def test_a_v2_hello_400_with_the_key_names_the_key(make_ctx):
@@ -137,3 +177,11 @@ def test_a_v2_hello_400_with_the_key_names_the_key(make_ctx):
     assert plain.reason == "opencode2 reported an error (status 400)"
     other = {**V2_VERSION, ("run",): CmdResult(1, v2_error_event(404), "")}
     assert hello(OpenCodeV2Adapter(), v2(True), other, make_ctx)[0].reason == "opencode2 reported an error (status 404)"
+
+
+def test_a_v2_hello_grammar_failure_gets_no_clause(make_ctx):
+    rules = {**V2_VERSION, ("run",): CmdResult(1, v2_error_event_with(400, "grammar binding failed"), "")}
+    out, _ = hello(OpenCodeV2Adapter(), v2(True), rules, make_ctx)
+    assert not out.ok and out.reason == "opencode2 reported an error (status 400)"
+    plain = {**V2_VERSION, ("run",): CmdResult(1, v2_error_event_with(400, "not a grammar problem"), "")}
+    assert hello(OpenCodeV2Adapter(), v2(True), plain, make_ctx)[0].reason.endswith(CLAUSE)

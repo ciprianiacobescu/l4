@@ -85,3 +85,13 @@ def test_a_run_without_the_key_has_no_block_and_no_variable(tmp_path):
     OpenCodeV2Adapter(proc).run(request(tmp_path, profile=profile()))
     assert all("providers" not in c for c in configs(proc))
     assert all(OUTPUT_TOKEN_ENV not in call["env"] for call in proc.calls)
+
+
+@pytest.mark.parametrize("key", [False, True])
+def test_the_hosts_own_value_never_reaches_a_v2_run_or_its_export(tmp_path, key):
+    proc = text_run()
+    options = {"max_output_tokens": 65536} if key else {}
+    host = {OUTPUT_TOKEN_ENV: "99999"}
+    OpenCodeV2Adapter(proc).run(request(tmp_path, profile=profile(**options), host_env=host))
+    assert [c["kind"] for c in proc.calls] == ["run", "export"]
+    assert all(OUTPUT_TOKEN_ENV not in call["env"] and "99999" not in call["env"].values() for call in proc.calls)

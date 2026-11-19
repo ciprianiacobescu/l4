@@ -2,6 +2,7 @@
 `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`, set by the profile alone; the hints that name the key are added by `run()`,
 never by `parse()`."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from l4.agents.base import PermissionPolicy, RunRequest, RunResult
 from l4.agents.opencode import (
     OUTPUT_TOKEN_ENV,
     OpenCodeAdapter,
+    config_content,
     output_limit_env,
     output_limit_hint,
 )
@@ -56,10 +58,14 @@ def keyed(model: str = MODEL, **options) -> Profile:
 PLAIN = Profile(adapter="opencode", model=MODEL, vendor="deepseek")
 
 
-def run_env(tmp_path: Path, profile: Profile, mode: str) -> dict[str, str]:
+HOST_VALUE = "99999"  # the host's own value of the variable: it must never reach a CLI
+
+
+def run_env(tmp_path: Path, profile: Profile, mode: str, host_env: dict[str, str] | None = None) -> dict[str, str]:
     proc = FakeProc(OK_STREAM)
     tmp_path.mkdir(parents=True, exist_ok=True)
-    OpenCodeAdapter(proc).run(request(tmp_path, profile=profile, permission_policy=POLICIES[mode], role=mode))
+    req = request(tmp_path, profile=profile, permission_policy=POLICIES[mode], role=mode, host_env=host_env or {})
+    OpenCodeAdapter(proc).run(req)
     (call,) = proc.calls
     return call["env"]
 
@@ -78,6 +84,37 @@ def test_the_key_is_exported_to_every_mode_and_the_configuration_is_unchanged(tm
     assert with_key["OPENCODE_CONFIG_CONTENT"].replace(str(tmp_path / "a"), "") == without[
         "OPENCODE_CONFIG_CONTENT"
     ].replace(str(tmp_path / "b"), "")
+
+
+@pytest.mark.parametrize("mode", ["implement", "judge", "read_only"])
+def test_the_hosts_own_value_never_reaches_a_v1_run(tmp_path, mode):
+    host = {OUTPUT_TOKEN_ENV: HOST_VALUE}
+    assert OUTPUT_TOKEN_ENV not in run_env(tmp_path / "a", PLAIN, mode, host)
+    assert run_env(tmp_path / "b", keyed(), mode, host)[OUTPUT_TOKEN_ENV] == "65536"
+
+
+RESULT_DIR = Path("/tmp/l4-step/result")
+# sha256 of `config_content(policy, RESULT_DIR, model, None, None)` as rendered by 0.4.58 (f0bc8a3c, the commit before
+# this change): the same render code, run from a worktree of that commit. A model of the free tier differs in judge and
+# read-only mode only.
+RENDERED_0458 = {
+    ("opencode-go/deepseek-v4.1-flash", "implement"): "0f446bd97cf3882281f86ed59ed97e8504f3406cc964ffdcab8278c682f13ff5",  # noqa: E501
+    ("opencode-go/deepseek-v4.1-flash", "judge"): "05a67845b1f061e5ec1186c86d59b8ab3a8857ef3827eb26d4d6b13e29dcad7d",
+    ("opencode-go/deepseek-v4.1-flash", "read_only"): "d55c29175f5e4e4a2ff81fd539c9ac562197e6345c24ce001ca1e98c41940a5a",  # noqa: E501
+    ("opencode/big-pickle", "implement"): "0f446bd97cf3882281f86ed59ed97e8504f3406cc964ffdcab8278c682f13ff5",
+    ("opencode/big-pickle", "judge"): "bac274efe82d69b39a7dddc6d4a489efdf0b063498338ef5790d7d385428706a",
+    ("opencode/big-pickle", "read_only"): "30cb7a6d38b4270595ab6bfea6576ad402a1f99115113e761db014df0071775a",
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("mode", ["implement", "judge", "read_only"])
+@pytest.mark.parametrize("model", [MODEL, "opencode/big-pickle"])
+def test_without_the_key_the_v1_configuration_is_the_one_of_0458_byte_for_byte(model, mode):
+    """SCN-FAC-53: head's text without the key equals 0.4.58's, pinned by hash, not only by a comparison inside head."""
+    text = config_content(POLICIES[mode], RESULT_DIR, model, None, None)
+    assert hashlib.sha256(text.encode()).hexdigest() == RENDERED_0458[(model, mode)]
+    keyed_options = keyed(model).opencode_options()
+    assert config_content(POLICIES[mode], RESULT_DIR, model, keyed_options, None) == text  # the key is not in it
 
 
 def test_the_other_options_of_a_profile_do_not_export_it(tmp_path):

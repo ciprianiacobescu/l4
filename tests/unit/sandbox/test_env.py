@@ -19,6 +19,7 @@ HOST = {
     "CLAUDECODE": "1",
     "GITHUB_OUTPUT": "/tmp/out",
     "CI_JOB_TOKEN": "job-token-123456",
+    "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX": "99999",  # L4-FAC-023: only the profile sets it
 }
 
 

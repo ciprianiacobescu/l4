@@ -100,7 +100,7 @@ def test_prv_001_an_unreachable_provider_is_a_note_not_a_failure(make_ctx, monke
     assert result.status == "pass" and "mag provider 192.0.2.10:10100 unreachable" in result.message
 
 
-def _two_providers_ctx(make_ctx, monkeypatch, *, key: int | None = None):
+def _two_providers_ctx(make_ctx, monkeypatch, *, key: int | None = None, big: int = 65536):
     """SCN-FAC-58: two custom-provider judge profiles, one whose model entry allows 65536 and one that allows 16384."""
     import copy
 
@@ -112,7 +112,7 @@ def _two_providers_ctx(make_ctx, monkeypatch, *, key: int | None = None):
     monkeypatch.setitem(factory.ADAPTERS, "opencode", lambda: Scripted(True, True))
     monkeypatch.setattr(provider, "TRANSPORT", httpx.MockTransport(lambda request: httpx.Response(401)))
     profiles = {}
-    for name, output in (("big", 65536), ("small", 16384)):
+    for name, output in (("big", big), ("small", 16384)):
         profile = copy.deepcopy(PROVIDER_PROFILE)
         profile["options"]["provider"]["models"][MODEL]["output"] = output
         if key is not None and name == "big":
@@ -136,6 +136,14 @@ def test_prv_001_notes_a_custom_provider_that_the_default_output_limit_caps(make
     assert result.message.count("asks for at most 32000") == 1
     assert result.message.index("big provider 192.0.2.10:10100 reachable") < result.message.index(NOTE)
     assert result.status == "pass"  # a note never changes the status
+
+
+def test_prv_001_the_output_limit_note_starts_above_32000(make_ctx, monkeypatch):
+    """L4-FAC-023: "above 32000": an entry of exactly the default is not capped by it, one token more is."""
+    at = checks_provision._prv_001(_two_providers_ctx(make_ctx, monkeypatch, big=32000))
+    assert "asks for at most" not in at.message and at.status == "pass"
+    above = checks_provision._prv_001(_two_providers_ctx(make_ctx, monkeypatch, big=32001))
+    assert "big asks for at most 32000 output tokens although its model entry allows 32001" in above.message
 
 
 def test_prv_001_the_output_limit_note_goes_with_the_key(make_ctx, monkeypatch):
