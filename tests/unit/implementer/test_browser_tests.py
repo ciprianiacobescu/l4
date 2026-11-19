@@ -82,3 +82,33 @@ def test_unit_ids_in_the_e2e_directory_are_shared():
     assert shared_with_unit_gate("tests", ids, files) == sorted(ids)
     assert shared_with_unit_gate("e2e", ids, files) == []
     assert shared_with_unit_gate("tests/browser", ids, files) == ["tests.browser.test_b::test_2[x]"]
+
+
+def test_a_capitalised_test_module_is_a_module_not_a_class():
+    files = {"e2e/Layout_test.py", "e2e/test_layout.py"}
+    plain = [("e2e/Layout_test.py", "test_width")]
+    shape = "e2e.Layout_test::test_width[chromium]"
+    assert match_task_tests([shape], plain, files).found == {plain[0]: [shape]}
+    in_class = [("e2e/Layout_test.py", "TestA.test_x")]
+    shape = "e2e.Layout_test.TestA::test_x"
+    assert match_task_tests([shape], in_class, files).found == {in_class[0]: [shape]}
+    assert match_task_tests([shape], [("e2e/Layout_test.py", "test_x")], files).found == {}  # the class is not dropped
+
+
+def test_a_rootdir_relative_id_prefers_the_file_in_the_e2e_directory_over_an_exact_match_outside_it():
+    files = {"test_layout.py", "e2e/test_layout.py", "e2e/pytest.ini", "e2e/other/test_layout.py"}
+    tests = [("e2e/test_layout.py", "test_width")]
+    shape = "test_layout::test_width[chromium]"
+    assert match_task_tests([shape], tests, files).found == {}  # no directory named: the exact path wins, as before
+    assert match_task_tests([shape], tests, files, directory="e2e").ambiguous == [shape]  # two files fit inside
+    only = files - {"e2e/other/test_layout.py"}
+    assert match_task_tests([shape], tests, only, directory="e2e").found == {tests[0]: [shape]}
+    assert match_task_tests([shape], tests, only, directory="e2e/").found == {tests[0]: [shape]}
+    outside = [("test_layout.py", "test_width")]  # a test outside the directory is never the report's
+    assert match_task_tests([shape], outside, only, directory="e2e").found == {}
+    assert module_files(["test_layout"], only, directory="e2e") == {"test_layout": "e2e/test_layout.py"}
+    assert module_files(["test_layout"], only) == {"test_layout": "test_layout.py"}
+
+
+def test_a_sibling_directory_with_the_same_prefix_is_not_shared_with_the_unit_gate():
+    assert shared_with_unit_gate("e2e", ["e2e_utils.test_u::t"], {"e2e_utils/test_u.py"}) == []

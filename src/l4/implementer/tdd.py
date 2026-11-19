@@ -3099,12 +3099,13 @@ def _task_e2e_run(wb: Workbench, task: Task, tests: Sequence[tuple[str, str]], p
         return f"the e2e gate produced no readable report ({gate.reason})", ""
     files = _py_files(wb)
     task_files = {path for path, _ in tests}
+    directory = e2e_test_dir(wb.cfg.gates.e2e, wb.worktree)  # the report holds only tests under it
     uncollected = sorted(
-        name for name, file in module_files(report.collection_errors, files).items() if file in task_files
+        name for name, file in module_files(report.collection_errors, files, directory).items() if file in task_files
     )
     if uncollected:
         return f"browser tests not collected: {', '.join(uncollected)}", ""
-    match = match_task_tests(report.tests, tests, files)
+    match = match_task_tests(report.tests, tests, files, directory)
     failing: list[str] = []
     unseen: list[str] = []
     for path, name in tests:

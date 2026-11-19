@@ -119,9 +119,11 @@ of a module that does map to a task file stays refusing: that module's tests err
 Matching a report id to a task test (`browser_tests.match_task_tests`): the module of an id is resolved with
 `evidence.testsran.file_of_test(id, tree, tree)` over every Python file of the tree (tracked, or new and not ignored): the
 exact path wins, else the one file whose path ends with the classname's module path, because pytest writes the classname
-from its rootdir (`test_layout`, not `e2e.test_layout`, under an `e2e/pytest.ini`). Two files that fit give no answer: the
-id is left out, listed in `ambiguous` and logged, never guessed. The class between module and function (the trailing
-capitalised parts of the classname) must be the test's own class, so `TestA::test_x` is not `TestB.test_x` and a
+from its rootdir (`test_layout`, not `e2e.test_layout`, under an `e2e/pytest.ini`); a file inside the e2e directory wins
+over an exact match outside it (a `test_layout.py` at the repository root), since the report holds only tests under that
+directory. Two files that fit give no answer: the id is left out, listed in `ambiguous` and logged, never guessed. The
+class between module and function (the parts of the classname after the module so resolved, so `e2e.Layout_test` is a
+module, not a class) must be the test's own class, so `TestA::test_x` is not `TestB.test_x` and a
 module-level function has none; the function name ends at a `[param]` suffix.
 
 Lists use `_list` (at most `MAX_LISTED`). Every other test of the e2e report, failing or not, and the gate's exit code
@@ -157,9 +159,11 @@ that is committed is the tree the test gate tested, so `keep_tested` stays right
   When not empty, `render_prompt` adds after the unfrozen and named blocks: `# Browser tests of this task` and the
   sentence "After your step the harness builds the app, serves it and runs the e2e gate; this task is not green while
   one of these browser tests, which its red step wrote, fails there (one the report does not show is not judged here: it
-  is run at verification). You cannot run them in this sandbox. They are frozen like the other red tests: if one is
-  wrong, report status blocked with one technical question whose first option is the exact edit." followed by a data
-  block `browser tests of this task` with one `one_line` per test.
+  is run at verification). You cannot run them in this sandbox. " and, when `tdd.test_globs` covers the e2e directory
+  (`PromptContext.e2e_frozen`, as for the red prompt below), "They are frozen like the other red tests: if one is wrong,
+  report status blocked with one technical question whose first option is the exact edit.", else "This project's test
+  globs do not cover the e2e directory, so they are not frozen: you may correct one that is wrong."; then a data block
+  `browser tests of this task` with one `one_line` per test.
 - Red: the existing `ctx.e2e_dir` paragraph gains one sentence: "The step that completes this task runs them with the app
   served[ and they are frozen after this step], so check what each one expects against the spec: a page a test builds
   itself (`page.set_content`) has the browser's default styles, not the app's." (it is the green step, or this very step

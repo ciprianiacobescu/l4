@@ -107,7 +107,7 @@ COLLECTABLE = (
 )
 
 
-def test_only_what_pytest_would_collect_is_a_browser_test(make_bench):
+def test_scn_imp_562_only_what_pytest_would_collect_is_a_browser_test(make_bench):
     """Finding 1: a fixture or a helper named `test*`, a method of a class that is not `Test*` or that has an
     `__init__`, and a helper module that `python_files` does not match are no tests."""
     bench = bench_with(make_bench)
@@ -174,12 +174,14 @@ def test_a_test_outside_the_e2e_directory_is_not_a_browser_test(make_bench):
 # 2. green runs them last (D3, D4, D5, D6)
 
 
-def browser_red(browser: str = BROWSER, extra: dict[str, str] | None = None) -> Step:
+def browser_red(
+    browser: str = BROWSER, extra: dict[str, str] | None = None, module: str = "e2e/test_layout.py"
+) -> Step:
     return Step(
         writes={
             "tests/test_discount.py": TESTS,
             "src/pytdd/pricing.py": STUB,
-            "e2e/test_layout.py": browser,
+            module: browser,
             **(extra or {}),
         },
         structured=result(
@@ -442,7 +444,7 @@ def test_a_collection_error_of_the_tasks_file_fails_the_attempt(make_bench, monk
 ROOT_WIDTH = "test_layout::test_width[chromium]"  # pytest's classname under an `e2e/pytest.ini`: no `e2e.` prefix
 
 
-def test_a_rootdir_relative_report_id_is_matched_by_the_module_suffix(make_bench, monkeypatch):
+def test_scn_imp_563_a_rootdir_relative_report_id_is_matched_by_the_module_suffix(make_bench, monkeypatch):
     """Finding 3: both id shapes name the task's test."""
     bench, red = red_then(make_bench, [green_step(), green_step()])
     calls: list = []
@@ -457,7 +459,7 @@ def test_a_rootdir_relative_report_id_is_matched_by_the_module_suffix(make_bench
     assert unseen_of(bench) == []
 
 
-def test_two_modules_that_fit_the_suffix_leave_the_id_unseen_and_logged(make_bench, monkeypatch, caplog):
+def test_scn_imp_563_two_modules_that_fit_the_suffix_leave_the_id_unseen_and_logged(make_bench, monkeypatch, caplog):
     """Finding 3: with `e2e/test_layout.py` and `e2e/other/test_layout.py`, `test_layout::test_width` is not guessed."""
     bench = make_bench([browser_red(), green_step()], e2e=e2e_config(free_port()))
     commit_files(bench, {"e2e/other/test_layout.py": BROWSER})
@@ -479,7 +481,7 @@ CLASSES = (
 A_X, B_X = "e2e.test_layout.TestA::test_x[chromium]", "e2e.test_layout.TestB::test_x[chromium]"
 
 
-def test_a_class_test_matches_only_its_own_class(make_bench, monkeypatch):
+def test_scn_imp_563_a_class_test_matches_only_its_own_class(make_bench, monkeypatch):
     """Finding 5: `TestA::test_x` passing does not stand for `TestB.test_x`."""
     bench, red = red_then(make_bench, [green_step()], red=browser_red(CLASSES))
     calls: list = []
@@ -523,6 +525,54 @@ def test_a_collection_error_of_an_ambiguous_module_is_unseen(make_bench, monkeyp
     assert run_green(bench.wb, TASK, red, attempt=1).status == "ok"
 
 
+def test_a_failing_test_of_a_capitalised_test_module_is_refused(make_bench, monkeypatch):
+    """Round 2: `e2e/Layout_test.py` is a module, not the class `Layout_test` of `e2e.py`: its failure is the task's."""
+    bench, red = red_then(make_bench, [green_step()], red=browser_red(module="e2e/Layout_test.py"))
+    calls: list = []
+    capital = "e2e.Layout_test::test_width[chromium]"
+    stub_e2e(monkeypatch, bench, calls, statuses={capital: "failed"}, details={capital: "E   assert 1508 == 1500"})
+    green = run_green(bench.wb, TASK, red, attempt=1)
+    assert green.status == "failed" and capital in green.reason, green.reason
+    assert "assert 1508 == 1500" in green.excerpt and unseen_of(bench) == []
+
+
+def test_a_root_test_of_the_same_name_does_not_hide_the_e2e_directorys_failing_test(make_bench, monkeypatch):
+    """Round 2: under an `e2e/pytest.ini` the id is `test_layout::...`; the exact path `test_layout.py` at the root of
+    the repository is not what the e2e run ran, the file in the e2e directory is."""
+    bench = make_bench([browser_red(), green_step()], e2e=e2e_config(free_port()))
+    commit_files(bench, {"test_layout.py": "def test_width():\n    assert 1\n", "e2e/pytest.ini": "[pytest]\n"})
+    red = run_red(bench.wb, TASK, attempt=1)
+    assert red.status == "ok", red.reason
+    calls: list = []
+    stub_e2e(monkeypatch, bench, calls, statuses={ROOT_WIDTH: "failed"}, details={ROOT_WIDTH: "E   assert 1 == 2"})
+    green = run_green(bench.wb, TASK, red, attempt=1)
+    assert green.status == "failed" and ROOT_WIDTH in green.reason, green.reason
+    assert unseen_of(bench) == []
+
+
+def test_a_collection_error_under_an_e2e_rootdir_is_the_e2e_files_not_the_root_files(make_bench, monkeypatch):
+    bench = make_bench([browser_red(), green_step()], e2e=e2e_config(free_port()))
+    commit_files(bench, {"test_layout.py": "def test_width():\n    assert 1\n"})
+    red = run_red(bench.wb, TASK, attempt=1)
+    calls: list = []
+    stub_e2e(monkeypatch, bench, calls, statuses={}, collection=("test_layout",))
+    green = run_green(bench.wb, TASK, red, attempt=1)
+    assert green.status == "failed" and green.reason == "browser tests not collected: test_layout", green.reason
+
+
+def test_a_collection_error_of_an_e2e_module_that_is_not_the_tasks_does_not_refuse_green(make_bench, monkeypatch):
+    """The false-refusal side of the collection check: a broken module the task did not write is the base's."""
+    bench = make_bench([browser_red(), green_step()], e2e=e2e_config(free_port()))
+    commit_files(bench, {"e2e/test_broken.py": "import not_a_module_anywhere\n\n\ndef test_old():\n    assert 1\n"})
+    red = run_red(bench.wb, TASK, attempt=1)
+    assert red.status == "ok", red.reason
+    calls: list = []
+    stub_e2e(monkeypatch, bench, calls, statuses={WIDTH: "passed"}, collection=("e2e.test_broken",))
+    green = run_green(bench.wb, TASK, red, attempt=1)
+    assert green.status == "ok", green.reason
+    assert unseen_of(bench) == []
+
+
 # 2b. when the task-step run is skipped (finding 4)
 
 
@@ -534,7 +584,7 @@ def build_probe(bench) -> None:
     commit_files(bench, {"scripts/build.py": BUILD_OK})
 
 
-def test_a_selecting_e2e_command_skips_the_task_step_run(make_bench, monkeypatch):
+def test_scn_imp_564_a_selecting_e2e_command_skips_the_task_step_run(make_bench, monkeypatch):
     config = e2e_config(free_port())
     config["command"] += " -m browser"
     bench = make_bench([browser_red(), green_step()], e2e=config, build=[f"{sys.executable} scripts/build.py"])
@@ -550,7 +600,7 @@ def test_a_selecting_e2e_command_skips_the_task_step_run(make_bench, monkeypatch
     assert "# Browser tests of this task" not in bench.adapter.requests[1].prompt  # the prompt promises no run
 
 
-def test_an_e2e_directory_that_holds_unit_tests_skips_the_task_step_run(make_bench, monkeypatch):
+def test_scn_imp_564_an_e2e_directory_that_holds_unit_tests_skips_the_task_step_run(make_bench, monkeypatch):
     config = e2e_config(free_port())
     config["command"] = config["command"].removesuffix(" e2e") + " tests"  # `pytest tests`: the unit gate's directory
     bench = make_bench(
@@ -653,7 +703,7 @@ def test_scn_imp_554_a_passing_browser_test_lets_the_task_finish_as_already_sati
 
 
 def test_the_green_prompt_names_the_browser_tests_and_says_the_harness_runs_them():
-    text = render_prompt("green", prompt_ctx(browser_tests=("e2e/test_layout.py::test_width",))).text
+    text = render_prompt("green", prompt_ctx(browser_tests=("e2e/test_layout.py::test_width",), e2e_frozen=True)).text
     assert "# Browser tests of this task" in text
     assert "After your step the harness builds the app, serves it and runs the e2e gate" in text
     assert (
@@ -662,6 +712,23 @@ def test_the_green_prompt_names_the_browser_tests_and_says_the_harness_runs_them
     )
     assert "report status blocked with one technical question whose first option is the exact edit" in text
     assert data_block("browser tests of this task", "- e2e/test_layout.py::test_width") in text
+
+
+def test_the_green_prompt_says_the_browser_tests_are_frozen_only_when_the_test_globs_cover_them():
+    browser = ("e2e/test_layout.py::test_width",)
+    separator = data_block("browser tests of this task", "- e2e/test_layout.py::test_width")
+
+    def section(**over: object) -> str:  # the browser-test block: the rest of the prompt speaks of frozen tests too
+        text = render_prompt("green", prompt_ctx(browser_tests=browser, **over)).text
+        return text.split("# Browser tests of this task", 1)[1].split(separator)[0]
+
+    frozen = section(e2e_frozen=True)
+    assert "They are frozen like the other red tests" in frozen and "not frozen" not in frozen
+    assert "report status blocked with one technical question whose first option is the exact edit" in frozen
+    open_ = section()
+    assert "frozen like the other red tests" not in open_ and "report status blocked" not in open_
+    assert "so they are not frozen: you may correct one that is wrong" in open_
+    assert "You cannot run them in this sandbox" in frozen and "You cannot run them in this sandbox" in open_
 
 
 def test_a_green_prompt_without_browser_tests_is_unchanged():

@@ -187,14 +187,14 @@ END = "-----END " + "RSA PRIVATE " + "KEY" + "-----"
 KEY_LINES = [f"MIIEowIBAAKCAQEA{n:02}" + "q" * 20 for n in range(6)]
 
 
-def test_an_end_marker_without_its_begin_removes_the_key_lines_before_it():
+def test_an_end_marker_without_its_begin_removes_the_key_lines_before_it():  # SCN-VER-311
     """The JUnit reader keeps the last 4,000 characters of a body, so the BEGIN marker can be gone."""
     body = "\n".join([*(f"E   {line}" for line in KEY_LINES), f"E   {END}", "E   after the key", "tests/t.py:3: Error"])
     text = case_text(case("t::a", body), redact=Redactor({}).redact_text)
     assert "MIIEow" not in text and "qqqq" not in text and "after the key" in text
 
 
-def test_a_begin_marker_without_its_end_removes_everything_after_it():
+def test_a_begin_marker_without_its_end_removes_everything_after_it():  # SCN-VER-311
     """The message is cut at 500 characters, so the END marker can be gone."""
     message = "\n".join(["first line", BEGIN, *KEY_LINES])
     text = case_text(case("t::a", message=message), redact=Redactor({}).redact_text)
@@ -215,7 +215,7 @@ def test_the_run_retry_excerpt_has_the_same_protection():
 # finding 8 and F7: a collection error's excerpt
 
 
-def test_a_collection_excerpt_is_cut_at_eight_lines_like_a_tests():
+def test_a_collection_excerpt_is_cut_at_eight_lines_like_a_tests():  # SCN-VER-311
     from l4.implementer.excerpt import collection_case_excerpt
 
     detail = "\n".join(f"E   line {n}" for n in range(20))

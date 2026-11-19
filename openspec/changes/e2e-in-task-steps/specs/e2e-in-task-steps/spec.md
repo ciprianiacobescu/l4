@@ -36,9 +36,11 @@ step SHALL record `e2e.task_tests_unseen{task, phase, tests, ambiguous}` and log
 verification step 3 runs them as before. A report id is matched to a task test by its module and its function:
 `evidence.testsran.file_of_test` resolves the module (the exact path wins; else the one Python file of the tree whose
 path ends with the classname's module path, since pytest writes the classname from its rootdir, `test_layout` under an
-`e2e/pytest.ini` and `e2e.test_layout` otherwise), two files that fit give no answer (the id is left out and listed in
-`ambiguous`, never guessed), the class between module and function must be the test's own class (`TestA::test_x` is not
-`TestB.test_x`, and a module-level function has none), and a `[param]` suffix is ignored. `must_contain` is not used,
+`e2e/pytest.ini` and `e2e.test_layout` otherwise; a file inside the e2e directory wins over an exact match outside it,
+since the report holds only tests under that directory), two files that fit give no answer (the id is left out and listed
+in `ambiguous`, never guessed), the class is the part of the classname after the module so resolved (`e2e.Layout_test` is
+the module `e2e/Layout_test.py`, not a class), it must be the test's own class (`TestA::test_x` is not `TestB.test_x`,
+and a module-level function has none), and a `[param]` suffix is ignored. `must_contain` is not used,
 because those exact ids are not known before the run. The other tests of the e2e report and the gate's exit code SHALL
 NOT be judged at the step: a task step has no e2e baseline, and step 3 judges the whole gate. A build that fails SHALL
 fail the attempt with `gates.build failed before the e2e gate: ...` and no e2e run. A server that is not ready SHALL fail
@@ -66,8 +68,9 @@ whose page is its own fails before and after the code alike. When `gates.e2e` is
 browser tests, no step of the task SHALL run it (a gate with a command only is refused at step 3 as before). The green
 prompt SHALL list the task's browser tests (`path::name`) in a block that says the harness builds and serves the app
 after the step and runs them, that the task is not green while one of them fails, that one the report does not show is
-run at verification, and that they are frozen like the other red tests (a wrong one: a technical question whose first
-option is the edit, L4-IMP-015); the red prompt's browser-test paragraph SHALL say that the step that completes the task
+run at verification, and, only when `tdd.test_globs` covers the e2e directory (`PromptContext.e2e_frozen`), that they
+are frozen like the other red tests (a wrong one: a technical question whose first option is the edit, L4-IMP-015; else
+the prompt says they are not frozen and a wrong one may be corrected); the red prompt's browser-test paragraph SHALL say that the step that completes the task
 runs them with the app served, and that they are frozen after red only when `tdd.test_globs` covers the e2e directory.
 Cost: at most one build and one e2e gate run per green attempt of a task with browser tests that passed every other
 check, none for any other task, each bounded by `gates.timeout`, and the run deadline's cap of a green step that runs

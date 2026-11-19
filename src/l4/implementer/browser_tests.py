@@ -93,17 +93,30 @@ def selecting_option(command: str) -> str | None:
     return None
 
 
-def _class_of(classname: str) -> str:
-    """The class between module and function of a JUnit classname: its trailing capitalised parts (`Outer.Inner`)."""
+def _locate(classname: str, tree: frozenset[str], directory: str | None = None) -> tuple[list[str], str]:
+    """The files of `tree` that the module of a JUnit classname fits, and the class after the module (`Outer.Inner`,
+    "" for a plain function). The module is the longest leading part that is a file, as `file_of_test` reads it (only a
+    capitalised part can follow it, so `e2e.Layout_test` is the module `e2e/Layout_test.py`, not a class `Layout_test`
+    of `e2e.py`); the exact path wins, else every file whose path ends with the module path (pytest writes the
+    classname from its rootdir). `directory`: the e2e directory. A report of the e2e run holds only tests under it, so a
+    file inside it wins over an exact match outside it (`test_layout` is `e2e/test_layout.py` even when a
+    `test_layout.py` lies at the repository root), and a name that several files fit is narrowed to those inside it."""
     parts = classname.split(".")
-    tail: list[str] = []
-    while parts and parts[-1][:1].isupper():
-        tail.append(parts.pop())
-    return ".".join(reversed(tail))
-
-
-def _function_of(test_id: str) -> str:
-    return test_id.rpartition("::")[2].split("[", 1)[0]
+    inner = directory.strip("/") + "/" if directory else ""
+    for end in range(len(parts), 0, -1):
+        if end < len(parts) and not parts[end][:1].isupper():
+            break
+        path = "/".join(parts[:end]) + ".py"
+        hits = sorted(f for f in tree if f == path or f.endswith("/" + path))
+        if not hits:
+            continue
+        inside = [f for f in hits if f.startswith(inner)] if inner else []
+        if path in inside or (not inside and path in tree):
+            hits = [path]
+        elif inside:
+            hits = inside
+        return hits, ".".join(parts[end:])
+    return [], ""
 
 
 @dataclass
@@ -116,44 +129,41 @@ class TaskMatch:
     ambiguous: list[str] = field(default_factory=list)
 
 
-def _suffix_files(parts: Sequence[str], files: Collection[str]) -> list[str]:
-    """Every file of `files` whose path is the module path `parts` or ends with it after a `/`."""
-    path = "/".join(parts) + ".py"
-    return sorted(f for f in files if f == path or f.endswith("/" + path))
+def _function_of(test_id: str) -> str:
+    return test_id.rpartition("::")[2].split("[", 1)[0]
 
 
-def _module_parts(classname: str) -> list[str]:
-    parts = classname.split(".")
-    cls = _class_of(classname)
-    return parts[: len(parts) - len(cls.split("."))] if cls else parts
-
-
-def match_task_tests(report_ids: Iterable[str], tests: Sequence[tuple[str, str]], files: Collection[str]) -> TaskMatch:
+def match_task_tests(
+    report_ids: Iterable[str],
+    tests: Sequence[tuple[str, str]],
+    files: Collection[str],
+    directory: str | None = None,
+) -> TaskMatch:
     """Which report ids are the ids of `tests` (`(path, name)` pairs; `name` is `test_x` or `Class.test_x`). The module
-    of an id is resolved as `evidence.testsran.file_of_test` does for a JUnit id: the exact path wins, else the one file
-    of `files` (every Python file of the tree) whose path ends with the module path, since pytest writes the classname
-    from its rootdir (`test_layout`, not `e2e.test_layout`, under an `e2e/pytest.ini`). When two files fit, the id is
-    left out and listed in `ambiguous` (when it names a test of the task), not guessed. The class must be the test's
-    own class (a plain function has none), so `TestA::test_x` is never the id of `TestB.test_x`; the function name ends
-    at a `[param]` suffix."""
+    of an id is resolved as `evidence.testsran.file_of_test` does for a JUnit id (`_locate`): the exact path wins, else
+    the one file of `files` (every Python file of the tree) whose path ends with the module path, since pytest writes
+    the classname from its rootdir (`test_layout`, not `e2e.test_layout`, under an `e2e/pytest.ini`); `directory` (the
+    e2e directory) prefers a file inside it to an exact match outside it. When two files fit, the id is left out and
+    listed in `ambiguous` (when it names a test of the task), not guessed. The class is the part of the classname after
+    the module, and must be the test's own (a plain function has none), so `TestA::test_x` is never the id of
+    `TestB.test_x`; the function name ends at a `[param]` suffix."""
     tree = frozenset(files)
     out = TaskMatch()
-    resolutions: dict[str, str | None] = {}  # a report holds many ids of one module
+    located: dict[str, tuple[list[str], str]] = {}  # a report holds many ids of one module
     for test_id in sorted(set(report_ids)):
         classname = test_id.rpartition("::")[0]
-        function, cls = _function_of(test_id), _class_of(classname)
+        function = _function_of(test_id)
         if not function or not classname:
             continue
-        if classname not in resolutions:
-            resolutions[classname] = file_of_test(classname, tree, tree)
-        resolved = resolutions[classname]
-        hits = [resolved] if resolved is not None else _suffix_files(_module_parts(classname), tree)
+        if classname not in located:
+            located[classname] = _locate(classname, tree, directory)
+        hits, cls = located[classname]
         listed = False
         for path, name in tests:
             owner, _, base = name.rpartition(".")
             if owner != cls or base != function or path not in hits:
                 continue
-            if resolved is not None:
+            if len(hits) == 1:
                 out.found.setdefault((path, name), []).append(test_id)
             elif not listed:
                 out.ambiguous.append(test_id)  # two files fit the module of the id: not guessed
@@ -161,10 +171,11 @@ def match_task_tests(report_ids: Iterable[str], tests: Sequence[tuple[str, str]]
     return out
 
 
-def module_files(names: Iterable[str], files: Collection[str]) -> dict[str, str | None]:
-    """The file of each dotted module name of a collection error, None when it is not one file of the tree."""
+def module_files(names: Iterable[str], files: Collection[str], directory: str | None = None) -> dict[str, str | None]:
+    """The file of each dotted module name of a collection error, None when it is not one file (`_locate`)."""
     tree = frozenset(files)
-    return {name: file_of_test(name, tree, tree) for name in names}
+    found = {name: _locate(name, tree, directory)[0] for name in names}
+    return {name: hits[0] if len(hits) == 1 else None for name, hits in found.items()}
 
 
 def shared_with_unit_gate(directory: str, unit_ids: Iterable[str], files: Collection[str]) -> list[str]:

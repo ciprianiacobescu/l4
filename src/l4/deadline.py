@@ -132,8 +132,9 @@ def stop_before_probe() -> None:
 
 def cap_s(phase: str, gates_timeout_s: float, agent_timeout_s: float = AGENT_TIMEOUT_S, *, e2e: bool = False) -> float:
     """The most a step of `phase` is expected to need: the agent's time limit plus one gate for red, green and single;
-    a verification round runs several gates and its judges, so four gates. A green step with `gates.e2e` configured
-    (`e2e`) can also run the build and the e2e gate (L4-IMP-101): three gates."""
+    a verification round runs several gates and its judges, so four gates. `e2e`: whether this green step will run the
+    build and the e2e gate (L4-IMP-101; the caller passes true only when `gates.e2e` is configured, the task has browser
+    tests and the run is not skipped): then three gates."""
     if phase == "verify":
         return 4 * gates_timeout_s
     if phase == "green" and e2e:

@@ -341,8 +341,14 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
             "# Browser tests of this task\nAfter your step the harness builds the app, serves it and runs the e2e "
             "gate; this task is not green while one of these browser tests, which its red step wrote, fails there "
             "(one the report does not show is not judged here: it is run at verification). You cannot run them in "
-            "this sandbox. They are frozen like the other red tests: if one is wrong, report status blocked with one "
-            "technical question whose first option is the exact edit.\n"
+            "this sandbox. "
+            + (
+                "They are frozen like the other red tests: if one is wrong, report status blocked with one "
+                "technical question whose first option is the exact edit.\n"
+                if ctx.e2e_frozen
+                else "This project's test globs do not cover the e2e directory, so they are not frozen: you may "
+                "correct one that is wrong.\n"
+            )
             + data_block(
                 "browser tests of this task",
                 "\n".join(f"- {one_line(t, MAX_REPAIR_LINE_CHARS)}" for t in ctx.browser_tests),
