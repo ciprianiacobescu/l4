@@ -279,11 +279,15 @@ class Subject:
     not_in_full: tuple[str, ...] = ()  # a prerequisite's files the budget cut: listed in `missing`, never blocking (D4)
     groups_only: bool = False  # a batch with no acceptance profile: batch_acceptance does not apply to it
     key_text: str = ""  # `user` with the delivered block left empty: what the material key covers (design D2)
+    part: str = ""  # a part of a batch reviewed in parts (L4-YOLO-098): a unit id, or `summary`
 
     @property
     def name(self) -> str:
-        """The subject as the CLI, the events and the cache name it: a unit id, or `batch:<id>`."""
-        return self.id if self.kind == "unit" else f"batch:{self.id}"
+        """The subject as the CLI, the events and the cache name it: a unit id, `batch:<id>`, or for a part of a batch
+        `batch:<id>/<unit id or summary>`."""
+        if self.kind == "unit":
+            return self.id
+        return f"batch:{self.id}/{self.part}" if self.part else f"batch:{self.id}"
 
 
 GROUPING_NOTE = (
@@ -420,6 +424,108 @@ def _batch_subject(
     return Subject(
         "batch", batch.id, text(delivered), left_out, not_shown, _cut_of(deps, dep_budget), groups_only, text({})
     )
+
+
+SIBLING_CHARS = 6_000  # what a part of a batch shows of every unit it reads in part (L4-YOLO-098)
+_READ_ORDER = "in the order proposal, requirements, specs, bugfix, design, other files, tasks"
+PART_NOTE_UNIT = (
+    "This call reviews one part of the batch: the unit whose folder is shown in full, with each other unit of the "
+    f"batch read in part (its first {SIBLING_CHARS:,} characters, {_READ_ORDER}). Each unit is also reviewed on its "
+    "own, and the batch as a whole from every unit read in part, in other calls. Report what lies between the unit "
+    "shown in full and the other units: contradiction, duplicate_scope, missing_dependency and the interfaces they "
+    "share, and batch_acceptance."
+)
+PART_NOTE_SUMMARY = (
+    f"This call reviews the batch as a whole from every unit read in part (its first {SIBLING_CHARS:,} characters, "
+    f"{_READ_ORDER}). Each unit is also reviewed on its own, and in full with the others read in part, in other "
+    "calls. Report what lies between the units: contradiction, duplicate_scope, missing_dependency and the "
+    "interfaces they share, and batch_acceptance."
+)
+
+
+def _sibling_folder(unit: PlanUnit, folder: FolderText) -> str:
+    """A unit of a batch read in part: its first characters, as a prerequisite is read."""
+    return data_block("folder", _label(f"{unit.id} ({folder.path}), read in part")) + "\n" + _folder_blocks(folder)
+
+
+def _batch_part(
+    plan: Plan,
+    batch: PlanBatch,
+    unit: PlanUnit | None,
+    folders: Mapping[str, FolderText],
+    siblings: Mapping[str, FolderText],
+    deps: Sequence[tuple[str, FolderText | None]],
+    delivered: Mapping[str, str] = {},  # noqa: B006 - read only
+    dep_budget: int = MAX_DEPENDENCY_CHARS,
+    skip: Collection[str] = (),
+) -> Subject:
+    """One call of a batch reviewed in parts (L4-YOLO-098, design D6). With a `unit`: that unit's folder in full as a
+    subject's is shown (its budgets and its cut), its prerequisites outside the batch as a batch shows them, and every
+    other unit of the batch read in part. Without one, the summary part: every unit read in part, the batch's
+    prerequisites outside it by name, no folder in full. `deps` are the prerequisites outside the batch (of `unit`, or
+    of every unit shown). The harness text of a part names no unit and no batch."""
+    units = [u for u in batch.units if u.id not in skip]
+    context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
+    groups_only = batch.acceptance_profile == PROFILE_NONE
+    note = PART_NOTE_SUMMARY if unit is None else PART_NOTE_UNIT
+    read_in_part = [_sibling_folder(u, siblings[u.id]) for u in units if unit is None or u.id != unit.id]
+    in_full = []
+    if unit is not None:
+        shown = data_block("folder", _label(f"{unit.id} ({folders[unit.id].path})"))
+        in_full = [shown + "\n" + _folder_blocks(folders[unit.id])]
+
+    def text(listed: Mapping[str, str]) -> str:
+        if unit is None:
+            names = "\n".join(f"- {d}" for d, _ in deps)
+            before = [data_block("batch prerequisites outside it", _label(names))] if deps else []
+        else:
+            before = _prerequisites(plan, deps)
+        values = {
+            "SUBJECT_KIND": "batch",
+            "SUBJECT_ID": data_block("subject", _label(batch.id)),
+            "ENTRY": data_block("plan entry", _entry(batch))
+            + "\n"
+            + context
+            + "\n"
+            + TASKS_NOTE
+            + ("\n" + GROUPING_NOTE if groups_only else "")
+            + "\n"
+            + note,
+            "DEPENDENCIES": "\n\n".join([*before, _batch_deps(batch.depends_on), _delivered_note(plan, listed)]).strip()
+            or "(none: the batch depends on nothing)",
+            "FOLDERS": "\n\n".join([*in_full, *read_in_part]),
+        }
+        return _fill(MATERIAL_TEMPLATE, values)
+
+    if unit is None:
+        return Subject(
+            "batch", batch.id, text(delivered), (), (), (), groups_only, text({}), part="summary"
+        )  # fmt: skip
+    return Subject(
+        "batch", batch.id, text(delivered), folders[unit.id].left_out, folders[unit.id].binary,
+        _cut_of(deps, dep_budget), groups_only, text({}), part=unit.id,
+    )  # fmt: skip
+
+
+_WORST = {"BLOCKED": 2, "NEEDS_REVISION": 1, "READY": 0}
+
+
+def merge_parts(parts: Sequence[Verdict], cause: str) -> Verdict:
+    """The verdict of a batch reviewed in parts (L4-YOLO-098): the worst verdict of the parts as the judge gave them
+    (not amended: the rules of L4-YOLO-004 and L4-YOLO-023 run once, on this, with the whole batch's cuts), their
+    findings in part order with an exact repeat kept once, their assumptions and `missing` lines joined the same way,
+    and the `missing` line that says no call saw two units in full together."""
+    said = max((p.verdict for p in parts), key=_WORST.__getitem__)
+    findings: list[dict[str, str]] = []
+    for part in parts:
+        findings += [f for f in part.findings if f not in findings]
+    assumptions = list(dict.fromkeys(a for p in parts for a in p.assumptions))
+    missing = list(dict.fromkeys(m for p in parts for m in p.missing))
+    missing.append(
+        f"judged in {len(parts)} parts (each unit in full with the other units read in part, and every unit read in "
+        f"part): no call saw two units of the batch in full together; why: {cause}"
+    )
+    return Verdict(said, tuple(findings), tuple(assumptions), tuple(missing))
 
 
 class FreshRefused(Exception):
@@ -660,9 +766,10 @@ class _Call:
 
 @dataclass
 class _Outcome:
-    kind: str  # "answered" | "none"
+    kind: str  # "answered" | "none" | "split": a whole batch the judge could not answer in one call (L4-YOLO-098)
     verdict: Verdict | None = None
-    judge: str | None = None
+    judge: str | None = None  # who answered, or who stopped the whole batch
+    why: str = ""  # "length" | "timeout", for a split
 
 
 def _failure_text(app: AppContext, detail: str) -> str:
@@ -768,9 +875,11 @@ class _Walk:
             return True
         return False
 
-    def ask(self, call: _Call, *, first: str | None = None) -> _Outcome:
+    def ask(self, call: _Call, *, first: str | None = None, splittable: bool = False) -> _Outcome:
         """The first judge of the chain that is not discarded for this call, and the next after each failure (D2). The
-        verdict is the judge's as `verdict_of` made it: the caller amends it."""
+        verdict is the judge's as `verdict_of` made it: the caller amends it. A whole batch that `splittable` says can
+        be reviewed in parts is not failed by a length stop or a timeout: the outcome is `split` and names the judge
+        (D6)."""
         avoid: set[str] = set()
         schema: tuple[str, str] | None = None  # the last judge that broke the schema on this call, and the paths
         while True:
@@ -793,10 +902,14 @@ class _Walk:
                 self.factory().cool_limited(calls.selected, reply.run)
                 self.out.add(name)
                 self.fail(name, call, "limit", reply.detail)
+            elif reply.status == "timeout" and splittable:
+                return _Outcome("split", judge=name, why="timeout")
             elif reply.status == "timeout":
                 self.fail(name, call, "timeout", reply.detail)
                 self.stop = "timeout"
                 return _Outcome("none")
+            elif reply.length_stop and splittable:
+                return _Outcome("split", judge=name, why="length")
             elif reply.length_stop:
                 avoid.add(name)
                 self.fail(name, call, "length", reply.detail)
@@ -926,6 +1039,7 @@ def review_plan_costed(
     subjects: list[tuple[Subject, str | None]] = []
     result_units: dict[str, Verdict] = {}
     result_batches: dict[str, Verdict] = {}
+    batch_info: dict[str, tuple[PlanBatch, list[PlanUnit], list[tuple[str, FolderText | None]]]] = {}
     for batch in plan.batches:
         for unit in batch.units:
             info, folder = units.get(unit.id), folders[unit.id]
@@ -952,6 +1066,7 @@ def review_plan_costed(
             # the prerequisites of the units reviewed that lie outside the batch, once each, in plan order
             outside = dict.fromkeys(d for u in left for d in u.depends_on if d not in inside)
             batch_deps = [(d, dependency(d)) for d in outside]
+            batch_info[batch.id] = (batch, left, batch_deps)
             subjects.append(
                 (_batch_subject(plan, batch, folders, done, batch_deps, delivered, limits.dependency), None)
             )
@@ -976,19 +1091,111 @@ def review_plan_costed(
         raise RoleUnavailable(walk.role, "no profile is configured for it under roles")
     answered: dict[str, Verdict] = {}  # what this run judged, for a review that does not finish (L4-YOLO-099)
     left_over: list[str] = []
-    for subject, digest, key in asked:
-        call = _Call(subject.name, subject, digest, key)
-        if walk.stop is not None:
-            left_over.append(call.name)
-            continue
-        outcome = walk.ask(call)
-        if outcome.kind != "answered" or outcome.verdict is None:
-            left_over.append(call.name)
-            continue
-        verdict = replace(_amend(outcome.verdict, subject), material=key, judge=outcome.judge)
-        (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
+
+    def keep(name: str, verdict: Verdict) -> None:
         if _reusable({"findings": verdict.findings}):
-            answered[call.name] = verdict
+            answered[name] = verdict
+
+    siblings: dict[str, FolderText] = {}
+
+    def sibling(unit_id: str) -> FolderText:  # a unit of a batch in parts read within SIBLING_CHARS, once
+        if unit_id not in siblings:
+            siblings[unit_id] = read_folder(
+                git, revs[unit_id], units[unit_id].folder, budget=SIBLING_CHARS, file_budget=SIBLING_CHARS,
+                order="prerequisite",
+            )  # fmt: skip
+        return siblings[unit_id]
+
+    def parts_of(subject: Subject) -> list[tuple[Subject, str]]:
+        batch, shown, batch_deps = batch_info[subject.id]
+        inside = {u.id for u in batch.units}
+        read = {u.id: sibling(u.id) for u in shown}
+        built = [
+            _batch_part(
+                plan, batch, u, folders, read, [(d, dependency(d)) for d in u.depends_on if d not in inside],
+                delivered, limits.dependency, done,
+            )
+            for u in shown
+        ]  # fmt: skip
+        built.append(_batch_part(plan, batch, None, folders, read, batch_deps, delivered, limits.dependency, done))
+        return [(part, material_key("batch-part", part.key_text)) for part in built]
+
+    def kept_part(whole: Subject, part: Subject, key: str) -> Mapping[str, Any] | None:
+        entry = prior.get(key)
+        fresh_ask = whole.name in fresh or part.name in fresh
+        return entry if entry is not None and _reusable(entry) and not fresh_ask else None
+
+    def judge_batch(subject: Subject, key: str) -> Verdict | None:
+        """A batch in parts or whole (L4-YOLO-098): None when a call has no answer (its names are in `left_over`)."""
+        shown = len(batch_info[subject.id][1])
+        call = _Call(subject.name, subject, None, key)
+        cause: str | None = None
+        first: str | None = None
+        parts: list[tuple[Subject, str]] | None = None
+        if shown >= 2:
+            if limits.batch > 0 and len(subject.user) > limits.batch:
+                cause = (
+                    f"its material has {len(subject.user)} characters, over yolo.review.max_batch_chars "
+                    f"({limits.batch})"
+                )
+            elif prior:
+                parts = parts_of(subject)
+                if any(kept_part(subject, part, k) is not None for part, k in parts):
+                    cause = "an earlier review run answered a part of it"
+        if cause is None:
+            outcome = walk.ask(call, splittable=shown >= 2)
+            if outcome.kind == "answered" and outcome.verdict is not None:
+                verdict = replace(_amend(outcome.verdict, subject), material=key, judge=outcome.judge)
+                keep(call.name, verdict)
+                return verdict
+            if outcome.kind != "split":
+                left_over.append(call.name)
+                return None
+            first = outcome.judge
+            what = "stopped at the output limit of" if outcome.why == "length" else "timed out on"
+            cause = f"the whole batch {what} {first}"
+        parts = parts or parts_of(subject)
+        rows: list[tuple[str, Verdict]] = []
+        missing: list[str] = []
+        for part, part_key in parts:
+            entry = kept_part(subject, part, part_key)
+            if entry is not None:
+                rows.append((part.name, _reused(entry, part_key, None)))
+                continue
+            outcome = _Outcome("none") if walk.stop is not None else walk.ask(
+                _Call(part.name, part, None, part_key), first=first
+            )  # fmt: skip
+            if outcome.kind != "answered" or outcome.verdict is None:
+                missing.append(part.name)
+                continue
+            raw = replace(outcome.verdict, material=part_key, judge=outcome.judge)
+            keep(part.name, raw)
+            rows.append((part.name, raw))
+        if missing:
+            left_over.extend([call.name, *missing])
+            return None
+        merged = _amend(merge_parts([v for _, v in rows], cause), subject)
+        judges = ", ".join(dict.fromkeys(v.judge for _, v in rows if v.judge))
+        verdict = replace(merged, material=key, judge=judges or None, parts=tuple(rows))
+        keep(call.name, verdict)
+        return verdict
+
+    for subject, digest, key in asked:
+        if walk.stop is not None:
+            left_over.append(subject.name)
+            continue
+        if subject.kind == "batch":
+            verdict = judge_batch(subject, key)
+        else:
+            outcome = walk.ask(_Call(subject.name, subject, digest, key))
+            verdict = None
+            if outcome.kind == "answered" and outcome.verdict is not None:
+                verdict = replace(_amend(outcome.verdict, subject), material=key, judge=outcome.judge)
+                keep(subject.name, verdict)
+            else:
+                left_over.append(subject.name)
+        if verdict is not None:
+            (result_units if subject.kind == "unit" else result_batches)[subject.id] = verdict
     if left_over:
         if walk.sandbox_errors and not answered and all(f.kind == "sandbox" for f in walk.failures):
             raise walk.sandbox_errors[0]  # every judge was refused its sandbox: exit 3, as with one judge (SCN-YOLO-61)

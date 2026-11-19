@@ -172,7 +172,7 @@ Rules for every task:
 
 ## 4. A batch in parts (D6, D8; L4-YOLO-098)
 
-- [ ] 4.1 Write the tests first, in a new `tests/unit/yolo/test_yolo_readiness_parts.py`:
+- [x] 4.1 Write the tests first, in a new `tests/unit/yolo/test_yolo_readiness_parts.py`:
   - SCN-YOLO-276, first:
     - record the prompt text (`fake.requests[i].prompt`) and `verdict.material` of a unit and of a two-unit batch
       under the bound;
@@ -210,7 +210,7 @@ Rules for every task:
     - A `prior` entry under the whole batch's key reuses the batch whole, with no request.
 
   Run them and see them fail.
-- [ ] 4.2 Then add the parts to `src/l4/yolo/readiness.py`: `SIBLING_CHARS`, `PART_NOTE_UNIT` and `PART_NOTE_SUMMARY`
+- [x] 4.2 Then add the parts to `src/l4/yolo/readiness.py`: `SIBLING_CHARS`, `PART_NOTE_UNIT` and `PART_NOTE_SUMMARY`
   as in D6; `Subject.part` and its `name`; `_batch_part` and `_batch_summary`; the three split triggers; `merge_parts`;
   the cause text; and the batch verdict's `parts`. Run the new file and the files named in 3.3.
 
