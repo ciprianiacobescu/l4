@@ -1595,6 +1595,13 @@ The harness writes the field line `- **Answered by:** …` after the Status line
 escalated (L4-DLG-008). Neither is a person's to write: an answer text that holds one is refused as structure
 (L4-QMD-003).
 
+A question the harness raises after a failed attempt, or for a fix chore, MAY hold a `### Harness notes` subsection
+between `### Options` and `### Answer` (L4-IMP-102): the failure text of the tests it is about and why the previous
+attempt was rejected. It is not part of the Context or the Options: what a question names, for what an accepted
+suggestion may unfreeze (L4-IMP-015), is judged against the title, the Context and the Options only. A line of it that
+would read as structure is escaped like any harness-written text, and an answer text that holds the heading is refused
+as structure.
+
 **L4-QMD-002** Parsing MUST be tolerant: status values case-insensitive; missing index table allowed (regenerated);
 an Answer block is "non-empty" when it contains any non-whitespace text after removing HTML comments. An answer
 counts only when its Status is explicitly set to `answered`, `accepted` or `dismissed`, so drafts are never consumed. A
@@ -2729,49 +2736,75 @@ halted with `last failure: the agent step reached its time limit (30m)`, which d
 passed.]
 
 **L4-IMP-101 The step that completes a task runs that task's own browser tests.** A task's *browser tests* SHALL be the
-test functions (`tamper.facts_of`) of the Python files under the e2e test directory (`e2e_test_dir(gates.e2e,
-worktree)`), other than `conftest.py`, `__init__.py` and files of `tdd.test_support_globs`, that the task's red step
-added or whose definition or what they use in their file changed, read from git between the red commit's parent and the
-red commit, so a red that a later run resumes counts the same and nothing of the agent's own record is trusted (between
-the step base and the work tree for a red step that finishes the task as already satisfied). A support file alone (a
-helper in `e2e/conftest.py`) and a file of another language add none. When `gates.e2e` is configured (`command`,
+test functions that pytest would collect, with its default settings, from the Python files under the e2e test directory
+(`e2e_test_dir(gates.e2e, worktree)`) that match `python_files` (`test_*.py`, `*_test.py`; not `conftest.py`, and not a
+file of `tdd.test_support_globs`): a module-level `def test*` or `async def test*` that is not decorated as a fixture,
+and a `test*` method of a module-level class named `Test*` that has no `__init__` (its own or an in-file base's), the
+names `tamper.facts_of` gives (`test_x`, `TestA.test_x`). A fixture or a helper that only happens to be named `test*`, a
+method of a class that is not `Test*`, a helper module and a file of another language are no tests. A browser test is
+the task's when the task's red step added it or changed its own definition, read from git between the red commit's parent
+and the red commit, so a red that a later run resumes counts the same and nothing of the agent's own record is trusted
+(between the step base and the work tree for a red step that finishes the task as already satisfied); a change to what a
+test reads in its file (an autouse fixture, `pytestmark`, a constant) does not make it the task's, and a support file
+alone (a helper in `e2e/conftest.py`) adds none. A git error while reading them gives none, a ledger note
+(`e2e.task_tests_unread`) and a warning, and does not fail the step. When `gates.e2e` is configured (`command`,
 `serve.command` and `serve.ready_url`; `e2e_configured`) and the task has browser tests, its green step SHALL run
 `gates.build` (when it is configured) and then the e2e gate (`run_e2e`, name `e2e-task`, the project's whole e2e command
 as every e2e run of the harness) last: after the test gate, the static gates (L4-IMP-096), the test-at-red run and any
-held check passed, and before its commit. The attempt SHALL fail unless each browser test of the task has an id in the
-report (matched by module and function, `names_test_id`, so a test that pytest-playwright reports once per browser,
-`test_x[chromium]`, counts; `must_contain` is not used, because those exact ids are not known before the run) and each
-of its ids passed or was skipped with at least one passed. In this order: a timed-out gate gives its reason; no readable
-report gives `the e2e gate produced no readable report (<reason>)`; a collection error of one of the task's files gives
-`browser tests not collected: <modules>`; a test with no id gives `the task's browser tests are not in the e2e report:
-<path::name, ...>`; a failing, erroring or only-skipped one gives `the task's browser tests do not pass: <ids>`, and the
-failure text of the failing ones (the retry excerpt, L4-IMP-064) SHALL be the excerpt the next attempt's prompt
-carries. The other tests of the e2e report and the gate's exit code SHALL NOT be judged at the step: a task step has no
-e2e baseline, and step 3 judges the whole gate. A build that fails SHALL fail the attempt with `gates.build failed
-before the e2e gate: ...` and no e2e run. A server that is not ready SHALL fail the attempt with `the e2e server was not
-ready (see <log name>)` and the last 2,000 characters of its log, redacted, as the excerpt; it counts as a failed attempt
-(the agent's code may be what keeps the server from starting) and SHALL NOT be an error of the run; any other refusal of
-`run_e2e` (a format it does not read, no `reports`) stops the run with its exit as for a fix chore (L4-IMP-090). Such a
-failure is no near pass (L4-IMP-100): a near pass stops at the static gates, before the e2e run. What the runs write into
-the tree is put away as for a fix chore (L4-IMP-090: a new path goes back to the base, a path the step had edited gets
-the step's content back, a link a gate planted is removed and recorded, the test-path freeze runs again with the files
-the task may change kept), so the commit holds the tree the test gate tested (L4-IMP-088). A red step that finishes a
-task as already satisfied (L4-IMP-003) SHALL run the task's browser tests the same way before its commit (with no
-test-path freeze: the test files are the step's own), and a failure SHALL fail the red attempt, whose next attempt may
-change the test. A red step that commits a red SHALL NOT run the e2e gate: a browser test's honest red failure is often
-an error raised in the browser library (a locator that waits for a button not built yet), so red could not ask for an
-assertion, and a test whose page is its own fails before and after the code alike. When `gates.e2e` is not configured,
-or the task has no browser tests, no step of the task SHALL run it (a gate with a command only is refused at step 3 as
-before). The green prompt SHALL list the task's browser tests (`path::name`) in a block that says the harness builds and
-serves the app after the step and runs them, that the task is green only when they pass, and that they are frozen like
-the other red tests (a wrong one: a technical question whose first option is the edit, L4-IMP-015); the red prompt's
-browser-test paragraph SHALL say that the green step runs them with the app served and that they are frozen after red.
+held check passed, and before its commit.
+
+The check is fail-safe: an attempt SHALL be refused only for a failure that the e2e run itself shows. In this order: a
+timed-out gate gives its reason; no readable report gives `the e2e gate produced no readable report (<reason>)`; a
+collection error of a module that is one of the task's files gives `browser tests not collected: <modules>`; a browser
+test of the task that the report shows as failed or errored (any of its ids) gives `the task's browser tests do not
+pass: <ids>`, and the failure text of those (the retry excerpt, L4-IMP-064) SHALL be the excerpt the next attempt's
+prompt carries. A browser test of the task that the report does not show SHALL NOT block the step: not collected, a
+module name that cannot be mapped, a test a person's answer removed, a class pytest skipped, or only skipped ids. The
+step SHALL record `e2e.task_tests_unseen{task, phase, tests, ambiguous}` and log that they were not seen and that
+verification step 3 runs them as before. A report id is matched to a task test by its module and its function:
+`evidence.testsran.file_of_test` resolves the module (the exact path wins; else the one Python file of the tree whose
+path ends with the classname's module path, since pytest writes the classname from its rootdir, `test_layout` under an
+`e2e/pytest.ini` and `e2e.test_layout` otherwise), two files that fit give no answer (the id is left out and listed in
+`ambiguous`, never guessed), the class between module and function must be the test's own class (`TestA::test_x` is not
+`TestB.test_x`, and a module-level function has none), and a `[param]` suffix is ignored. `must_contain` is not used,
+because those exact ids are not known before the run. The other tests of the e2e report and the gate's exit code SHALL
+NOT be judged at the step: a task step has no e2e baseline, and step 3 judges the whole gate. A build that fails SHALL
+fail the attempt with `gates.build failed before the e2e gate: ...` and no e2e run. A server that is not ready SHALL fail
+the attempt with `the e2e server was not ready (see <log name>)` and the last 2,000 characters of its log, redacted, as
+the excerpt; it counts as a failed attempt (the agent's code may be what keeps the server from starting) and SHALL NOT
+be an error of the run; any other refusal of `run_e2e` (a format it does not read, no `reports`) stops the run with its
+exit as for a fix chore (L4-IMP-090). Such a failure is no near pass (L4-IMP-100): a near pass stops at the static gates,
+before the e2e run. What the runs write into the tree is put away as for a fix chore (L4-IMP-090: a new path goes back to
+the base, a path the step had edited gets the step's content back, a link a gate planted is removed and recorded, the
+test-path freeze runs again with the files the task may change kept), so the commit holds the tree the test gate tested
+(L4-IMP-088).
+
+The run SHALL be skipped, and no build or e2e run paid for, when the e2e gate cannot tell the task's browser tests from
+the other tests of its directory: when the e2e command selects tests with `-m` or `-k` after its `pytest` word (its
+report holds only part of the directory), or when the e2e directory also holds tests that the unit gate's report of the
+step shows (`pytest tests -m browser` with `tests/` as the unit gate's directory, where every unit test would be a
+browser test). The skip SHALL be decided before the step from the baseline and red reports (so the green prompt promises
+no run), and again from the step's own unit report; it SHALL be recorded as `e2e.task_run_skipped{task, phase, reason,
+tests}` and logged, and verification step 3 runs the browser tests as before. A red step that finishes a task as already
+satisfied (L4-IMP-003) SHALL run the task's browser tests the same way before its commit (with no test-path freeze: the
+test files are the step's own), and a failure SHALL fail the red attempt, whose next attempt may change the test. A red
+step that commits a red SHALL NOT run the e2e gate: a browser test's honest red failure is often an error raised in the
+browser library (a locator that waits for a button not built yet), so red could not ask for an assertion, and a test
+whose page is its own fails before and after the code alike. When `gates.e2e` is not configured, or the task has no
+browser tests, no step of the task SHALL run it (a gate with a command only is refused at step 3 as before). The green
+prompt SHALL list the task's browser tests (`path::name`) in a block that says the harness builds and serves the app
+after the step and runs them, that the task is not green while one of them fails, that one the report does not show is
+run at verification, and that they are frozen like the other red tests (a wrong one: a technical question whose first
+option is the edit, L4-IMP-015); the red prompt's browser-test paragraph SHALL say that the step that completes the task
+runs them with the app served, and that they are frozen after red only when `tdd.test_globs` covers the e2e directory.
 Cost: at most one build and one e2e gate run per green attempt of a task with browser tests that passed every other
-check, none for any other task, each bounded by `gates.timeout`, and the run deadline's cap of a green step counts them
-(L4-IMP-067). [V, a consumer unit's red steps added browser tests; one built its page with `page.set_content`, which
-keeps the browser's default 8px body margin, so the scroll width was 1508 and not the 1500 it asserted; it went through
-all nine tasks without running, failed first at verification step 3, and its fix unit could change neither the test nor
-the support file it uses (ci-evidence D11), while the parent task's green step could have had the test unfrozen.]
+check, none for any other task, each bounded by `gates.timeout`, and the run deadline's cap of a green step that runs
+them counts them (L4-IMP-067). [V, a consumer unit's red steps added browser tests; one built its page with
+`page.set_content`, which keeps the browser's default 8px body margin, so the scroll width was 1508 and not the 1500 it
+asserted; it went through all nine tasks without running, failed first at verification step 3, and its fix unit could
+change neither the test nor the support file it uses (ci-evidence D11), while the parent task's green step could have had
+the test unfrozen. A check that refused every attempt for a test the report could not show would have halted such a task
+for good, so only a failure the run shows refuses.]
 
 **L4-IMP-102 A fix task, its prompt and its questions carry the failure text of its tests.** A fix task whose findings
 name failing tests SHALL carry a *failure block*. The tests are, per finding: for `test gate failed` and `e2e gate
@@ -2783,19 +2816,27 @@ only, and a last line `and <n> more failing tests (the round's verdict.json)` fo
 on every task that is not a feedback item (`Finding.failures`, the repair chore included), and the plan's redaction
 SHALL redact it. The block SHALL be written into the fix unit's `proposal.md` (OpenSpec: right after the finding's line
 in `## What Changes`) or `design.md` (Kiro: after the finding's detail), after the line `Failing tests as the verifier
-recorded them:`, every line indented by four spaces, so that no line of it can open or close a heading, a list or a
+recorded them:`, every line indented by six spaces (OpenSpec: the finding is a list item whose content starts at column
+2, so six spaces are an indented code block inside it, where four would let a line that begins `#`, a fence or `-` be
+structure; Kiro: a top-level block of four spaces), so that no line of it can open or close a heading, a list or a
 fence, and never into `tasks.md`, where the OpenSpec CLI counts any line shaped like a checkbox; the fix unit SHALL
 still validate. The prompt of a fix chore (kind `fix`) SHALL hold the block, read from the round that spawned the fix
 unit (`fix.spawned.verify_round`), under `# Failures of this task's tests` in a data block that the context budget does
 not govern, so a `proposal.md` cut from the unit context does not lose it; the repair chore keeps its own `Tests to
-repair` block. Every question a fix chore raises SHALL hold the block in its Context as `Harness note: the verifier recorded these
-failures for the tests of this task's findings:`. Every question raised by an attempt that follows a failed attempt of
+repair` block. Every question a fix chore raises SHALL hold the block as `Harness note: the verifier recorded these
+failures for the tests of this task's findings:` in its `### Harness notes` subsection. Every question raised by an attempt that follows a failed attempt of
 the same task and phase in the run SHALL hold `Harness note: the previous attempt of this task was rejected: <reason,
-at most 300 characters>` and, when that attempt had one, its ledger excerpt (L4-IMP-064, 600 characters). These notes
-SHALL come after the agent's own text and before the harness note on unfreezing or on the fix task, which stays last
-(SCN-IMP-398; the delegate finds a chore's question by `chore: true` and that note's first sentence, L4-DLG-025); the question of a hung frozen test (W-D1) is
-about the attempt that just failed and gets neither. Everything SHALL pass the redactor (the Context is redacted again
-when `questions.md` is written). With no stored round (a recovered fix unit) or a round without `failures`, nothing
+at most 300 characters>` and, when that attempt had one, its ledger excerpt (L4-IMP-064, 600 characters) in the same
+subsection; the reason is redacted before it is cut and after, so a token that straddles the cut is not left in part.
+The notes are in their own subsection of the question (`### Harness notes`, between `### Options` and the answer; a
+`###` line inside a note is escaped like any structural line of a harness-written text), never in the Context: what an
+accepted suggestion may unfreeze is judged against the question's title, Context and Options (L4-IMP-015, the three
+readers of `suggestion_effects`, `unfrozen` and `config_opened`, and `existing_tests`), and text that came from a test's
+output must not widen it. The question's Context keeps the agent's own text and the harness note on unfreezing or on the
+fix task, which stays last (SCN-IMP-398; the delegate finds a chore's question by `chore: true` and that note's first
+sentence, L4-DLG-025). The clarifier and the delegate read the notes with the Context (`QuestionView.context`). The
+question of a hung frozen test (W-D1) is about the attempt that just failed and gets neither. Everything SHALL pass the
+redactor (the notes are redacted again when `questions.md` is written). With no stored round (a recovered fix unit) or a round without `failures`, nothing
 SHALL be added. [V, a consumer's fix chore for a browser test that failed by assertion got the test's id but not its
 message; its implementer asked a question that said it did not reproduce the failure, the delegate escalated it, and the
 person read a question without the one-line cause, which the round's `verdict.json` held.]
@@ -3652,8 +3693,10 @@ committed red is resumed (its setup and baseline belong to the green step), and 
 profile. The estimate SHALL be the longest step of the same phase measured in this run or among the unit's last 10
 recorded `step.timed` and stopped steps of that phase, or, with no measure of that phase, the longest of any phase. It
 SHALL be at least 10 minutes, and at most a cap per phase: the agent's time limit plus `gates.timeout` for red, green
-and single (for green when `gates.e2e` is configured, the agent's time limit plus three times `gates.timeout`: the
-test gate, the build and the e2e gate, L4-IMP-101), and four times `gates.timeout` for a verification round. A step whose estimate exceeds the time left MUST
+and single (for a green step that will run the build and the e2e gate (L4-IMP-101: `gates.e2e` configured, browser
+tests in the task's red commit, the run not skipped; read from git before the step, from its first check on a task
+resumed at green), the agent's time limit plus three times `gates.timeout`: the test gate, the build and the e2e gate;
+a skip that only the step's own unit report shows leaves that cap a little high, which can only defer a step), and four times `gates.timeout` for a verification round. A step whose estimate exceeds the time left MUST
 NOT start, and the step is handed back (L4-IMP-069). The first step of a run MUST start whenever any time is left. A
 step that was stopped at the last deadline (L4-IMP-071) starts only as the first step of a run. Every step that starts
 SHALL record `step.timed{phase, task, attempt, seconds}` (a round: `round` in place of `task` and `attempt`). With no
@@ -5962,11 +6005,15 @@ tests of each gate (`test`, `e2e`) in sorted id order, the round's `failures` re
 source line and location, the last location; the message's first lines when the report holds no body), paths relative
 to the worktree and the gate's tmp root shown as `<tmp>`, the body redacted whole before a line is dropped and the result
 redacted again, at most 8 lines and 600 characters (cut at a line end; a longer single line at 600). A module that a
-report could not collect, among those 20 by its id, SHALL get the `E` lines of its collection error the same way. A
+report could not collect, among those 20 by its id, SHALL get the `E` lines of its collection error the same way, cut as
+a test's excerpt is (8 lines, then at a line end before 600 characters). A report keeps only the last 4,000 characters of
+a body and the first 500 of a message, so a private-key block can reach the excerpt with one marker only: an END marker
+without its BEGIN SHALL take everything before it, and a BEGIN without its END everything after it, for every excerpt of
+a failing test (the shared redactor is unchanged). A
 record with nothing to show has no `excerpt`. `message`, `location`, `frames`, the 200-record cap of the `test` side and
 `failures_dropped` SHALL stay as they are; `restore_round` SHALL keep the excerpts of a reused round, and readers that do
 not know the key (`repairs`, the fix unit's grouping, the fix chore's e2e duty) SHALL keep working. A `verdict.json`
-grows by at most 24,000 characters. [V, a consumer unit's browser test failed at step 3 with `assert 1508 == 1500`; the
+grows by at most 24,000 characters of excerpt (2 x 20 x 600; the keys, ids and JSON around them are not counted). [V, a consumer unit's browser test failed at step 3 with `assert 1508 == 1500`; the
 verdict kept the first line of each failing test's message, but the fix task and the question made from it carried
 only the test's id, and the implementer of the fix chore reported that it could not reproduce the failure.]
 
@@ -9408,8 +9455,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 128 | `static-gates-runnable` | an implementer may run the configured lint and typecheck commands before it finishes, so a lint or type error is no longer seen only after the step. `l4.agents.base.PermissionPolicy` gains `static_commands` (the `gates.lint` then `gates.typecheck` commands, each once); `agent_step` and `l4.sim.dryrun` pass them; claude-code adds one `Bash(<command>:*)` per command in implement mode, copilot-cli one `--allow-tool=shell(<first word>:*)` per distinct first word; opencode, codex and kiro-cli are unchanged; the prompt's `# Gate command` section says the agent may run them and to check by reading when one cannot run in the sandbox (L4-IMP-098, SCN-IMP-533..536) |
 | 129 | `idle-gate-floor` | an implementer on an adapter whose stream cannot show an open tool call (opencode 1.x and 2.x, the command adapter; `AgentCaps.open_calls` false) is no longer stopped as idle while it runs a gate command: its idle limit is the larger of `implementer.idle_timeout` and 1.5 times the longest counted gate run of the unit run plus 60 s (`Workbench.gate_peak`: `baseline` and `test` runs of the test command and the lint and typecheck runs, on the unit's work tree, not variant runs, not timed-out or deadline-stopped runs), at most the step's limit and never below `implementer.idle_timeout`; `agent.idle` gains `limit_s` and `raised_by{gate, seconds}`, and the reason, the silent limit's text, the previous-attempt note and the progress line name the raised limit; L4-IMP-024 and L4-IMP-087's named risk are amended (L4-IMP-099, SCN-IMP-537..540) |
 | 130 | `near-pass-carry` | a green attempt whose test gate passed and that failed only its static gates is a near pass: its changes (`held_patch.step_patch`, shared with `capture`) are kept in memory and applied once, as uncommitted changes on the red commit, to the next green attempt of the task in the run, whatever profile runs it (a limit's fallback included), with a `near pass` prompt block; an escalation block says the changes are in the checkout only for the profile that wrote them, a limit block never; `task.attempt_failed{near_pass}`, `task.near_pass_applied`, `task.near_pass_dropped` (a found or refused replay comes first; a patch that does not apply); the halt reason has `nearest: attempt <n> (<profile>) ...` right after the phase, before a refused move and the last failure, read from the run's ledger, and `breaker.tripped` carries `near_pass`; red, single, test-failing and secret-shaped attempts are not near passes, and nothing is carried across runs except in an interrupted step's work in progress (L4-IMP-100, SCN-IMP-541..547) |
-| 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the test functions (`tamper.facts_of`) of the Python files under `e2e_test_dir(gates.e2e)`, not `conftest.py`, `__init__.py` or a support glob, that the red commit added or changed (read from git, so a resumed red counts); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`, the task's tests matched by `names_test_id` and judged in order (timed out, no report, not collected, not in the report, not passed), the excerpt of the failing ones, `ServerNotReady` a failed attempt with the log's end, `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold, when `e2e_configured`; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt's browser-test paragraph says the green step runs them and that they are frozen. `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for green. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; browser tests in another language and a support-only change are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_fix_chore_e2e`, `test_tdd_green`, `test_near_pass_carry`, `test_already_satisfied`, `test_prompt`, `test_deadline`) |
-| 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding by `openspec._proposal` and `kiro._fix_design`, never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason and ledger excerpt. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..310, SCN-IMP-557..561; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_loop`) |
+| 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed; the check is fail-safe. `l4.implementer.browser_tests` (new): `collectable_tests` (what pytest would collect: `python_files`, no fixture, `Test*` classes without `__init__`), `match_task_tests` (a report id by module suffix through `evidence.testsran.file_of_test` and by exact class, two fitting files left `ambiguous`), `selecting_option` (`-m`/`-k`), `shared_with_unit_gate`. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the collectable tests of the Python files under `e2e_test_dir(gates.e2e)` that the red commit added or whose own definition it changed (read from git, so a resumed red counts; a git error is `e2e.task_tests_unread`); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`; only a failing or erroring task test, a timed-out gate, no report, a collection error of a mapped task module, a failed build or a server that is not ready refuse, and a test the report does not show is `e2e.task_tests_unseen`; `_e2e_skip_reason` (`e2e.task_run_skipped`: a selecting command or a directory the unit gate also runs); `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt says the step that completes the task runs them, and that they are frozen only when `PromptContext.e2e_frozen`. `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for a green step, passed by `loop._check_step` only when `task_runs_e2e` (in `l4.implementer.tdd`) is true. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556, 562..564; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; a task test the report does not show is run first at step 3; browser tests in another language, a support-only change and a pytest configuration that overrides `python_files` are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_browser_tests`, `test_deadline`) |
+| 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13474,11 +13521,13 @@ scenario is a spec defect (§26).
 - **Then** the attempt fails with `the e2e server was not ready (see <log name>)`, the end of the log is the excerpt,
   the attempt is counted, and the run does not stop with an internal error
 
-#### SCN-IMP-552 (−) A browser test that did not run does not pass · L4-IMP-101
+#### SCN-IMP-552 (+) A browser test the report does not show does not block green · L4-IMP-101
 - **Given** a task with browser tests `test_a` and `test_b`, and an e2e report that holds no id of `test_b`, or holds
-  `test_b[chromium]` only as skipped
+  `test_b[chromium]` only as skipped, or holds only a module name that two files fit
 - **When** the green attempt is judged
-- **Then** it fails naming `test_b`; with both passing, an e2e test that is not the task's and fails changes nothing
+- **Then** it is not refused, `e2e.task_tests_unseen` names `e2e/test_layout.py::test_b` (and the ambiguous ids), the
+  step log says they were not seen and that verification step 3 runs them; when `test_a` fails in the report the attempt
+  is refused naming `test_a` only; an e2e test that is not the task's and fails changes nothing
 
 #### SCN-IMP-553 (+) The e2e run comes last · L4-IMP-101, L4-IMP-100
 - **Given** a task with browser tests, a green attempt whose test gate fails, and another whose tests pass and whose
@@ -13499,10 +13548,11 @@ scenario is a spec defect (§26).
 - **Then** it runs the e2e gate for that test, as the run that made the red commit would have
 
 #### SCN-IMP-556 (+) The deadline counts a green step's e2e gate · L4-IMP-067, L4-IMP-101
-- **Given** a known deadline, `gates.timeout: 10m`, the agent's 30-minute limit, a configured `gates.e2e`, and a
-  recorded green step of 55 minutes
+- **Given** a known deadline, `gates.timeout: 10m`, the agent's 30-minute limit, a recorded green step of 55 minutes,
+  and a task whose red commit has browser tests that the green step will run (`gates.e2e` configured, no `-m`/`-k`)
 - **When** the next green step is checked
-- **Then** its estimate is 55 minutes (the cap is 60), where without `gates.e2e` it would be 40
+- **Then** its estimate is 55 minutes (the cap is 60), where for a task without browser tests, or with `gates.e2e` not
+  configured, or whose run is skipped, it would be 40
 
 #### SCN-IMP-557 (+) The fix proposal shows why the test failed · L4-IMP-102, L4-VER-006
 - **Given** a round with `e2e gate failed` whose record of `e2e.test_layout::test_width[chromium]` has kind `assertion`
@@ -13520,21 +13570,52 @@ scenario is a spec defect (§26).
 - **Given** the fix chore of SCN-IMP-558, whose agent reports blocked with a technical question that holds no failure
   text
 - **When** the question is raised
-- **Then** its Context holds the agent's text, then the harness note with `assert 1508 == 1500`, and ends with the
-  fix chore's note as before
+- **Then** its `### Harness notes` subsection holds the harness note with `assert 1508 == 1500`, and its Context is the
+  agent's text and ends with the fix chore's note as before
 
 #### SCN-IMP-560 (+) A question after a failed attempt says why that attempt failed · L4-IMP-102, L4-IMP-064
 - **Given** a green attempt that failed with `red tests still failing: tests.test_a::test_x` and the excerpt
   `E   assert 2 == 3`, and a next green attempt that reports blocked with a question
 - **When** the question is raised
-- **Then** its Context holds, after the agent's text, `Harness note: the previous attempt of this task was rejected:
-  red tests still failing: tests.test_a::test_x` and a line holding `assert 2 == 3`; a question of a first attempt has
-  no such note
+- **Then** its `### Harness notes` subsection holds `Harness note: the previous attempt of this task was rejected: red
+  tests still failing: tests.test_a::test_x` and a line holding `assert 2 == 3`, and its Context does not; a question of a
+  first attempt has no such note, and a reason with a token that straddles the 300-character cut leaves no part of it
 
 #### SCN-IMP-561 (−) Nothing is added without a recorded failure · L4-IMP-102
 - **Given** a fix unit whose spawning round is not on record, and another whose round's verdict has no `failures`
 - **When** their fix chores are prompted and raise questions
 - **Then** no failure block is in the prompt or the Context, and the rest of both is as before
+
+#### SCN-IMP-562 (+) Only the tests pytest would collect, and only those the red step wrote, are the task's · L4-IMP-101
+- **Given** a red commit that adds `e2e/test_pages.py` with a fixture `test_user`, a method `Helper.test_helper`, a
+  `TestA.test_x` and a module-level `test_real`, `e2e/helpers.py` with `testid`, and, in an existing e2e module, a new
+  autouse fixture
+- **When** the task's browser tests are read
+- **Then** they are `TestA.test_x` and `test_real` of `e2e/test_pages.py` only: the fixture, the helper, the helper
+  module and the tests of the existing module (whose own definitions did not change) are not the task's
+
+#### SCN-IMP-563 (+) A report id is matched by module suffix and by class · L4-IMP-101
+- **Given** a task with `e2e/test_layout.py::TestA.test_x` and `TestB.test_x`, and reports whose classname is
+  `e2e.test_layout` or, under an `e2e/pytest.ini`, `test_layout`
+- **When** the green attempt is judged
+- **Then** both id shapes name the tests; `TestA::test_x` passing does not stand for `TestB.test_x`; a report that
+  holds `TestB::test_x` failing refuses the attempt naming it; a report without it leaves it unseen; with a second file
+  `e2e/other/test_layout.py` the id `test_layout::test_x` is neither test's and is listed as ambiguous
+
+#### SCN-IMP-564 (+) A run that cannot tell the task's tests apart is skipped · L4-IMP-101, L4-IMP-067
+- **Given** a task with browser tests and an e2e command `pytest e2e -m browser`, or an e2e command `pytest tests`
+  whose directory the unit gate's report also holds tests of
+- **When** its green step runs and its deadline is checked
+- **Then** no build and no e2e run is paid for, `e2e.task_run_skipped` names the reason, the green prompt lists no
+  browser tests, the cap of the green step is the plain one, and verification step 3 runs the browser tests as before
+
+#### SCN-IMP-565 (−) A harness note never widens what an accepted suggestion unfreezes · L4-IMP-102, L4-IMP-015
+- **Given** a question whose only mention of `tests/test_discount.py` is in the harness note about the previous
+  attempt, and a suggestion `Edit tests/test_discount.py`
+- **When** `l4 questions accept` lists its effects, and the green step reads the accepted question
+- **Then** the effect is `unfreezes: false` (`the question does not name it`) and the file stays frozen, as when the
+  note does not exist; the note is in the question's own `### Harness notes` subsection, which a line of the note cannot
+  forge (a `###` line in it is escaped)
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 
@@ -15642,6 +15723,13 @@ scenario is a spec defect (§26).
 - **When** step 3 writes the verdict
 - **Then** the first 20 unit-test records by id and both browser records hold an `excerpt`, the other 10 hold their
   `message` only, and a reused round keeps the same records
+
+#### SCN-VER-311 (−) A key block with one marker is not recorded, and a collection excerpt is bounded like a test's · L4-VER-078, L4-OBS-002
+- **Given** a failing test whose kept body starts inside a private-key block (its END marker, no BEGIN), another whose
+  message ends inside one (its BEGIN marker, no END), and a module that did not collect with 20 `E` lines in its error
+- **When** step 3 writes the verdict
+- **Then** no line of either key block is in the `excerpt` or in `verdict.json`, and the collection record's excerpt
+  holds its first 8 lines
 
 ## MODIFIED Requirements
 
