@@ -271,6 +271,25 @@ roles:
 - `l4 doctor --ci --fix` installs the pinned `copilot 1.0.102` and warms its cache; a Copilot CLI 2 is refused. The
   first 429 ends the step (`rate_limited`) and the next profile takes it. Details: `docs/runbook.md` 10.8.
 
+## 4h. An OpenCode profile's output limit
+
+An opencode profile can say how many tokens its model may write in one reply (harness 0.4.59):
+
+```yaml
+profiles:
+  judge-oc: {adapter: opencode, auth: api_key, model: opencode-go/glm-5.3-flash, vendor: zhipu, options: {max_output_tokens: 65536}}
+```
+
+- **The default is OpenCode's own.** Without the key, OpenCode 1 asks for at most 32000 output tokens, and OpenCode 2
+  asks for the limit its catalog knows for the model, else 32000.
+- **When to set it.** A judge or reviewer whose replies stop with `length` (the ledger shows `last reason: length`, and
+  the failure line now names the key). Set it on that profile, not on every profile.
+- **Use the model's real maximum.** A whole number from 1024 to 256000. A larger value gets an HTTP 400 from the
+  provider (the hello shows it), OpenRouter reserves credits for it, and on OpenCode 1 an implementer's session compacts
+  earlier. The key may not exceed a custom provider's model `output`, must be below its `context` and below `context_window`.
+- **The pin must be 0.4.59 or later before you add the key.** An older harness ignores the key without an error: check
+  the pin is 0.4.59 or later first. Details: `docs/runbook.md` 10.10.
+
 ## 5. Upgrades
 
 ```sh

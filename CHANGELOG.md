@@ -6,6 +6,11 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Added
+- An opencode profile can declare its model's output limit: `options.max_output_tokens`, a whole number from 1024 to 256000. Judges on opencode profiles ended long verdicts with the finish reason `length`, so plan reviews and verifications of large subjects failed: OpenCode 1 asks for at most 32000 output tokens unless `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` says otherwise, and OpenCode 2 asks for 32000 when its catalog does not know the model's limit, and L4 set neither. Now OpenCode 1 gets the variable in the run (every mode) and the hello, and asks for the smaller of it and the limit its catalog knows; OpenCode 2 gets `providers.<provider>.models.<model>.limit.output` in its configuration (run, export and hello), which replaces the catalog's limit, at most 256000 and fitted to the context. Without the key nothing changes. The hello asks with the same limit, so a value the provider refuses fails the probe and the chain falls back. The key may not exceed a custom provider's model entry `output` (OpenCode 1 asks for the smaller), must be below that entry's `context`, and must be below `context_window`; on OpenCode 1 a custom provider's `output` above 32000 takes effect only with the key, and `l4 doctor` PRV-001 notes such a profile. A run that stops with `length` on an opencode profile now names the key in its detail (with its value when set), and a 400 on a profile with the key says the key may be above the model's maximum. Use the model's own maximum: a larger value gets a 400 from the provider, OpenRouter reserves credits for it, and on OpenCode 1 an implementer's session compacts earlier by the amount the key is raised (L4-FAC-023, L4-OCV-020).
+
 ## 0.4.58 (2026-11-13)
 
 ### Fixed

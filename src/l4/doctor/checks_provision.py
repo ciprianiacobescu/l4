@@ -32,6 +32,7 @@ from l4.provision.runner import (
 )
 
 OS_RELEASE = Path("/etc/os-release")
+DEFAULT_OUTPUT_TOKENS = 32000  # what OpenCode 1 asks for unless `options.max_output_tokens` is set
 
 
 def _os_release() -> str:
@@ -69,7 +70,8 @@ def survey_provision(ctx: DoctorContext) -> Sequence[FixAction]:
 
 def _provider_notes(ctx: DoctorContext, names: Sequence[str]) -> list[str]:
     """Host reachability of each custom provider, as a note: the machine behind it may sleep, which makes the profile
-    unavailable (the chain falls back), not the runner unhealthy. Host and port only: no path, no key."""
+    unavailable (the chain falls back), not the runner unhealthy. Host and port only: no path, no key. A provider
+    profile whose model entry allows more than OpenCode 1's default output and that sets no key gets a second note."""
     notes = []
     for name in sorted(names):
         options = ctx.cfg.profiles[name].opencode_options()
@@ -78,6 +80,13 @@ def _provider_notes(ctx: DoctorContext, names: Sequence[str]) -> list[str]:
         up, _ = reachable(options.provider.base_url)
         host = provider_host(options.provider.base_url)
         notes.append(f"{name} provider {host} {'reachable' if up else 'unreachable (optional: the chain falls back)'}")
+        entry = options.provider.models.get((ctx.cfg.profiles[name].model or "").split("/", 1)[-1])
+        output = entry.output if entry is not None else 0
+        if output > DEFAULT_OUTPUT_TOKENS and options.max_output_tokens is None:  # L4-FAC-023: OpenCode 1 caps it
+            notes.append(
+                f"{name} asks for at most {DEFAULT_OUTPUT_TOKENS} output tokens although its model entry allows "
+                f"{output} (OpenCode 1's default): set options.max_output_tokens to use it"
+            )
     return notes
 
 
