@@ -24,7 +24,7 @@ Rules for every task:
 
 ## 1. Configuration and the judge roles (D1, D3; L4-YOLO-095, L4-YOLO-097)
 
-- [ ] 1.1 Write the tests first, in a new `tests/unit/config/test_plan_judges_config.py`:
+- [x] 1.1 Write the tests first, in a new `tests/unit/config/test_plan_judges_config.py`:
   - `RolesCfg().plan_judges == []`, and a configuration without the key loads.
   - `"plan_judges" in l4.config.roles.JUDGE_ROLES`, placed right after `"judges"`.
   - SCN-YOLO-262, the load part: a `command` profile in `roles.plan_judges` fails the load with
@@ -46,7 +46,7 @@ Rules for every task:
   `tests/unit/docs/test_delegate_docs.py::test_the_reference_configuration_has_the_delegate_section_and_profiles`. SPEC
   §3.2 holds `roles.plan_judges`, `yolo.review.max_batch_chars` and `yolo.review.timeout`, and the schema refuses extra
   keys. Task 1.2 makes them pass. Do not edit SPEC §3.2 to make them pass.
-- [ ] 1.2 Then change the code:
+- [x] 1.2 Then change the code:
   - `src/l4/config/schema.py`:
     - add `plan_judges: list[str]` to `RolesCfg`, after `judges`, with a comment `optional (L4-YOLO-095): the
       readiness review's chain; empty: judges`;

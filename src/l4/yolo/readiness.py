@@ -127,11 +127,12 @@ class Budgets:
     file: int
     folder: int
     dependency: int
+    batch: int = 160_000  # a batch subject longer than this is reviewed in parts (L4-YOLO-098); 0: no bound
 
     @classmethod
     def of(cls, cfg: L4Config) -> "Budgets":
         review = cfg.yolo.review
-        return cls(review.max_file_chars, review.max_folder_chars, review.max_dependency_chars)
+        return cls(review.max_file_chars, review.max_folder_chars, review.max_dependency_chars, review.max_batch_chars)
 
 
 @dataclass(frozen=True)
