@@ -915,7 +915,8 @@ class YoloReviewCfg(_Strict):
     max_dependency_chars: int = Field(default=20_000, ge=0)
     accept_after_rounds: int = Field(default=2, ge=1)
     accept_by_agents: bool = False
-    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0: only after a length stop or a timeout
+    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0: only after a length stop or
+    # a timeout
     max_batch_chars: int = Field(default=160_000, ge=0)
     timeout: Duration = "15m"  # each judge call of the review (L4-YOLO-097)
 
@@ -1054,7 +1055,8 @@ class L4Config(_Strict):
                 raise ValueFree(
                     f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
                     f"tools): an adapter profile in roles.judges, roles.plan_judges, roles.verifier_agent, "
-                    f"roles.clarifier or roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                    f"roles.clarifier or roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; "
+                    f"remove {name} from roles.{role}"
                 )
         return self
 
