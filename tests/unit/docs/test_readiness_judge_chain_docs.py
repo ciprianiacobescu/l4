@@ -48,8 +48,8 @@ def test_the_skill_names_the_chain_and_the_incomplete_review() -> None:
     assert "the review is incomplete" in read(*REFERENCES, "plan.md").split("When no judge can run", 1)[1]
 
 
-def test_the_changelog_names_the_keys_under_unreleased() -> None:
-    head = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## 0.", 1)[0]
+def test_the_changelog_names_the_keys_in_the_0459_section() -> None:
+    head = read("CHANGELOG.md").split("## 0.4.59 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("roles.plan_judges", "yolo.review.timeout", "yolo.review.max_batch_chars", "plan.review_incomplete"):
         assert needle in head, needle
 
@@ -75,7 +75,7 @@ def test_the_operate_row_gives_the_message_a_dry_run_prints() -> None:
 
 
 def test_the_changelog_lists_the_changed_behaviour_of_the_review() -> None:
-    head = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## 0.", 1)[0]
+    head = read("CHANGELOG.md").split("## 0.4.59 (", 1)[1].split("\n## ", 1)[0]
     assert "160,000" not in head
     changed = head.split("### Changed", 1)[1].split("\n### ", 1)[0]
     for needle in (
