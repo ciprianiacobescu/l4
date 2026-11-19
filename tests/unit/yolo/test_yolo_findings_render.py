@@ -345,3 +345,33 @@ def test_an_accepted_subject_that_holds_has_no_refusal():
         can_accept=lambda s: Refusal("x", "y"),
     )
     assert doc["subjects"][0]["accept_refusal"] is None
+
+
+PARTS = {
+    "criterion": "parts",
+    "severity": "minor",
+    "text": "this batch was reviewed in parts: no judge saw two units' full text together",
+}
+
+
+def test_a_ready_batch_reviewed_in_parts_is_shown_with_its_note_without_all():
+    """The note blocks nothing (the batch is READY), but the person is told: it is shown, with a Resolve line that says
+    it is a note."""
+    events = [reviewed("2026-10-14T10:00:00Z", batches={"b1": entry("READY", material="kb", findings=[PARTS])})]
+    lines = render(events)
+    assert lines[0] == "batch:b1: READY"
+    assert any(PARTS["text"] in line for line in lines)
+    assert any(line.startswith("    Resolve: A note, not a defect") for line in lines)
+    assert not any("minor finding" in line for line in lines)  # shown in full, not counted away behind --all
+
+
+def test_the_note_is_shown_in_full_beside_a_minor_nit_that_stays_behind_all():
+    events = [reviewed("2026-10-14T10:00:00Z", batches={"b1": entry("NEEDS_REVISION", findings=[F, X, PARTS])})]
+    lines = render(events)
+    assert any(PARTS["text"] in line for line in lines) and not any("a nit" in line for line in lines)
+    assert "  1 minor finding (--all shows it)" in lines
+
+
+def test_a_batch_without_the_note_and_ready_stays_hidden():
+    events = [reviewed("2026-10-14T10:00:00Z", batches={"b1": entry("READY", material="kb", findings=[X])})]
+    assert render(events) == []

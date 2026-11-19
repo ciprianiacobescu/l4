@@ -262,7 +262,7 @@ def _cfg_011(ctx: DoctorContext) -> CheckResult:
 
     profiles = ctx.cfg.profiles
     judging: list[str] = []
-    for name in [*ctx.cfg.roles.judges, *ctx.cfg.roles.clarifier]:
+    for name in [*ctx.cfg.roles.judges, *ctx.cfg.roles.plan_judges, *ctx.cfg.roles.clarifier]:
         profile = profiles.get(name)
         if profile is not None and profile.adapter == "kiro-cli" and name not in judging:
             judging.append(name)
@@ -317,16 +317,45 @@ CFG_011 = register(Check("CFG-011", "kiro-cli judge profiles", "warn", _cfg_011,
 CFG_012_FIX = "set ci.time_budget: auto (the job timeout), or a duration at least soft_deadline_margin plus 10m"
 
 
+CFG_012_REVIEW_FIX = "lower yolo.review.timeout, or raise ci.time_budget"
+
+
+def _review_timeout_warning(cfg, job: tuple[int, str] | None = None) -> str | None:
+    """L4-YOLO-097: the plan step starts a readiness call only with `yolo.review.timeout` left before the soft
+    deadline, so a timeout that is not below the budget minus the margin leaves no call that can start. With
+    `ci.time_budget: auto` the budget is the job's timeout (`job`, as `shortens_job` reads it); unknown: nothing is
+    said."""
+    ci = cfg.ci
+    if ci.time_budget == "auto":
+        if job is None:
+            return None
+        seconds, source = job
+        what = f"the job's timeout ({seconds // 60} min, {source})"
+    else:
+        seconds, what = duration_seconds(ci.time_budget), f"ci.time_budget ({ci.time_budget})"
+    room = seconds - duration_seconds(ci.soft_deadline_margin)
+    if duration_seconds(cfg.yolo.review.timeout) < room:
+        return None
+    return (
+        f"yolo.review.timeout ({cfg.yolo.review.timeout}) is not less than {what} minus "
+        f"ci.soft_deadline_margin ({ci.soft_deadline_margin}): no readiness call can start in a CI job"
+    )
+
+
 def _cfg_012(ctx: DoctorContext) -> CheckResult:
     ci = ctx.cfg.ci
     error = too_short(ctx.cfg)
-    warning = shortens_job(ctx.cfg, job_timeout(ctx.env, read_workflow(ctx.repo)))
-    if error and warning:
-        return CheckResult("fail", f"{error}; {warning}", CFG_012_FIX)
+    job = job_timeout(ctx.env, read_workflow(ctx.repo))
+    warning = shortens_job(ctx.cfg, job)
+    review = _review_timeout_warning(ctx.cfg, job)
+    warned = "; ".join(w for w in (warning, review) if w)
+    fix = f"{CFG_012_FIX}; {CFG_012_REVIEW_FIX}" if review else CFG_012_FIX
+    if error and warned:
+        return CheckResult("fail", f"{error}; {warned}", fix)
     if error:
         return CheckResult("fail", error, CFG_012_FIX)
-    if warning:
-        return CheckResult("fail", warning, CFG_012_FIX, severity="warn")
+    if warned:
+        return CheckResult("fail", warned, CFG_012_REVIEW_FIX if review and not warning else fix, severity="warn")
     if ci.time_budget == "auto":
         return CheckResult("pass", "ci.time_budget is auto: the job's timeout is the budget")
     left = (duration_seconds(ci.time_budget) - duration_seconds(ci.soft_deadline_margin)) // 60

@@ -227,6 +227,28 @@ class Factory:
             request=SelectionRequest(role, unit, serves, tuple(constraints)),
         )  # fmt: skip
 
+    def for_profile(self, role: str, unit: str, name: str, *, serves: Collection[str] | None = None) -> Selected:
+        """The selection of one named profile of the role's chain (readiness-judge-chain D2): its probes, cool-down,
+        `serves` and login gate, as `for_role` checks each profile, and nothing about the others. The role is never
+        required here and no `availability.unavailable` is recorded: the caller walks the chain itself and decides what
+        a failure means. Raises `RoleUnavailable` with the reason when the profile is not usable, `ValueError` for a
+        role or a name that is not in the chain."""
+        if role not in RolesCfg.model_fields:
+            raise ValueError(f"{role!r} is not a role")
+        chain: list[str] = getattr(self._cfg.roles, role)
+        if name not in chain:
+            raise ValueError(f"{name!r} is not in roles.{role}")
+        picked = self._selector().select(role, [name], required=False, serves=serves, record_unavailable=False)
+        if self._events is not None:
+            self._events.append("availability.selected", role=role, **to_event(picked, None))
+            self._note_adapter(role, picked.profile_name, picked.profile, picked.impl, picked.report)
+        return Selected(
+            picked.profile_name, picked.profile, self._gated(picked.profile, picked.impl), 0,
+            [s.to_event() for s in picked.skipped], picked.probes, picked.cached, None,
+            vendor=resolve_vendor(picked.profile)[0], provenance=resolve_vendor(picked.profile)[1],
+            request=SelectionRequest(role, unit, serves, ()),
+        )  # fmt: skip
+
     def next_profile(self, role: str, unit: str, after: str, *, constraints: Sequence[Constraint] = ()) -> Selected:
         """The first usable profile of the role's chain after `after` (escalate-and-note D5): never parks the unit,
         records no cool-down. Raises `RoleUnavailable` when there is none."""

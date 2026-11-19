@@ -9,8 +9,8 @@ from l4.config.loader import ConfigSchemaError, load_config_text
 
 CMD = (
     "profiles.cmd is in roles.judges, but its adapter command cannot judge (a judge call has no tools): an adapter "
-    "profile in roles.judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use one of claude-code, "
-    "codex, opencode, kiro-cli, copilot-cli, fake; remove cmd from roles.judges at $"
+    "profile in roles.judges, roles.plan_judges, roles.verifier_agent, roles.clarifier or roles.s1_judge must use "
+    "one of claude-code, codex, opencode, kiro-cli, copilot-cli, fake; remove cmd from roles.judges at $"
 )
 
 

@@ -40,3 +40,12 @@ def test_cfg005_is_a_warning_in_the_config_scope():
 
     check = next(c for c in REGISTRY.checks() if c.id == "CFG-005")
     assert check.severity == "warn" and {"ci", "local", "config"} <= check.scopes
+
+
+def test_cfg002_covers_an_undefined_profile_in_plan_judges(make_ctx):  # SCN-YOLO-262
+    ctx, _ = make_ctx(
+        cfg=config(profiles={"a": {"adapter": "fake"}}, roles={"judges": ["a"], "plan_judges": ["ghost"]})
+    )
+    result = cc._cfg_002(ctx)
+    assert result.status == "fail"
+    assert "roles.plan_judges names a profile that is not defined under profiles" in result.message

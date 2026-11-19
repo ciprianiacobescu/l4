@@ -36,7 +36,7 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -111,7 +111,14 @@ from l4.yolo.plans import (
     readable_unit_ids,
     unit_infos,
 )
-from l4.yolo.readiness import PROMPT_VERSION, Budgets, delivered_on_target, read_folder, review_plan_costed
+from l4.yolo.readiness import (
+    PROMPT_VERSION,
+    Budgets,
+    ReviewIncomplete,
+    delivered_on_target,
+    read_folder,
+    review_plan_costed,
+)
 from l4.yolo.state import apply_extend, fold_plan, parse_time
 from l4.yolo.store import LEDGER_FILE, PlanRead, PlanStore, list_plans, parse_ledger
 from l4.yolo.testpaths import PathGlobs
@@ -983,6 +990,10 @@ def _verdict_json(verdict: Any) -> dict[str, Any]:
         out["material"] = verdict.material
     if getattr(verdict, "reused_from", None) is not None:
         out["reused_from"] = verdict.reused_from
+    if getattr(verdict, "judge", None) is not None:  # the profile that answered (L4-YOLO-096)
+        out["judge"] = verdict.judge
+    if getattr(verdict, "parts", ()):  # a batch reviewed in parts (L4-YOLO-098)
+        out["parts"] = [{"part": name, **_verdict_json(part)} for name, part in verdict.parts]
     return out
 
 
@@ -1091,7 +1102,7 @@ def run_review(
         if not no_run:
             ctx.say(start_run_line(ctx.app, ctx.cfg))
         return ExitCode.OK
-    chosen: dict[str, str] = {}
+    labels: dict[str, str] = {}  # profile -> the sandbox label its judge ran under
 
     def sandbox_for(adapter: str, profile: str) -> Any:
         """The judge's sandbox (design D5): bwrap, or none for a tool-less judge outside CI, said out loud."""
@@ -1103,12 +1114,13 @@ def run_review(
             in_ci=ci_like(ctx.app.environ),
             profile=profile,
         )
-        chosen.update(sandbox=label, judge=profile)
+        labels[profile] = label
         if label == "none" and ctx.cfg.sandbox.mode != "none":
             why = judge_sandbox.unsandboxed_reason(ctx.app.environ, ctx.app.repo)
             ctx.say(f"judge unsandboxed ({why}): it has no tools and runs in an empty folder")
         return sandbox
 
+    digest_of_file = plan_digest(file.text)
     try:
         result, cost = review_plan_costed(
             ctx.app,
@@ -1121,15 +1133,31 @@ def run_review(
             delivered=delivered_on_target(archived_at(ctx.git, rev, ctx.cfg), units.phases),
             prior=fnd.prior_entries(read.events, PROMPT_VERSION, state.accepted),
             sandbox_for=sandbox_for,
+            failed_before=fnd.failed_before(read.events, PROMPT_VERSION),
+            kept=fnd.kept_keys(read.events, PROMPT_VERSION),
         )
+    except ReviewIncomplete as exc:
+        _record_incomplete(
+            ctx, store, read, state, admission, exc, plan_id=plan_id, source="local", digest=digest_of_file,
+            merge=parsed.merge, rev=rev,
+        )  # fmt: skip
     except RoleLimit as exc:
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: the judge hit a usage limit: {exc}") from None
     except RoleUnavailable as exc:  # a judge that timed out or failed too (R9): no review happened, none is recorded
         raise L4Exit(ExitCode.WAITING_CAPACITY, f"review: no judge could answer, nothing was recorded: {exc}") from None
     except RevisionMissing as exc:
         raise L4Exit(ExitCode.USAGE_ERROR, f"review: {exc}") from None
-    digest = plan_digest(file.text)
+    digest = digest_of_file
     batches = review_batches(parsed, result)
+    answering = fnd.judges_answering([*result.units.values(), *batches.values()])
+    chosen: dict[str, Any] = {}
+    if answering or labels:  # `judge` is the first that answered; with no entry that names one, the first opened
+        first = answering[0] if answering else next(iter(labels))
+        chosen = {"judge": first, "sandbox": labels.get(first)}
+        if answering:
+            chosen["judges"] = answering
+    if result.failures:
+        chosen["failures"] = fnd.failure_rows(result.failures, material=False)
     events = [
         _event("plan.admitted", plan_digest=digest, order=list(admission.order), merge=parsed.merge),
         _event(
@@ -1147,6 +1175,8 @@ def run_review(
         )  # fmt: skip
         events.append(_event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(before + cost, 6), runs=0))
     _append(store, events, read.head)
+    for failure in result.failures:
+        ctx.say(fnd.failure_line(failure))
     ctx.say(f"{plan_id}: reviewed here (${cost:.2f})")
     held = accepting.holds(state, events[1].data)  # the acceptances that hold on this review (L4-YOLO-066)
     open_subjects = 0
@@ -1764,6 +1794,10 @@ def _describe(
         }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
+        if view.kind == "current" and (in_parts := fnd.batches_in_parts(read.events, PROMPT_VERSION)):
+            out["review"]["in_parts"] = in_parts
+        if view.kind != "current" and (incomplete := fnd.latest_incomplete(read.events, PROMPT_VERSION)) is not None:
+            out["review"]["incomplete"] = _incomplete_doc(incomplete)
         if view.kind == "stale":
             out["review"]["stale"] = _stale_lines(
                 ctx, plan, file, state, read.events, now, units, prompt_matters=needs_review
@@ -2036,6 +2070,101 @@ def _advance(ctx: Any, state: PlanState, out: dict[str, Any], units: _Units) -> 
     )
 
 
+INCOMPLETE_FIX = {
+    "timeout": "raise yolo.review.timeout or put another judge first in roles.plan_judges",
+    "no_judge": "fix the judges named, `l4 doctor --live`, or set roles.plan_judges",
+    "job_time": "give the CI job more time or lower yolo.review.timeout",
+}
+
+
+def _record_incomplete(
+    ctx: _Ctx,
+    store: PlanStore,
+    read: Any,
+    state: PlanState,
+    admission: Admission,
+    exc: ReviewIncomplete,
+    *,
+    plan_id: str,
+    source: str,
+    digest: str,
+    merge: str,
+    rev: str | None,
+    entry: Any = None,
+) -> NoReturn:
+    """A review of `--local` or `--worktree --record` that does not finish (L4-YOLO-099): the failure lines, the record
+    (`plan.admitted` when it is not recorded yet, `plan.review_incomplete` with what was answered, and the cost), the
+    fix, and exit 12. Nothing is written for a repeat that answered nothing and spent nothing."""
+    entry = entry or _verdict_json
+    for failure in exc.failures:
+        ctx.say(fnd.failure_line(failure))
+    if not fnd.repeats_incomplete(
+        fnd.latest_incomplete(read.events, PROMPT_VERSION),
+        plan_digest=digest, reason=exc.reason, failures=exc.failures, answered=exc.answered, cost=exc.cost,
+    ):  # fmt: skip
+        order = list(admission.order)
+        events: list[PlanEvent] = []
+        if not (state.status in ("admitted", "reviewed") and state.plan_digest == digest and state.order == order):
+            events.append(_event("plan.admitted", plan_digest=digest, order=order, merge=merge))
+        events.append(
+            _event(
+                "plan.review_incomplete", plan_digest=digest, prompt_version=PROMPT_VERSION, source=source,
+                by=ctx.who(), target_rev=rev, reason=exc.reason,
+                answered={n: entry(v) for n, v in exc.answered.items()}, left=list(exc.left),
+                failures=fnd.failure_rows(exc.failures, material=True), cost_usd=round(exc.cost, 6),
+            )
+        )  # fmt: skip
+        if exc.cost > 0:
+            before = max(
+                (float(e.data.get("cost_usd") or 0) for e in read.events
+                 if e.type == "plan.charged" and e.data.get("unit") == REVIEW_KEY),
+                default=0.0,
+            )  # fmt: skip
+            events.append(
+                _event("plan.charged", unit=REVIEW_KEY, attempt=0, cost_usd=round(before + exc.cost, 6), runs=0)
+            )
+        _append(store, events, read.head)
+    kept = f"{len(exc.answered)} answered and kept, {len(exc.left)} left"
+    ctx.say(f"{plan_id}: the review is incomplete ({exc.reason}): {kept}")
+    if fix := INCOMPLETE_FIX.get(exc.reason):
+        ctx.say(f"fix: {fix}")
+    raise L4Exit(
+        ExitCode.WAITING_CAPACITY,
+        f"review: the review is incomplete ({exc.reason}): {kept}; run it again to ask the rest",
+    )
+
+
+def _incomplete_doc(event: PlanEvent) -> dict[str, Any]:
+    """`review.incomplete` of `l4 yolo status --json` (L4-YOLO-099): the newest review that did not finish."""
+    data = event.data
+    return {
+        "at": event.at,
+        "source": data.get("source"),
+        "reason": data.get("reason"),
+        "answered": len(data.get("answered") or {}),
+        "left": len(data.get("left") or ()),
+        "failures": [
+            {k: f.get(k) for k in ("profile", "subject", "kind", "detail")}
+            for f in data.get("failures") or ()
+            if isinstance(f, dict)
+        ],
+        "cost_usd": data.get("cost_usd"),
+    }
+
+
+def _incomplete_lines(doc: Mapping[str, Any]) -> list[str]:
+    """The status lines of `review.incomplete`: when, how many answers were kept, each failure, and the fix."""
+    lines = [
+        f"    incomplete {_since(str(doc['at']))} ago ({doc['source']}, {doc['reason']}): "
+        f"{doc['answered']} answered and kept, {doc['left']} left"
+    ]
+    lines += [
+        f"      {f['profile']}: {f['subject'] or 'selection'}: {f['kind']}: {f['detail']}" for f in doc["failures"]
+    ]
+    fix = INCOMPLETE_FIX.get(str(doc["reason"]))
+    return [*lines, f"      fix: {fix}"] if fix else lines
+
+
 def _since(ts: str) -> str:
     when = parse_time(ts)
     return ago((_now() - when).total_seconds()) if when else "?"
@@ -2065,6 +2194,13 @@ def _render(d: dict[str, Any]) -> str:
             else ""
         )
         lines.append(f"  review: {d['review']['state']}{changed}{covered}")
+        if d["review"].get("in_parts"):
+            lines.append(
+                f"    reviewed in parts: {', '.join(d['review']['in_parts'])} "
+                "(no judge saw two units' full text together)"
+            )
+        if d["review"].get("incomplete"):
+            lines += _incomplete_lines(d["review"]["incomplete"])
         lines += [f"    {r}" for r in d["review"].get("stale", [])]
         lines += [f"    {p}" for p in d["review"]["problems"]]
         lines += [
@@ -2369,10 +2505,11 @@ def run_findings(
         ctx.say(json.dumps(doc, indent=2))
         return ExitCode.OK
     lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
-    if lines:
-        for line in lines:
-            ctx.say(line)
-    else:
+    for line in lines:
+        ctx.say(line)
+    if not lines or (
+        subject is None and not show_all and fnd.all_ready(review)
+    ):  # the notes of batches in parts are no open finding
         ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
     if force is not None:
         for line in _force_lines(force):
@@ -2574,7 +2711,7 @@ def _accepted_findings(state: PlanState) -> dict[str, tuple[str, dict[str, Any],
     """finding id -> (subject, the finding, its item) for every finding the activation froze (L4-YOLO-028)."""
     out: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
     for subject, item in state.activated_accepted.items():
-        for finding in item.get("findings") or ():
+        for finding in fnd.carried(item.get("findings")):
             if isinstance(finding, Mapping):
                 out[fnd.finding_id(subject, finding)] = (subject, dict(finding), item)
     return out

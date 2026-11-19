@@ -14,10 +14,11 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from l4.yolo.model import PlanEvent
+from l4.yolo.model import JudgeFailure, PlanEvent
 
 # A finding of these criteria is the harness saying that no review happened for the item (never reused, never a round).
 HARNESS_CRITERIA = frozenset({"schema", "unit_missing", "completeness"})
+IN_PARTS = "parts"  # the harness's minor note on a batch verdict made from parts (L4-YOLO-098): it blocks nothing
 BATCH_PREFIX = "batch:"
 
 Entry = dict[str, Any]
@@ -33,6 +34,13 @@ def findings_sha(findings: Sequence[Mapping[str, Any]]) -> str:
     """The first 16 hex digits of sha256 of the findings as canonical JSON."""
     raw = json.dumps([dict(f) for f in findings], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def carried(findings: Sequence[Any] | None) -> list[Any]:
+    """The findings of an accepted item that go on to the unit run (L4-YOLO-028): all but the harness's parts note
+    (L4-YOLO-098), which is no defect, so no verifier can answer it and the merge gate must not wait for it. The
+    acceptance itself keeps every finding, so its `findings_sha` is the one the review entry has."""
+    return [f for f in findings or () if not (isinstance(f, Mapping) and f.get("criterion") == IN_PARTS)]
 
 
 # --- reading the ledger -----------------------------------------------------------------------------------------------
@@ -51,6 +59,11 @@ def _entries(event: PlanEvent) -> Iterable[tuple[str, Entry]]:
                 yield f"{prefix}{ident}", entry
 
 
+def _is_part(name: str) -> bool:
+    """`batch:<id>/<unit or summary>`: a part of a batch reviewed in parts, which is no subject of the history."""
+    return name.startswith(BATCH_PREFIX) and "/" in name[len(BATCH_PREFIX) :]
+
+
 def _harness(entry: Mapping[str, Any]) -> bool:
     return any(isinstance(f, dict) and f.get("criterion") in HARNESS_CRITERIA for f in entry.get("findings") or ())
 
@@ -64,12 +77,30 @@ def _key(subject: str, entry: Mapping[str, Any], event: PlanEvent) -> str:
     return str(entry.get("digest") or event.at)
 
 
+def _reusable_rows(event: PlanEvent) -> Iterable[tuple[Entry, str]]:
+    """The entries a later review may reuse from an event, each with the time of its judgement (L4-YOLO-099): the
+    `answered` entries of a `plan.review_incomplete` (units, batches and parts); the entries of a `plan.reviewed`, and
+    the `parts` rows of its batch entries (L4-YOLO-098), a reuse keeping the time of the judgement it reuses."""
+    if event.type == "plan.review_incomplete":
+        for entry in (event.data.get("answered") or {}).values():
+            if isinstance(entry, dict) and entry.get("verdict") is not None:
+                yield entry, event.at
+        return
+    for _, entry in _entries(event):
+        yield entry, str(entry.get("reused_from") or event.at)
+        for row in entry.get("parts") or ():
+            if isinstance(row, dict) and row.get("verdict") is not None:
+                yield row, str(row.get("reused_from") or event.at)
+
+
 def prior_entries(
     events: Sequence[PlanEvent], prompt_version: int, accepted: Mapping[str, Mapping[str, Any]] | None = None
 ) -> dict[str, Entry]:
     """Material key -> the newest recorded entry with it (current prompt version only), never one with a harness
-    `schema`, `unit_missing` or `completeness` finding. The returned entry is a copy of the recorded one plus `at`: the
-    time of the judgement itself (of the original when the recorded entry was already a reuse). For a material key that
+    `schema`, `unit_missing` or `completeness` finding. The entries come from `plan.reviewed` (and the part rows of its
+    batches) and from the `answered` entries of `plan.review_incomplete` (L4-YOLO-099). The returned entry is a copy of
+    the recorded one plus `at`: the time of the judgement itself (of the original when the recorded entry was already a
+    reuse). For a material key that
     an acceptance in `accepted` (subject -> the `plan.accepted` data) is bound to, the entry is the newest one with
     that key whose `findings_sha` equals the acceptance's, when the ledger holds one (L4-YOLO-065, design D9.1)."""
     found: dict[str, Entry] = {}
@@ -79,13 +110,13 @@ def prior_entries(
         if item.get("material") and item.get("findings_sha"):
             wanted.setdefault(str(item["material"]), set()).add(str(item["findings_sha"]))
     for event in events:
-        if event.type != "plan.reviewed" or _version(event) != prompt_version:
+        if event.type not in ("plan.reviewed", "plan.review_incomplete") or _version(event) != prompt_version:
             continue
-        for _, entry in _entries(event):
+        for entry, at in _reusable_rows(event):
             material = entry.get("material")
             if not material or _harness(entry):
                 continue
-            row = {**entry, "at": str(entry.get("reused_from") or event.at)}
+            row = {**entry, "at": at}
             found[str(material)] = row
             if str(material) in wanted and findings_sha(entry.get("findings") or []) in wanted[str(material)]:
                 bound[str(material)] = row
@@ -93,12 +124,22 @@ def prior_entries(
 
 
 def history(events: Sequence[PlanEvent], subject: str, prompt_version: int) -> list[Entry]:
-    """The subject's entries of the given prompt version, oldest first, each a copy with `at`, `source`, `material`."""
+    """The subject's entries of the given prompt version, oldest first, each a copy with `at`, `source`, `material`: a
+    judgement counts where it was made, in a `plan.reviewed` or in the `answered` of a `plan.review_incomplete`
+    (L4-YOLO-099). A part of a batch is no subject."""
     out: list[Entry] = []
     for event in events:
-        if event.type != "plan.reviewed" or _version(event) != prompt_version:
+        if event.type not in ("plan.reviewed", "plan.review_incomplete") or _version(event) != prompt_version:
             continue
-        for name, entry in _entries(event):
+        if event.type == "plan.review_incomplete":
+            named = [
+                (name, entry)
+                for name, entry in (event.data.get("answered") or {}).items()
+                if isinstance(entry, dict) and entry.get("verdict") is not None and not _is_part(name)
+            ]
+        else:
+            named = list(_entries(event))
+        for name, entry in named:
             if name == subject:
                 out.append(
                     {
@@ -109,6 +150,109 @@ def history(events: Sequence[PlanEvent], subject: str, prompt_version: int) -> l
                     }
                 )
     return out
+
+
+FAILED_KINDS = ("error", "length", "schema_invalid", "timeout")  # a judge that failed the material (L4-YOLO-096)
+
+
+def _since_review(events: Sequence[PlanEvent], prompt_version: int) -> list[PlanEvent]:
+    """The `plan.review_incomplete` events of the prompt version after the latest `plan.reviewed`, oldest first."""
+    last = max((i for i, e in enumerate(events) if e.type == "plan.reviewed"), default=-1)
+    return [e for e in events[last + 1 :] if e.type == "plan.review_incomplete" and _version(e) == prompt_version]
+
+
+def failed_before(events: Sequence[PlanEvent], prompt_version: int) -> dict[str, list[str]]:
+    """Material key -> the profiles that failed that call (kinds `error`, `length`, `schema_invalid`, `timeout`) in the
+    incomplete reviews after the plan's latest `plan.reviewed`, accumulated over those events in the order they first
+    failed it. The next review asks those judges last (L4-YOLO-096); a `plan.reviewed` resets the memory."""
+    out: dict[str, list[str]] = {}
+    for event in _since_review(events, prompt_version):
+        for failure in event.data.get("failures") or ():
+            if not isinstance(failure, dict) or failure.get("kind") not in FAILED_KINDS:
+                continue
+            material, profile = failure.get("material"), failure.get("profile")
+            if material and profile and profile not in out.setdefault(str(material), []):
+                out[str(material)].append(str(profile))
+    return out
+
+
+def kept_keys(events: Sequence[PlanEvent], prompt_version: int) -> set[str]:
+    """The material keys of the `answered` entries of the `plan.review_incomplete` events after the plan's latest
+    `plan.reviewed` (of the prompt version, no harness finding). A batch with a part among them is reviewed in parts
+    (L4-YOLO-098); a part that only a finished review recorded splits nothing."""
+    return {
+        str(entry["material"])
+        for event in _since_review(events, prompt_version)
+        for entry in (event.data.get("answered") or {}).values()
+        if isinstance(entry, dict) and entry.get("material") and not _harness(entry)
+    }
+
+
+def latest_incomplete(events: Sequence[PlanEvent], prompt_version: int) -> PlanEvent | None:
+    """The newest `plan.review_incomplete` of the prompt version after the plan's latest `plan.reviewed`, else None."""
+    found = _since_review(events, prompt_version)
+    return found[-1] if found else None
+
+
+def failure_rows(failures: Sequence[JudgeFailure], *, material: bool) -> list[dict[str, str]]:
+    """`[{profile, subject, kind, detail}]` of L4-YOLO-096; a review that does not finish keeps the material key too,
+    which the next run reads to ask the other judges first (`failed_before`)."""
+    return [
+        {"profile": f.profile, "subject": f.subject, "kind": f.kind, "detail": f.detail}
+        | ({"material": f.material} if material and f.material else {})
+        for f in failures
+    ]
+
+
+def judges_answering(verdicts: Iterable[Any]) -> list[str]:
+    """The distinct profiles that answered in this review (a reuse names none, nor does a part of a batch that was
+    reused), in the order they first answered. A batch in parts has the profiles of its parts in its entry (`judge`,
+    joined by `, `); only the parts judged in this review count here."""
+    names: list[str] = []
+    for verdict in verdicts:
+        if verdict.reused_from is not None:
+            continue
+        found = (
+            [p.judge for _, p in verdict.parts if p.reused_from is None and p.judge]
+            if verdict.parts
+            else verdict.judge.split(", ")
+            if verdict.judge
+            else []
+        )
+        names += [n for n in found if n not in names]
+    return names
+
+
+def failure_line(failure: JudgeFailure) -> str:
+    """The log and command line of a judge that was skipped or discarded: `selection` where no subject was asked."""
+    return f"{failure.profile}: {failure.subject or 'selection'}: {failure.kind}: {failure.detail}"
+
+
+def repeats_incomplete(
+    previous: PlanEvent | None,
+    *,
+    plan_digest: str,
+    reason: str,
+    failures: Sequence[JudgeFailure],
+    answered: Mapping[str, Any],
+    cost: float,
+) -> bool:
+    """True when the newest incomplete review (`latest_incomplete`) has the same plan digest, reason and failures
+    (profile, subject, kind and material key) and this run answered nothing and spent nothing: nothing is written
+    (L4-YOLO-099). The material key is part of it: the same judge failing the same unit on a text a person has since
+    changed is new, and `failed_before` learns it only from the event."""
+    if previous is None or answered or cost > 0:
+        return False
+    same = {
+        (f.get("profile"), f.get("subject"), f.get("kind"), f.get("material"))
+        for f in previous.data.get("failures") or ()
+        if isinstance(f, dict)
+    }
+    return (
+        previous.data.get("plan_digest") == plan_digest
+        and previous.data.get("reason") == reason
+        and same == {(f.profile, f.subject, f.kind, f.material) for f in failures}
+    )
 
 
 def judged(hist: Sequence[Mapping[str, Any]]) -> list[Entry]:
@@ -281,6 +425,12 @@ def resolve(
         )
     if criterion == "material":
         return finding.get("text", "")
+    if criterion == IN_PARTS:
+        return (
+            "A note, not a defect, and it blocks nothing: the batch was too large for one call, or its whole call "
+            "failed, so read the interfaces its units share together yourself. The batch is asked whole again when "
+            "its material changes (unless it is over yolo.review.max_batch_chars)."
+        )
     if criterion == "schema":
         return f"No review happened for this item: run the review again (l4 yolo review {plan_id})."
     if criterion in ("unit_missing", "completeness"):
@@ -290,7 +440,7 @@ def resolve(
         )
     if criterion == "verdict":
         return (
-            "The judge said NEEDS_REVISION and named no finding: read the missing list, "
+            "The judge named no finding: read the missing list, "
             f"or ask again with l4 yolo review {plan_id} --worktree --fresh {subject}."
         )
     return "Read the finding and change the specification it points to, then run the review again."
@@ -347,6 +497,31 @@ def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any
                 yield f"{prefix}{ident}", entry
 
 
+def _in_parts(entry: Mapping[str, Any]) -> bool:
+    """A batch verdict made from parts carries the note (a minor finding of criterion `parts`): READY or not, the person
+    is shown that no judge saw two units' full text together."""
+    return any(isinstance(f, dict) and f.get("criterion") == IN_PARTS for f in entry.get("findings") or ())
+
+
+def all_ready(review: Mapping[str, Any]) -> bool:
+    """No subject of the review is open: every verdict is READY (a READY batch that carries the note of a batch in parts
+    is listed by `l4 yolo findings`, but nothing is open)."""
+    return all(str(entry["verdict"]) == "READY" for _, entry in _subjects(review))
+
+
+def batches_in_parts(events: Sequence[PlanEvent], prompt_version: int) -> list[str]:
+    """The batches of the plan's latest `plan.reviewed` (of the prompt version) whose verdict was made from parts, for
+    `l4 yolo status`."""
+    for event in reversed(events):
+        if event.type == "plan.reviewed" and _version(event) == prompt_version:
+            return [
+                str(batch)
+                for batch, entry in (event.data.get("batches") or {}).items()
+                if isinstance(entry, dict) and _in_parts(entry)
+            ]
+    return []
+
+
 def _facts(
     review: Mapping[str, Any],
     history_of: Callable[[str], Sequence[Mapping[str, Any]]],
@@ -364,7 +539,7 @@ def _facts(
         if only is not None:
             if subject != only:
                 continue
-        elif verdict == "READY" and not show_all:
+        elif verdict == "READY" and not show_all and not _in_parts(entry):
             continue
         hist = list(history_of(subject))
         material = entry.get("material") or (hist[-1]["material"] if hist else None)
@@ -450,8 +625,10 @@ def render(
         if fact.reused_from:
             lines.append(f"  reused: judged {fact.reused_from} on the same material")
         shown = _by_severity(fact.findings)
-        minors = [f for f in shown if f.get("severity") == "minor"]
-        for f in shown if show_all else [f for f in shown if f.get("severity") != "minor"]:
+        minors = [f for f in shown if f.get("severity") == "minor" and f.get("criterion") != IN_PARTS]
+        for f in (
+            shown if show_all else [f for f in shown if f.get("severity") != "minor" or f.get("criterion") == IN_PARTS]
+        ):
             lines.append(f"  {finding_id(fact.subject, f)} [{f.get('severity')}/{f.get('criterion')}] {f.get('text')}")
             lines.append(f"    Resolve: {resolver(fact.subject, f)}")
         if minors and not show_all:
@@ -528,7 +705,9 @@ def render_json(
                     }
                     for f in _by_severity(fact.findings)
                 ],
-                "minor": sum(1 for f in fact.findings if f.get("severity") == "minor"),
+                "minor": sum(
+                    1 for f in fact.findings if f.get("severity") == "minor" and f.get("criterion") != IN_PARTS
+                ),
                 "assumptions": fact.assumptions,
                 "missing": fact.missing,
                 "since": since,

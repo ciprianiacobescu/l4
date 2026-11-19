@@ -196,6 +196,58 @@ def test_the_unit_that_completes_the_batch_merges_once_the_batch_item_is_address
     assert world.landed(head) and "unit.merged" in world.kinds() and not waits(world)
 
 
+NOTE = {
+    "criterion": "parts",
+    "severity": "minor",
+    "text": "this batch was reviewed in parts: no judge saw two units' full text together",
+}
+
+
+def _batch_note_plan(world, name, *, integrated=(), **state):
+    """As `_batch_item_plan`, with the accepted batch item holding F1 and the harness's parts note (L4-YOLO-098)."""
+    world.plan(merge="auto", deps={})
+    world.activate()
+    text = (world.repo / ".l4" / "plans" / "p1.json").read_text(encoding="utf-8")
+    world.seed(ev("plan.activated", plan_digest=plan_digest(text), digests=world.digests(), limits={}, by="alice",
+                  reason="go", accepted={"batch:b1": accepted_item(F1, NOTE)}))  # fmt: skip
+    for done in integrated:
+        world.seed(ev("unit.integrated", unit=unit_id(done), revision="r"))
+    world.seed(ev("unit.dispatched", unit=unit_id(name), run="r0"))
+    head = world.unit_branch(name)
+    world.forge.create_pr(f"l4/openspec/{name}", "main", f"[l4] {name}", "b", draft=False)
+    return head, {name: world.in_review(name, head, **state)}
+
+
+def test_the_parts_note_of_an_accepted_batch_does_not_hold_the_unit_that_completes_it(world):
+    """The real finding is addressed; the note was never a finding a verifier could answer (L4-YOLO-098)."""
+    bid = finding_id("batch:b1", F1)
+    head, snaps = _batch_note_plan(world, "b", integrated=["a"], accepted_addressed=frozenset({bid}))
+    world.step(snaps)
+    assert world.landed(head) and "unit.merged" in world.kinds() and not waits(world)
+
+
+def test_the_parts_note_is_not_carried_to_the_unit_and_the_real_finding_is(world):
+    _, snaps = _batch_note_plan(world, "b", integrated=["a"])
+    step = world.step(snaps)
+    (item,) = step.accepted[unit_id("b")]
+    assert [f["criterion"] for f in item["findings"]] == [F1["criterion"]]
+    (waiting,) = waits(world)
+    assert finding_id("batch:b1", F1) in waiting.data["detail"] and "parts" not in waiting.data["detail"]
+
+
+def test_an_accepted_item_of_the_parts_note_alone_is_not_carried(world):
+    _, snaps = in_review(world, accepted={A: accepted_item(NOTE)})
+    step = world.step(snaps)
+    assert step.accepted == {} and not waits(world)
+
+
+def test_the_report_does_not_list_the_parts_note_as_an_accepted_finding(world):
+    in_review(world, accepted={A: accepted_item(F1, NOTE)})
+    text = report_of(world, {})
+    assert f"{ID1} [testability/major] {TEXT1}: no answer recorded" in text
+    assert "[parts/minor]" not in text and finding_id(A, NOTE) not in text
+
+
 def test_a_human_merge_plan_is_unchanged(world):
     _, snaps = in_review(world, accepted={A: accepted_item(F1)}, merge="human")
     world.step(snaps)

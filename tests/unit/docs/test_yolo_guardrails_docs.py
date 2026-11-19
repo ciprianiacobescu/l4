@@ -98,11 +98,12 @@ def test_operate_starts_with_origin_then_the_runbook_and_the_table() -> None:  #
     ):
         assert row in section, row
     assert (
-        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 37
+        len([ln for ln in section.splitlines() if ln.startswith("| `")]) == 38
     )  # run-continuation adds three rows; pin-clis seven (Kiro 3, ENV-015, two load errors, two checksums, a refusal);
     # budget-guard two: `less than one step (10 min)` and `is shorter than the job's timeout`;
     # ci-evidence one: `repository CI failed: <job>`;
-    # test-path-intake one (`warning: test_path`) and local-doctor one (`LOCAL-001`)
+    # test-path-intake one (`warning: test_path`) and local-doctor one (`LOCAL-001`);
+    # readiness-judge-chain one (`review: the review is incomplete`, beside the old `no judge could answer` row)
 
 
 def test_every_command_of_the_runbook_exists() -> None:

@@ -54,6 +54,7 @@ class Step:
     permission_denials: list[dict[str, Any]] = field(default_factory=list)
     tool_rejections: list[dict[str, str]] = field(default_factory=list)
     transient: bool = False  # an `error` step that is a server-side overload (a 529): the caller may retry it
+    length_stop: bool = False  # an `error` step whose reply stopped at the model's output limit (L4-VER-071)
     api_status: int | None = None
     last_message: str | None = None  # the text after the last tool call, as an adapter reports it
     rejected: dict[str, Any] | None = None  # a structured reply the schema refused
@@ -159,6 +160,6 @@ class FakeAdapter:
             ),
             model_resolved=step.model if self._served_model else None, detail=step.detail,
             permission_denials=list(step.permission_denials), tool_rejections=list(step.tool_rejections),
-            transient=step.transient, api_status=step.api_status,
+            transient=step.transient, api_status=step.api_status, length_stop=step.length_stop,
             last_message=step.last_message, rejected=step.rejected, result_problem=step.result_problem,
         )  # fmt: skip

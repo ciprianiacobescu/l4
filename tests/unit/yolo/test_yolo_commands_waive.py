@@ -157,3 +157,19 @@ def test_a_waiver_is_withdrawn_and_a_finding_without_one_has_nothing_to_withdraw
     assert event.data == {"finding": ID1, "reason": "look again", "by": "alex@example.com", "actor": "person"}
     assert world.l4("waive", "p1", ID2, "--reason", "x", "--withdraw", "--no-run") == 2
     assert f"waive: {ID2} has no waiver: nothing to withdraw" in capsys.readouterr().err
+
+
+def test_the_parts_note_of_an_accepted_batch_is_not_a_finding_to_waive(world, person, capsys):
+    """The note is not carried into the accepted findings of a unit (L4-YOLO-098): it is open nowhere, so a waiver of
+    its id is refused as unknown, and the real finding of the same item can be waived."""
+    note = {"criterion": "parts", "severity": "minor", "text": "this batch was reviewed in parts"}
+    world.push_plan()
+    item = {"findings": [TESTABILITY, note], "reason": "use a plain path", "by": "alice", "actor": "person"}
+    world.seed("p1", ev("plan.activated", plan_digest=plan_digest(world.plan_text), digests={}, limits={}, by="alice",
+                        reason="go", accepted={A: item}))  # fmt: skip
+    note_id = finding_id(A, note)
+    assert world.l4("waive", "p1", note_id, "--reason", REASON, "--no-run") == 2
+    err = capsys.readouterr().err
+    assert f"waive: {note_id} is not an accepted finding of p1" in err and ID1 in err and err.count(note_id) == 1
+    assert not recorded(world, "plan.finding_waived")
+    assert world.l4("waive", "p1", ID1, "--reason", REASON, "--no-run") == 0

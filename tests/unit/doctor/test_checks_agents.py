@@ -134,3 +134,29 @@ def test_live001_line_is_unchanged_when_every_step_is_fast(make_ctx, scripted):
     ctx, _ = make_ctx(cfg=cfg(implementer=["impl"], judges=["judge"]))
     [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
     assert live.message == "implementer: impl ok (hello 7 ms); judges: judge ok (hello 7 ms)"
+
+
+def test_live001_probes_plan_judges_when_set_and_its_failure_is_a_warning(make_ctx, scripted):  # L4-YOLO-095
+    scripted({"c": ("auth", "plan judge is not logged in")})
+    load_check_modules()
+    config = L4Config(
+        profiles={
+            "impl": Profile(adapter="fake", vendor="a"),
+            "judge": Profile(adapter="fake", vendor="b"),
+            "plan": Profile(adapter="fake", vendor="c"),
+        },
+        roles=RolesCfg(implementer=["impl"], judges=["judge"], plan_judges=["plan"]),
+    )
+    ctx, _ = make_ctx(cfg=config)
+    [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
+    assert live.status == "fail" and live.severity == "warn"
+    assert "plan judge is not logged in" in live.message and "judges: judge ok" in live.message
+
+
+def test_live001_without_plan_judges_is_as_before(make_ctx, scripted):
+    scripted()
+    load_check_modules()
+    ctx, _ = make_ctx(cfg=cfg(implementer=["impl"], judges=["judge"]))
+    [live] = [o for o in run_checks(ctx, live=True) if o.id == "LIVE-001"]
+    assert live.message == "implementer: impl ok (hello 7 ms); judges: judge ok (hello 7 ms)"
+    assert ("c", "binary") not in Scripted.log

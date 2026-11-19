@@ -130,3 +130,10 @@ def test_a_copilot_cli_auto_profile_is_not_read_as_a_kiro_one(make_ctx):
     assert "anthropic, minimax, zhipu" in result.message  # kiro's set, for the kiro profile only
     ctx, _ = make_ctx(cfg=cfg({"cj": {"adapter": "copilot-cli"}}, judges=["cj"]))
     assert cc._cfg_011(ctx).message == "no kiro-cli judge profile"
+
+
+def test_a_kiro_profile_in_plan_judges_only_is_listed(make_ctx):  # L4-YOLO-095
+    profiles = {"kp": dict(BASE), "x": {"adapter": "fake"}}
+    ctx, _ = make_ctx(cfg=cfg(profiles, judges=["x"], plan_judges=["kp"]))
+    result = cc._cfg_011(ctx)
+    assert f"kp: {TRAIL}" in result.message and "no kiro-cli judge profile" not in result.message

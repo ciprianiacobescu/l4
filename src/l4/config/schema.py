@@ -610,6 +610,9 @@ class RolesCfg(_Strict):
     clarifier: list[str] = Field(default_factory=list)
     verifier_agent: list[str] = Field(default_factory=list)
     judges: list[str] = Field(default_factory=list)
+    plan_judges: list[str] = Field(
+        default_factory=list
+    )  # optional (L4-YOLO-095): the readiness review's chain; empty: judges
     s1_judge: list[str] = Field(default_factory=list)
     spec_writer: list[str] = Field(default_factory=list)
     delegate: list[str] = Field(default_factory=list)  # optional (L4-AVL-010): answers the questions of units in scope
@@ -950,6 +953,17 @@ class YoloReviewCfg(_Strict):
     max_dependency_chars: int = Field(default=20_000, ge=0)
     accept_after_rounds: int = Field(default=2, ge=1)
     accept_by_agents: bool = False
+    # a batch subject whose material is longer is reviewed in parts (L4-YOLO-098); 0 (default): no split before a call,
+    # only after a length stop, a timeout or a part kept by an incomplete review
+    max_batch_chars: int = Field(default=0, ge=0)
+    timeout: Duration = "15m"  # each judge call of the review (L4-YOLO-097)
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout(cls, value: str) -> str:
+        if duration_seconds(value) < DELEGATE_MIN_TIMEOUT_S:
+            raise ValueFree("yolo.review.timeout must be at least 1m")
+        return value
 
 
 class YoloMergeCfg(_Strict):
@@ -1078,8 +1092,9 @@ class L4Config(_Strict):
                 known = profile.adapter if profile.adapter in HARNESS_ADAPTERS else "(not one the harness knows)"
                 raise ValueFree(
                     f"profiles.{name} is in roles.{role}, but its adapter {known} cannot judge (a judge call has no "
-                    f"tools): an adapter profile in roles.judges, roles.verifier_agent, roles.clarifier or "
-                    f"roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; remove {name} from roles.{role}"
+                    f"tools): an adapter profile in roles.judges, roles.plan_judges, roles.verifier_agent, "
+                    f"roles.clarifier or roles.s1_judge must use one of {', '.join(JUDGE_ADAPTERS)}; "
+                    f"remove {name} from roles.{role}"
                 )
         return self
 

@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
 from l4.yolo.accept import force_line
-from l4.yolo.findings import finding_id
+from l4.yolo.findings import carried, finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
 
 
@@ -55,13 +55,14 @@ def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, f
         if data and data.get("force"):  # L4-YOLO-062: no findings, the person's reason
             lines.append(f"- {force_line(subject, str(data.get('by', '?')), str(data.get('reason', '')))}")
             continue
-        if not data or not data.get("findings"):
+        listed = carried(data.get("findings")) if data else []  # the parts note is no accepted finding
+        if not listed:
             continue
         lines.append(
             f"- Accepted review findings ({'' if subject == unit_id else subject + ', '}accepted by "
             f"{data.get('by', '?')} ({data.get('actor', '?')}): {data.get('reason', '')}):"
         )
-        for f in data["findings"]:
+        for f in listed:
             fid = finding_id(subject, f)
             if folded is not None and fid in folded.accepted_addressed:
                 answer = "addressed by the verifier"

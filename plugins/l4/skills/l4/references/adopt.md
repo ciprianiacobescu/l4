@@ -172,6 +172,10 @@ implementer:
 - A judge of every implementer vendor is vetoed. The harness does not move a task to a profile when no judge of another
   vendor is left (the independence rule). With the judge `claude-judge` alone, a move to `claude-sonnet` is skipped.
   Keep one judge of another vendor, here `codex-judge`.
+- `roles.plan_judges` is the chain of the plan readiness review. Leave it out and the review asks `roles.judges`; list
+  it to put other judges, or another first judge, on the plan review without reordering the judges of your units. A
+  list there replaces `judges` for the review only, and a judge of `judges` that you want in the review goes in it too.
+  The review moves a subject to the next judge when one fails, and keeps what it answered.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
 - The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.58`) before you
