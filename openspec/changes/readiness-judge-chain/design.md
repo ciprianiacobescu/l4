@@ -300,6 +300,9 @@ usually the proposal and the start of the specs. The summary part sees every uni
 
 - `merge_parts(raw_verdicts, cause) -> Verdict` takes the verdicts as `verdict_of` returned them, not amended, in part
   order.
+- before the merge, a part whose verdict is NEEDS_REVISION and names no finding gets the harness finding `verdict` (the text
+  `_amend` gives it, from the part's own `missing`). `_amend` adds that finding only to a verdict with no finding at all,
+  so after the merge another part's minor finding would hide it, and "all minor" would give READY;
 - verdict: the worst, by `{"BLOCKED": 2, "NEEDS_REVISION": 1, "READY": 0}`;
 - findings: concatenated, with a repeated `(criterion, severity, text)` kept once, at its first place;
 - assumptions and missing: concatenated, with an exact repeat kept once;

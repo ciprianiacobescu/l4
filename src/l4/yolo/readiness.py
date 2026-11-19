@@ -528,7 +528,13 @@ def merge_parts(parts: Sequence[Verdict], cause: str) -> Verdict:
     """The verdict of a batch reviewed in parts (L4-YOLO-098): the worst verdict of the parts as the judge gave them
     (not amended: the rules of L4-YOLO-004 and L4-YOLO-023 run once, on this, with the whole batch's cuts), their
     findings in part order with an exact repeat kept once, their assumptions and `missing` lines joined the same way,
-    and the `missing` line that says no call saw two units in full together."""
+    and the `missing` line that says no call saw two units in full together. A part that says NEEDS_REVISION and names
+    no finding gets the harness finding `verdict` first, so another part's minor findings cannot turn the merged verdict
+    into READY (`_amend` adds that finding only to a verdict with no finding at all)."""
+    parts = [
+        replace(p, findings=(_verdict_finding(p),)) if p.verdict == "NEEDS_REVISION" and not p.findings else p
+        for p in parts
+    ]
     said = max((p.verdict for p in parts), key=_WORST.__getitem__)
     findings: list[dict[str, str]] = []
     for part in parts:
@@ -590,6 +596,13 @@ def _with_digest(verdict: Verdict, digest: str | None) -> Verdict:
     return Verdict(verdict.verdict, verdict.findings, verdict.assumptions, verdict.missing, digest)
 
 
+def _verdict_finding(verdict: Verdict) -> dict[str, str]:
+    """The harness finding of a NEEDS_REVISION that names no finding (L4-YOLO-023)."""
+    shown = "; ".join(verdict.missing) or "nothing"
+    text = f"the judge said NEEDS_REVISION and named no finding; missing: {shown}"
+    return {"criterion": "verdict", "severity": "major", "text": text}
+
+
 def _amend(verdict: Verdict, subject: Subject) -> Verdict:
     """What the judge was not shown is the harness's finding, not the model's (R9): material the size limits cut makes
     the verdict at least NEEDS_REVISION (BLOCKED stays BLOCKED) with a blocking finding that names it; the binary files
@@ -626,9 +639,7 @@ def _amend(verdict: Verdict, subject: Subject) -> Verdict:
         findings = (*findings, {"criterion": "material", "severity": "blocking", "text": text})
         said = "NEEDS_REVISION" if said == "READY" else said
     if said == "NEEDS_REVISION" and named_none and not findings:
-        shown = "; ".join(verdict.missing) or "nothing"
-        text = f"the judge said NEEDS_REVISION and named no finding; missing: {shown}"
-        findings = ({"criterion": "verdict", "severity": "major", "text": text},)
+        findings = (_verdict_finding(verdict),)
     elif said == "NEEDS_REVISION" and findings and all(f["severity"] == "minor" for f in findings):
         said = "READY"  # the prompt defines minor as a nit
     if subject.not_shown:

@@ -7910,8 +7910,10 @@ findings in part order with an exact repeat (criterion, severity and text) kept 
 lists joined the same way, and the `missing` line `judged in <n> parts (each unit in full with the other units read in
 part, and every unit read in part): no call saw two units of the batch in full together; why: <cause>` (`its material
 has <c> characters, over yolo.review.max_batch_chars (<m>)`, `the whole batch stopped at the output limit of
-<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`). The rules of
-L4-YOLO-004 and L4-YOLO-023 SHALL then be applied once, to that verdict, with the whole batch's cuts. The batch's entry
+<profile>`, `the whole batch timed out on <profile>`, or `an earlier review run answered a part of it`). A part whose
+verdict is NEEDS_REVISION and names no finding SHALL get the harness finding `verdict` (L4-YOLO-023) before the merge,
+so that another part's findings cannot hide it and the merged verdict is never READY because of it. The other rules of
+L4-YOLO-004 and L4-YOLO-023 SHALL then be applied once, to the merged verdict, with the whole batch's cuts. The batch's entry
 SHALL have the whole batch's material key, so that a later review of the same material reuses it (L4-YOLO-022), and
 `parts` (`[{part, material, judge, verdict, findings, assumptions, missing}]`, with `reused_from` for a part that was
 reused), whose rows SHALL be reusable by their own keys. `l4 yolo review --worktree --fresh batch:<id>` SHALL ask every
@@ -18641,7 +18643,9 @@ scenario is a spec defect (§26).
   `batch_acceptance` finding
 - **When** the batch's verdict is made
 - **Then** the first is NEEDS_REVISION with F once and the minor finding; with one part BLOCKED it is BLOCKED; the
-  second is READY with the finding among its assumptions
+  second is READY with the finding among its assumptions; and a part that is NEEDS_REVISION with no finding, merged
+  with a part that is READY with one minor finding, gives NEEDS_REVISION with the harness finding `verdict`, never
+  READY
 
 #### SCN-YOLO-276 (−) A batch that fits and a unit keep today's prompt · L4-YOLO-098
 - **Given** a batch under the bound, a unit subject, a batch with one unit left to review (the others done), and a

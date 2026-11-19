@@ -218,6 +218,31 @@ def test_scn_yolo_275_a_batch_without_a_profile_whose_only_finding_is_batch_acce
     assert any("batch_acceptance does not apply" in a and "no outcome" in a for a in amended.assumptions)
 
 
+def test_a_part_that_says_needs_revision_and_names_nothing_is_never_merged_into_ready():
+    """The harness finding for a NEEDS_REVISION that names no finding is made per part, before the merge: another
+    part's minor finding must not hide it (L4-YOLO-098)."""
+    silent = Verdict("NEEDS_REVISION", missing=("m1",))
+    merged = merge_parts([silent, Verdict("READY", (MINOR,))], "why")
+    assert merged.verdict == "NEEDS_REVISION"
+    verdicts = [f for f in merged.findings if f["criterion"] == "verdict"]
+    assert len(verdicts) == 1 and verdicts[0]["severity"] == "major" and "m1" in verdicts[0]["text"]
+    assert MINOR in merged.findings
+    amended = _amend(merged, Subject("batch", "b1", ""))
+    assert amended.verdict == "NEEDS_REVISION" and verdicts[0] in amended.findings
+
+
+def test_a_silent_part_keeps_the_review_of_a_batch_from_being_ready(world):
+    silent = said("NEEDS_REVISION")
+    minor = said("READY", [MINOR])
+    fake = FakeAdapter([ok(), ok(), silent, minor, ok()])  # A, B, part A, part B, the summary
+    result, _ = review(world, TWO, fake, cfg=cfg_of(1000))
+    verdict = result.batches["b1"]
+    assert verdict.verdict == "NEEDS_REVISION"
+    assert any(f["criterion"] == "verdict" for f in verdict.findings)
+    raw = dict(verdict.parts)[f"batch:b1/{A}"]
+    assert raw.verdict == "NEEDS_REVISION" and raw.findings == ()  # the recorded part is what the judge said
+
+
 # --- SCN-YOLO-277 ----------------------------------------------------------------------------------------------------
 
 
