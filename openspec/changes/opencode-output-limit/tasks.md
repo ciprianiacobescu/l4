@@ -125,6 +125,11 @@ fail, then write the code. Run only the test files named here, never the whole s
 
 ## 6. The live record (a person with keys; not the implementer)
 
+- Evidence so far (direct CLI runs, not through the harness, no fixture recorded): on 1.18.33 with
+  `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=1024` a free `opencode/` model's list of 800 lines ended at once with no text,
+  and without it wrote all 800 lines; on 2.2.6 with `providers.opencode.models.<id>.limit.output: 1024` in
+  `OPENCODE_CONFIG_CONTENT` the same list stopped after 343 lines, and without the block wrote all 800, a profile
+  without any credential included. The raise above 32000 and the recorded fixtures are still to do.
 - [ ] 6.1 The oracle is the lowering direction, which is cheap and does not depend on a model writing 32000 tokens. On a
   machine with `@opencode/cli` 2.2.6 and an `opencode-go/` key, for a `cli_major: 2` profile:
   - with `max_output_tokens: 1024`, one judge call whose prompt asks for a long reply (for example "write 3000 words
