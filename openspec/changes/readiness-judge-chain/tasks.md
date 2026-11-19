@@ -60,7 +60,7 @@ Rules for every task:
   Run `uv run --frozen pytest tests/unit/config/test_plan_judges_config.py tests/unit/config/test_judge_roles.py
   tests/unit/config/test_schema.py tests/unit/config/test_schema_yolo.py tests/unit/docs/test_delegate_docs.py
   tests/unit/yolo/test_yolo_preflight_script.py tests/unit/agents/test_shared_types.py -q`.
-- [ ] 1.3 Doctor. Write the tests first:
+- [x] 1.3 Doctor. Write the tests first:
   - SCN-YOLO-262, the doctor part, in `tests/unit/doctor/test_checks_config.py`: an undefined profile in
     `roles.plan_judges` fails CFG-002, naming `roles.plan_judges`. This needs no code change; it shows CFG-002 covers
     the key.

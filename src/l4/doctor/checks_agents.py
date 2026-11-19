@@ -49,8 +49,12 @@ def scratch_dir(repo: Path) -> Iterator[str]:
 def _live_001(ctx: DoctorContext) -> CheckResult:
     lines: list[str] = []
     failures: list[str] = []
-    optional: list[str] = []  # the delegate is an optional role (L4-AVL-010): its failure is a warning
-    roles = (*LIVE_ROLES, *(("delegate",) if ctx.cfg.delegate.enabled else ()))
+    optional: list[str] = []  # the delegate and plan_judges are optional roles (L4-AVL-010): a failure is a warning
+    roles = (
+        *LIVE_ROLES,
+        *(("plan_judges",) if ctx.cfg.roles.plan_judges else ()),
+        *(("delegate",) if ctx.cfg.delegate.enabled else ()),
+    )
     with scratch_dir(ctx.repo) as scratch:
         probe_ctx = ProbeCtx(environ=ctx.env, cwd=Path(scratch), run=run_process, forbid=(ctx.repo,))
         factory = Factory(ctx.cfg, probe_ctx)
@@ -58,7 +62,7 @@ def _live_001(ctx: DoctorContext) -> CheckResult:
             try:
                 picked = factory.for_role(role, "doctor", serves=DELEGATE_SERVES if role == "delegate" else None)
             except L4Exit as exc:
-                (optional if role == "delegate" else failures).append(str(exc))
+                (optional if role in ("delegate", "plan_judges") else failures).append(str(exc))
                 continue
             hello = picked.probes.get("hello", {}).get("ms")
             slow = [  # a step of a second or more, so the next slow step is visible
@@ -73,7 +77,7 @@ def _live_001(ctx: DoctorContext) -> CheckResult:
     hint = "log in or install the CLI as the runner user (docs/runner/README.md)"
     if failures:
         return CheckResult("fail", "; ".join([*failures, *optional]), hint)
-    if optional:  # only the delegate failed: it escalates to a person, so the run is not blocked
+    if optional:  # only an optional role failed: the delegate escalates to a person, plan_judges falls back
         return CheckResult("fail", "; ".join([*lines, *optional]), hint, severity="warn")
     return CheckResult("pass", "; ".join(lines))
 
