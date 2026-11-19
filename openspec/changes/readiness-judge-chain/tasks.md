@@ -294,7 +294,7 @@ Rules for every task:
 
 ## 6. Documentation (L4-YOLO-100)
 
-- [ ] 6.1 Write the test first, in a new `tests/unit/docs/test_readiness_judge_chain_docs.py` (SCN-YOLO-282), in the
+- [x] 6.1 Write the test first, in a new `tests/unit/docs/test_readiness_judge_chain_docs.py` (SCN-YOLO-282), in the
   style of `tests/unit/docs/test_yolo_guardrails_docs.py`:
   - `docs/runbook.md` names `roles.plan_judges`, `yolo.review.timeout`, `yolo.review.max_batch_chars`,
     `plan.review_incomplete` and the three reasons;
@@ -304,7 +304,7 @@ Rules for every task:
   - the CHANGELOG's `## Unreleased` names `roles.plan_judges` and `yolo.review.timeout`.
 
   Run it and see it fail.
-- [ ] 6.2 Then write the docs. Plain sentences, the runbook's style. No consumer or project names.
+- [x] 6.2 Then write the docs. Plain sentences, the runbook's style. No consumer or project names.
   - `docs/runbook.md`, 12.2 (search `The review does not run if the judge agent fails`): replace that paragraph. Say
     which chain reviews a plan, that a subject goes to the next judge and the answers are kept, what `incomplete` under
     `review:` in `l4 yolo status` shows, and the fix per reason. Name `yolo.review.timeout` (15m) and
@@ -321,7 +321,7 @@ Rules for every task:
 
   Run the docs test and `uv run --frozen pytest tests/unit/docs -q`. Also run `uv run --frozen pytest
   tests/unit/skills -q` if the skill is hashed or checked there (`grep -rln "operate.md\|plan.md" tests/unit/skills`).
-- [ ] 6.3 `CHANGELOG.md` already has the Unreleased entry. Check it against what you built, and correct any number or
+- [x] 6.3 `CHANGELOG.md` already has the Unreleased entry. Check it against what you built, and correct any number or
   name that differs.
 
 ## 7. Checks

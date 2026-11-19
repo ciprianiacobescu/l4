@@ -1626,12 +1626,16 @@ retry and the `l4 yolo resume`.
   judge again with fewer criteria in each call (`judge.length_split`; at most `verifier.judge_length_splits` halvings),
   so this cause is rare. If it stays, the judge's thinking fills its limit: give the model a reasoning cap through
   `options.provider`, or add a judge with a larger output limit to `roles.judges`.
+- The plan review has no judge. It is not a capacity wait: no unit is parked. The review records
+  `plan.review_incomplete` (reason `no_judge`) with each judge and why it was skipped, and a later run asks the rest.
+  Set `roles.plan_judges` beside `roles.judges` to give the plan review its own chain
+  ([12.2](#122-procedure-review-and-activate-a-plan)).
 
 If `roles.implementer` or `roles.judges` is empty, the job is red with exit 2. The unit does not go to
 `waiting_capacity`.
 
-A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.verifier_agent`,
-`roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
+A profile whose adapter cannot judge (a judge call has no tools) in `roles.judges`, `roles.plan_judges`,
+`roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` is not a capacity problem either: the configuration does not load, and every
 command, `l4 doctor` included, exits 2 with `profiles.<name> is in roles.<role>, but its adapter <adapter> cannot judge
 (a judge call has no tools): … must use one of claude-code, codex, opencode, kiro-cli, copilot-cli, fake; remove <name> from
 roles.<role>`. Remove the profile from that role, commit and push. Since 0.4.19 `kiro-cli` is a judge adapter in all four
@@ -2920,10 +2924,47 @@ The steps one by one:
 > afterward, the plan stops with `inputs_changed`. The same is true if a person edits the plan file of an active plan.
 > A later review or admission of the file does not change what the activation froze.
 
-The review does not run if the judge agent fails or does not answer in time. The harness then records no review, and
-the next run tries again. If the size limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names
-the file, its size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000),
-`max_folder_chars` (80,000) and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.
+The review asks the profiles of `roles.plan_judges`, and those of `roles.judges` when `plan_judges` is empty or not
+set. A `plan_judges` list replaces `judges` for the plan review only: unit verification always uses `roles.judges`, and
+the two lists are never joined. The review goes to the next judge of its chain when a judge cannot answer a subject (a
+unit, a batch, or a part of a batch):
+- A judge that is not usable (a failed probe, a cool-down, no sandbox) is skipped and named.
+- An error discards the judge for the rest of the review.
+- A reply that stopped at the output limit, or that breaks the schema twice, discards the judge for that subject only.
+- A usage limit cools the profile down.
+- A timeout ends the review for this run: the next judge is not asked in the same job.
+
+Each answer is kept. A review that finishes is recorded once as `plan.reviewed`, which names the judge of each entry
+(`judge`) and, for the review, `judges` and `failures`. The log and `l4 yolo review --local` and `--worktree` print one
+line per failure: `<profile>: <subject>: <kind>: <detail>`. With one judge, a reply that breaks the schema twice is
+still BLOCKED.
+
+If a call has no answer, the review is incomplete and does not record `plan.reviewed`. It records
+`plan.review_incomplete` instead: the subjects answered, the subjects left, each judge and its failure, and the cost,
+which is charged to the plan. The plan's status, review and activation do not change. The next run reuses those answers
+and asks only the rest, and it asks a judge that failed a subject after the other judges. The log says
+`the review is incomplete (<reason>): <a> answered and kept, <l> left`, and while the review is not current
+`l4 yolo status` shows `incomplete`, the failures and a `fix:` line under `review:`. The reason and its fix:
+- `no_judge`: no judge was left for a subject. Fix the profiles named in the failures, run `l4 doctor --live`, or set
+  `roles.plan_judges`.
+- `timeout`: a judge did not answer within `yolo.review.timeout`. Raise it, or put another judge first in
+  `roles.plan_judges`.
+- `job_time`: the CI job had less time left before its soft deadline than `yolo.review.timeout`. Give the job more time
+  or lower the timeout. `l4 doctor` (CFG-012) warns when the timeout does not fit `ci.time_budget`.
+
+`l4 yolo review --local` and `--worktree --record` record the same event and exit 12 with the same lines; a `--worktree`
+dry run keeps the answers in its local cache and exits 12. A judge failure that reaches the command any other way
+records nothing, and the next run tries again.
+
+The review's keys, set on the base branch: `yolo.review.timeout` (`15m`, at least `1m`) bounds each judge call, and
+`yolo.review.max_batch_chars` (160,000; `0` turns it off) is the length of a batch's material above which the batch is
+reviewed in parts. A batch is also reviewed in parts when one of its parts was answered in an earlier run, and when its
+whole call stops at the output limit or times out. A part shows one unit in full with the other units cut at 6,000
+characters each, and one part shows every unit at that depth. The parts' verdicts make the batch's verdict, and its
+`missing` says `judged in <n> parts` and why, with `no call saw two units of the batch in full together`. If the size
+limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names the file, its
+size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000), `max_folder_chars` (80,000)
+and `max_dependency_chars` (20,000). A cut of a prerequisite folder does not block.
 
 The activation is refused with exit 2 and the cause in these cases:
 - The review is stale: `activate: the review of <plan-id> is stale against origin/<base> (<sha>):`, then one line for

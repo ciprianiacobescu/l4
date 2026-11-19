@@ -129,6 +129,12 @@ not even when `accept_by_agents` is true: it accepts the plan with no model revi
 the command for the person:
 `l4 yolo accept <id> --all --force --reason "<what the implementer should know>"`.
 
+A review that says `the review is incomplete (<reason>)` kept the subjects it answered (`plan.review_incomplete`) and
+asks only the rest at the next run: `l4 yolo status <id>` shows the failures and a `fix:` line (`no_judge`: fix the
+judges named or set `roles.plan_judges`; `timeout`: raise `yolo.review.timeout` or put another judge first in
+`roles.plan_judges`; `job_time`: more job time). Those keys are a person's change on the base branch. Do not review
+again in a loop: one run per cause.
+
 `l4 yolo waive <id> <F-id> --reason "..."` follows the same rule. It is for a plan that waits with
 `accepted_finding_open` on a finding the judge found not addressed. Never waive a finding the judge did not answer:
 run `l4 retry` for it. Never waive a finding whose fix the code needs: give it as feedback. Waive only after you have
