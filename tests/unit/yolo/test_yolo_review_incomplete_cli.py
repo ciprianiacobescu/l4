@@ -152,7 +152,7 @@ def test_the_parts_of_a_finished_dry_run_do_not_split_the_changed_batch_again(wo
     assert world.l4("review", "p1", "--worktree") == 0
     rewrite_cache(world, lambda lines: [{**x, "material": "stale"} if x["kind"] == "batch" else x for x in lines])
     configure(world, ["j1"], review={"max_batch_chars": 0})
-    again = FakeAdapter([ok()])
+    again = FakeAdapter([ok(), ok()])
     judges(monkeypatch, again, FakeAdapter([]))
     assert world.l4("review", "p1", "--worktree") == 0
     assert len(again.requests) == 1 and "read in part" not in again.requests[0].prompt
@@ -184,3 +184,25 @@ def test_record_writes_judge_and_sandbox_per_entry_from_the_judge_that_answered_
     assert data["judges"] == ["j1", "j2"] and data["judge"] == "j1"
     assert all(e["sandbox"] == "none" for e in (data["units"][A], data["units"][B], data["batches"]["b1"]))
     assert [(f["profile"], f["subject"], f["kind"]) for f in data["failures"]] == [("j1", B, "error")]
+
+
+def _split_then_fail(monkeypatch, *, module):
+    """A batch split by a size bound of 1: A, B, the part of A (answered), the part of B (an error; no judge is left, so
+    the summary is not asked)."""
+    j2 = FakeAdapter([ok(), ok(), ok(), Step(status="error", detail="boom")])
+    judges(monkeypatch, FakeAdapter([], probes=REFUSED), j2, module=module)
+
+
+def test_local_passes_the_kept_parts_so_the_next_run_asks_only_the_remaining_parts(world, monkeypatch, capsys):
+    """An incomplete `--local` review kept a part of the batch: the next run splits the batch for it even with the
+    size bound off, and asks the part of B and the summary, with no whole-batch call (L4-YOLO-098)."""
+    ready_world(world)
+    configure(world, ["j1", "j2"], review={"max_batch_chars": 1})
+    _split_then_fail(monkeypatch, module="commands")
+    assert world.l4("review", "p1", "--local") == 12
+    capsys.readouterr()
+    configure(world, ["j1", "j2"], review={"max_batch_chars": 0})
+    j2 = FakeAdapter([ok(), ok()])
+    judges(monkeypatch, FakeAdapter([], probes=REFUSED), j2, module="commands")
+    assert world.l4("review", "p1", "--local") in (0, 2)
+    assert len(j2.requests) == 2 and all("read in part" in r.prompt for r in j2.requests)  # part of B, summary

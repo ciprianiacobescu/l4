@@ -249,8 +249,9 @@ job [I].
 1. `yolo.review.max_batch_chars > 0` (the default is `0`: no pre-split) and `len(subject.user) > max_batch_chars`;
 2. any of its parts' material keys was kept by a `plan.review_incomplete` after the plan's latest `plan.reviewed`
    (`findings.kept_keys`, passed as `kept`; a `--worktree` dry run adds the parts of its local cache that no cached
-   whole-batch line is as new as: a dry run that finished writes that line with its parts, and one that did not does
-   not). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
+   whole-batch line is as new as, and that are newer than the plan's latest `plan.reviewed` on the ledger: a dry run that
+   finished writes that line with its parts, and one that did not does not; a review that finished in CI or with
+   `--local` ends the cached parts as it ends the ledger's). A part that only a `plan.reviewed` holds in `prior` is reused when the batch is split, and
    never splits it: without this a batch split once stays split, and `max_batch_chars: 0` would not turn the split off
    after a prerequisite changed;
 3. its whole call ends `error` with `length_stop`, or `timeout`, and the same judge is asked the parts first.
@@ -310,9 +311,18 @@ usually the proposal and the start of the specs. The summary part sees every uni
 
 - `merge_parts(raw_verdicts, cause) -> Verdict` takes the verdicts as `verdict_of` returned them, not amended, in part
   order.
-- before the merge, a part whose verdict is NEEDS_REVISION and names no finding gets the harness finding `verdict` (the text
-  `_amend` gives it, from the part's own `missing`). `_amend` adds that finding only to a verdict with no finding at all,
-  so after the merge another part's minor finding would hide it, and "all minor" would give READY;
+- before the merge, a part whose verdict is NEEDS_REVISION or BLOCKED and names no finding gets the harness finding
+  `verdict` (the text `_amend` gives it, from the part's own `missing`). `_amend` adds that finding only to a verdict
+  with no finding at all, so after the merge another part's minor finding would hide it, and "all minor" would give
+  READY. A silent BLOCKED part needs it for another reason: on a batch with no acceptance profile `_amend` moves the
+  `batch_acceptance` findings of the other parts to the assumptions, and a BLOCKED verdict left with no finding is read
+  as "the subject only groups units" and becomes READY. The criterion is `verdict`, never `schema`, `unit_missing` or
+  `completeness`, which mark a verdict that is no review and is never reused. A whole-batch BLOCKED with no finding
+  stays BLOCKED;
+- known limit: the grouping rule (a `batch_acceptance` finding on a batch with no profile is an assumption) runs once,
+  on the merged verdict, not on each part. A part BLOCKED only by `batch_acceptance`, merged with a part that is
+  NEEDS_REVISION with a major finding, gives BLOCKED, where a whole-batch call would give NEEDS_REVISION. That is
+  stricter than needed and never lets a defect through;
 - verdict: the worst, by `{"BLOCKED": 2, "NEEDS_REVISION": 1, "READY": 0}`;
 - findings: concatenated, with a repeated `(criterion, severity, text)` kept once, at its first place;
 - assumptions and missing: concatenated, with an exact repeat kept once;
@@ -325,7 +335,12 @@ usually the proposal and the start of the specs. The summary part sees every uni
   missed`. It comes after `_amend` so that no rule of `_amend` reads it (a verdict of only minor findings would become
   READY, and a BLOCKED batch with its findings moved would lose its `not findings` test). It accompanies the `missing`
   line. A minor finding blocks nothing, so a READY batch stays READY. `l4 yolo findings` shows a batch that carries it
-  even when it is READY, and `l4 yolo status` lists the batches of the current review that were judged in parts.
+  even when it is READY, and `l4 yolo status` lists the batches of the current review that were judged in parts. It is
+  not counted among the minor findings (text and JSON `minor`). `l4 yolo accept` records the subject's findings
+  unchanged (the digest `findings_sha` is of the review entry), but `cycle._accepted` drops the finding of criterion
+  `parts` (`findings.carried`) before the items reach the unit's carrier file, the implementer and verifier prompts,
+  the report and `accepted_finding_open`: the note is no defect, so a `merge: auto` unit never waits for it. An item
+  whose only findings were the note carries nothing.
 - The batch verdict's `material` is the whole batch's key. Its `parts` are `(part name, part verdict with material,
   judge, reused_from)`.
 

@@ -198,7 +198,7 @@ def run_findings_worktree(
     lines = findings.render(plan_id, ctx.target, review, history_of, **options)
     for line in lines:
         ctx.say(line)
-    if not lines or (subject is None and findings.all_ready(review)):
+    if not lines or (subject is None and not show_all and findings.all_ready(review)):
         ctx.say(f"{plan_id}: every subject of the latest dry run is READY (--all lists them)")
     return ExitCode.OK
 
@@ -376,7 +376,7 @@ def run_review_worktree(
         **{k: {**line["entry"], "at": line.get("at")} for k, line in cached.items()},
         **ledger,
     }  # the ledger wins: it is the shared record
-    kept = findings.kept_keys(read.events, PROMPT_VERSION) | _kept_in_cache(cached)
+    kept = findings.kept_keys(read.events, PROMPT_VERSION) | _kept_in_cache(cached, read.events)
     sandboxes = _Sandboxes(ctx, ctx.say)
     ctx.say(f"plan {plan_id} at the working tree: plan digest {plan_digest(file.text)}")
     try:
@@ -544,10 +544,13 @@ def _cache_lines(judged: Mapping[str, tuple[str, Verdict]], stamp: str, sandboxe
     ]  # fmt: skip
 
 
-def _kept_in_cache(cached: Mapping[str, Mapping[str, Any]]) -> set[str]:
+def _kept_in_cache(cached: Mapping[str, Mapping[str, Any]], events: Sequence[PlanEvent] = ()) -> set[str]:
     """The keys of the cached parts that split their batch (L4-YOLO-098): the parts of a dry run that did not finish. A
     dry run that finished writes the whole-batch line of the batch as well, with the same `at`, so a part counts only
-    when no cached line of its batch is as new as it (the cache has no `plan.reviewed`; this is how it ends)."""
+    when no cached line of its batch is as new as it. A part is also ignored when it is not newer than the plan's
+    latest `plan.reviewed`: a review that finished in CI or with `--local` ended the incomplete one, as it does for the
+    ledger's own parts (`findings.kept_keys`), so the dry run splits the same batches CI does."""
+    reviewed = max((e.at for e in events if e.type == "plan.reviewed"), default="")
     whole: dict[str, str] = {}
     for line in cached.values():
         if line.get("kind") == "batch":
@@ -558,6 +561,7 @@ def _kept_in_cache(cached: Mapping[str, Mapping[str, Any]]) -> set[str]:
         for key, line in cached.items()
         if line.get("kind") == "batch-part"
         and str(line.get("at") or "") > whole.get(str(line.get("subject")).split("/")[0], "")
+        and str(line.get("at") or "") > reviewed
     }
 
 

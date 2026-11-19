@@ -73,6 +73,7 @@ from l4.yolo.admit import FINISHED_PHASES, admit, done_units, merged_not_integra
 from l4.yolo.digest import MISSING, FolderMissing, RevisionMissing, current_unit_digest, plan_digest
 from l4.yolo.draft import derived_parents
 from l4.yolo.findings import (
+    carried,
     failed_before,
     failure_line,
     failure_rows,
@@ -782,12 +783,14 @@ class _Step:
                                 "id": finding_id(subject, f),
                                 **{k: f.get(k, "") for k in ("criterion", "severity", "text")},
                             }
-                            for f in data.get("findings") or ()
+                            for f in carried(data.get("findings"))
                         ],
                         **({"force": True} if data.get("force") is True else {}),  # only a force item has the key
                     }
                     for subject in (unit.id, f"batch:{batch.id}")
                     if (data := ctx.state.activated_accepted.get(subject)) is not None
+                    # an item whose only findings were the parts note has nothing to carry (a force item has none)
+                    and (data.get("force") is True or carried(data.get("findings")) or not data.get("findings"))
                 )
                 if items:
                     out[unit.id] = items

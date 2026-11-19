@@ -36,6 +36,13 @@ def findings_sha(findings: Sequence[Mapping[str, Any]]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def carried(findings: Sequence[Any] | None) -> list[Any]:
+    """The findings of an accepted item that go on to the unit run (L4-YOLO-028): all but the harness's parts note
+    (L4-YOLO-098), which is no defect, so no verifier can answer it and the merge gate must not wait for it. The
+    acceptance itself keeps every finding, so its `findings_sha` is the one the review entry has."""
+    return [f for f in findings or () if not (isinstance(f, Mapping) and f.get("criterion") == IN_PARTS)]
+
+
 # --- reading the ledger -----------------------------------------------------------------------------------------------
 
 
@@ -698,7 +705,9 @@ def render_json(
                     }
                     for f in _by_severity(fact.findings)
                 ],
-                "minor": sum(1 for f in fact.findings if f.get("severity") == "minor"),
+                "minor": sum(
+                    1 for f in fact.findings if f.get("severity") == "minor" and f.get("criterion") != IN_PARTS
+                ),
                 "assumptions": fact.assumptions,
                 "missing": fact.missing,
                 "since": since,

@@ -202,6 +202,8 @@ Rules for every task:
   - SCN-YOLO-275: test `merge_parts` directly with four raw `Verdict`s:
     - the worst verdict wins, F is kept once, and the minor finding is kept;
     - one BLOCKED part makes the batch BLOCKED;
+    - a BLOCKED part with no finding, merged with a part whose only finding is `batch_acceptance`, is BLOCKED with the
+      harness finding `verdict` (round 2), also for a kept part reused from an earlier review;
     - a groups-only batch (`acceptance_profile: none`, see `test_yolo_readiness_grouping_batch.py`) whose parts' only
       finding is `batch_acceptance` is READY, with the finding moved to its assumptions by `_amend`.
   - SCN-YOLO-277, the function part:

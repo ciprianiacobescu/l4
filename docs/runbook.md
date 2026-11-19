@@ -2966,8 +2966,10 @@ not split it: once a review has finished, a changed batch is asked whole again, 
 characters each, and one part shows every unit at that depth. The parts' verdicts make the batch's verdict, and its
 `missing` says `judged in <n> parts` and why, with `no call saw two units of the batch in full together`, and the
 verdict carries one minor finding that says so (`this batch was reviewed in parts: no judge saw two units' full text
-together, so defects visible only across units may be missed`). It blocks nothing: `l4 yolo findings` shows it, even for
-a READY batch, and `l4 yolo status` lists the batches judged in parts. Read the interfaces the batch's units share
+together, so defects visible only across units may be missed`). It blocks nothing, also when a person accepts the
+batch: it is not carried into the accepted findings of a unit, so no verifier answers it and no `merge: auto` unit
+waits for it. `l4 yolo findings` shows it, even for a READY batch (it is not counted among the minor findings), and
+`l4 yolo status` lists the batches judged in parts. Read the interfaces the batch's units share
 together yourself. If the size
 limits cut some of the unit's own material, the verdict is at most `NEEDS_REVISION`, and the finding names the file, its
 size, the budget and the key to raise. The limits are `yolo.review.max_file_chars` (20,000), `max_folder_chars` (80,000)

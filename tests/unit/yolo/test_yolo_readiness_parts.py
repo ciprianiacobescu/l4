@@ -9,6 +9,7 @@ import pytest
 from l4.agents.fake import FakeAdapter, Step
 from l4.yolo.model import UnitInfo, Verdict
 from l4.yolo.readiness import (
+    NO_REVIEW,
     PROMPT_VERSION,
     ReviewIncomplete,
     Subject,
@@ -318,6 +319,56 @@ def test_a_silent_part_keeps_the_review_of_a_batch_from_being_ready(world):
     assert any(f["criterion"] == "verdict" for f in verdict.findings)
     raw = dict(verdict.parts)[f"batch:b1/{A}"]
     assert raw.verdict == "NEEDS_REVISION" and raw.findings == ()  # the recorded part is what the judge said
+
+
+def test_a_part_that_says_blocked_and_names_nothing_is_never_merged_into_ready():
+    """A BLOCKED part with no finding gets the harness finding `verdict` before the merge (L4-YOLO-098): the batch
+    rule that a BLOCKED subject which only groups units and has no finding is READY must not apply to it."""
+    silent = Verdict("BLOCKED", missing=("m1",))
+    merged = merge_parts([silent, Verdict("NEEDS_REVISION", (GAP,))], "why")
+    amended = _amend(merged, Subject("batch", "b1", "", groups_only=True))
+    assert amended.verdict == "BLOCKED"
+    verdicts = [f for f in amended.findings if f["criterion"] == "verdict"]
+    assert len(verdicts) == 1 and "BLOCKED" in verdicts[0]["text"] and "m1" in verdicts[0]["text"]
+    assert verdicts[0]["criterion"] not in NO_REVIEW  # a review that was made: the batch is reused, not asked again
+    assert any("no outcome" in a for a in amended.assumptions)  # the batch_acceptance finding still became a note
+
+
+def test_a_silent_blocked_part_with_a_blocked_part_of_only_batch_acceptance_is_not_ready():
+    gap_blocked = Verdict("BLOCKED", (GAP,))
+    merged = merge_parts([Verdict("BLOCKED"), gap_blocked], "why")
+    amended = _amend(merged, Subject("batch", "b1", "", groups_only=True))
+    assert amended.verdict == "BLOCKED" and any(f["criterion"] == "verdict" for f in amended.findings)
+
+
+def test_a_whole_batch_that_says_blocked_and_names_nothing_stays_blocked():
+    assert _amend(Verdict("BLOCKED"), Subject("batch", "b1", "", groups_only=True)).verdict == "BLOCKED"
+
+
+def test_a_silent_blocked_part_keeps_the_review_of_a_batch_from_being_ready(world):
+    silent = said("BLOCKED")
+    gap = said("NEEDS_REVISION", [GAP])
+    fake = FakeAdapter([ok(), ok(), silent, gap, ok()])  # A, B, part A, part B, the summary
+    result, _ = review(world, TWO, fake, cfg=cfg_of(1000))
+    verdict = result.batches["b1"]
+    assert verdict.verdict == "BLOCKED"
+    assert any(f["criterion"] == "verdict" for f in verdict.findings)
+    raw = dict(verdict.parts)[f"batch:b1/{A}"]
+    assert raw.verdict == "BLOCKED" and raw.findings == ()  # the recorded part is what the judge said
+
+
+def test_a_silent_blocked_part_reused_through_kept_keeps_the_batch_from_being_ready(world):
+    first = review(world, TWO, FakeAdapter([ok(), ok(), said("BLOCKED"), said("NEEDS_REVISION", [GAP]), ok()]),
+                   cfg=cfg_of(1000))[0]  # fmt: skip
+    parts = dict(first.batches["b1"].parts)
+    prior = {v.material: _entry(v) for v in first.units.values()}
+    kept = f"batch:b1/{A}"
+    prior[parts[kept].material] = _entry(parts[kept])
+    fake = FakeAdapter([said("NEEDS_REVISION", [GAP]), ok()])
+    result, _ = review(world, TWO, fake, cfg=cfg_of(0), prior=prior, kept=[parts[kept].material])
+    assert len(fake.requests) == 2 and all("read in part" in r.prompt for r in fake.requests)
+    verdict = result.batches["b1"]
+    assert verdict.verdict == "BLOCKED" and any(f["criterion"] == "verdict" for f in verdict.findings)
 
 
 # --- SCN-YOLO-277 ----------------------------------------------------------------------------------------------------

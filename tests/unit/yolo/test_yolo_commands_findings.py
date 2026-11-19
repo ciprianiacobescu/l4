@@ -215,3 +215,27 @@ def test_a_ready_plan_with_a_batch_in_parts_shows_the_note_and_still_says_every_
     assert world.l4("findings", "p1", "--json") == 0
     subjects = json.loads(capsys.readouterr().out)["subjects"]
     assert [(x["subject"], x["verdict"]) for x in subjects] == [("batch:b1", "READY")]
+
+
+def test_all_on_a_ready_plan_lists_the_subjects_and_has_no_closing_line(world, capsys):
+    """The line that says every subject is READY is for the empty list: `--all` lists them, as 0.4.58 did."""
+    world.push_plan()
+    world.seed("p1", review(world, "2026-10-14T10:00:00Z", {A: entry(world, A, "READY", [], "ma1")}, {}))
+    assert world.l4("findings", "p1") == 0
+    assert "p1: every subject of the latest review is READY (--all lists them)" in capsys.readouterr().out
+    assert world.l4("findings", "p1", "--all") == 0
+    out = capsys.readouterr().out
+    assert f"{A}: READY" in out and "every subject" not in out
+
+
+def test_the_json_minor_count_leaves_out_the_parts_note(world, capsys):
+    """The text counts the minor findings that --all shows, which the note is not: the JSON `minor` agrees."""
+    note = {"criterion": "parts", "severity": "minor", "text": "this batch was reviewed in parts"}
+    nit = {"criterion": "outcome", "severity": "minor", "text": "a nit"}
+    batch = {"verdict": "READY", "digest": None, "material": "kb", "findings": [nit, note]}
+    world.push_plan()
+    world.seed("p1", review(world, "2026-10-14T10:00:00Z", {}, {"b1": batch}))
+    assert world.l4("findings", "p1", "--json") == 0
+    (subject,) = json.loads(capsys.readouterr().out)["subjects"]
+    assert subject["minor"] == 1
+    assert {f["criterion"] for f in subject["findings"]} == {"outcome", "parts"}  # the note is still listed

@@ -264,3 +264,31 @@ def test_a_lost_lease_drops_the_incomplete_record_when_another_run_recorded_one(
     monkeypatch.setattr(PlanStore, "append", moved)
     world.step()  # the step ends its plan quietly on a stale write
     assert world.kinds().count("plan.review_incomplete") == 1 and len(calls) == 1
+
+
+def test_the_ci_step_passes_the_kept_parts_so_the_next_run_asks_only_the_remaining_parts(world):
+    """An incomplete review kept a part of a batch split by a size bound of 1. The next run, with the bound off,
+    splits the batch for the kept part and asks the part of B and the summary: no whole-batch call (L4-YOLO-098)."""
+    world.cfg = make_cfg(
+        forge={"type": "local", "base_branch": "main", "merge_policy": "auto"},
+        profiles=PROFILES,
+        roles={"implementer": ["impl"], "judges": ["j1", "j2"]},
+        yolo={"review": {"max_batch_chars": 1}},
+    )
+    world.plan()
+    # A, B, the part of A (answered), the part of B (an error: no judge is left, so the summary is not asked)
+    j2 = FakeAdapter([ok(), ok(), ok(), Step(status="error", detail="boom")])
+    judges(world, FakeAdapter([], probes=REFUSED), j2)
+    world.step()
+    assert world.kinds()[:2] == ["plan.admitted", "plan.review_incomplete"]
+    world.cfg = make_cfg(
+        forge={"type": "local", "base_branch": "main", "merge_policy": "auto"},
+        profiles=PROFILES,
+        roles={"implementer": ["impl"], "judges": ["j1", "j2"]},
+        yolo={"review": {"max_batch_chars": 0}},
+    )
+    again = FakeAdapter([ok(), ok()])
+    judges(world, FakeAdapter([], probes=REFUSED), again)
+    world.step()
+    assert len(again.requests) == 2 and all("read in part" in r.prompt for r in again.requests)  # part of B, summary
+    assert "plan.reviewed" in world.kinds()

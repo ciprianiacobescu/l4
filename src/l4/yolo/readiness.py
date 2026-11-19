@@ -540,9 +540,14 @@ def merge_parts(parts: Sequence[Verdict], cause: str) -> Verdict:
     findings in part order with an exact repeat kept once, their assumptions and `missing` lines joined the same way,
     and the `missing` line that says no call saw two units in full together. A part that says NEEDS_REVISION and names
     no finding gets the harness finding `verdict` first, so another part's minor findings cannot turn the merged verdict
-    into READY (`_amend` adds that finding only to a verdict with no finding at all)."""
+    into READY (`_amend` adds that finding only to a verdict with no finding at all). A part that says BLOCKED and
+    names no finding gets it too: otherwise the other parts' `batch_acceptance` findings, moved to the assumptions on a
+    batch with no profile, would leave a BLOCKED with no finding, which `_amend` reads as the grouping note and makes
+    READY. The finding is criterion `verdict`, not one of `NO_REVIEW`: the batch was reviewed and is reused."""
     parts = [
-        replace(p, findings=(_verdict_finding(p),)) if p.verdict == "NEEDS_REVISION" and not p.findings else p
+        replace(p, findings=(_verdict_finding(p),))
+        if p.verdict in ("NEEDS_REVISION", "BLOCKED") and not p.findings
+        else p
         for p in parts
     ]
     said = max((p.verdict for p in parts), key=_WORST.__getitem__)
@@ -607,9 +612,10 @@ def _with_digest(verdict: Verdict, digest: str | None) -> Verdict:
 
 
 def _verdict_finding(verdict: Verdict) -> dict[str, str]:
-    """The harness finding of a NEEDS_REVISION that names no finding (L4-YOLO-023)."""
+    """The harness finding of a NEEDS_REVISION that names no finding (L4-YOLO-023), and of a BLOCKED part that names
+    none (L4-YOLO-098)."""
     shown = "; ".join(verdict.missing) or "nothing"
-    text = f"the judge said NEEDS_REVISION and named no finding; missing: {shown}"
+    text = f"the judge said {verdict.verdict} and named no finding; missing: {shown}"
     return {"criterion": "verdict", "severity": "major", "text": text}
 
 

@@ -125,3 +125,19 @@ def test_a_current_review_shows_no_incomplete_even_when_one_follows_it_in_the_le
     assert "review: current" in out and "incomplete " not in out
     world.l4("status", "p1", "--json")
     assert "incomplete" not in json.loads(capsys.readouterr().out)["plans"][0]["review"]
+
+
+def test_status_says_nothing_of_parts_while_the_review_is_stale(world, capsys):
+    """`in_parts` and its line are shown for a current review view only: a stale review is not the plan's review."""
+    seeded(world)
+    note = {"criterion": "parts", "severity": "minor", "text": "this batch was reviewed in parts"}
+    event = world.reviewed()
+    event.data["batches"]["b1"]["findings"] = [note]
+    event.data["plan_digest"] = "an older plan file"  # the review is for another plan file: stale
+    world.seed("p1", event)
+    assert world.l4("status", "p1") == 0
+    out = capsys.readouterr().out
+    assert "review: stale" in out and "reviewed in parts" not in out
+    world.l4("status", "p1", "--json")
+    review = json.loads(capsys.readouterr().out)["plans"][0]["review"]
+    assert review["state"] == "stale" and "in_parts" not in review

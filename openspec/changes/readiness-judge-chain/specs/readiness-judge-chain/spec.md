@@ -162,9 +162,10 @@ and split only by the other triggers; a positive value is the size bound), or wh
 one of its parts (L4-YOLO-099). A part that only a `plan.reviewed` recorded SHALL be reused when the batch is split, but
 SHALL NOT split it: once a review has finished, the next review of a changed batch starts whole again, so that `0`
 turns the size split off. It SHALL also be reviewed in parts, by the same judge first, when its whole call stops at the
-output limit or times out. (A `--worktree` dry run has no `plan.reviewed`: a cached part counts as kept, and splits
-the batch, unless a cached line of its batch is as new as it, which a dry run that finished writes; `l4 yolo review
---worktree --fresh batch:<id>` asks the batch again.) The parts
+output limit or times out. (A `--worktree` dry run keeps its parts in a local cache: a cached part counts as kept, and splits
+the batch, unless a cached line of its batch is as new as it, which a dry run that finished writes, or it is not newer than the
+plan's latest `plan.reviewed` on the ledger, so that a review that finished in CI or with `--local` ends it as it does
+for a ledger part; `l4 yolo review --worktree --fresh batch:<id>` asks the batch again.) The parts
 SHALL be, in order: one part per unit the batch review shows, in plan order (`batch:<batch>/<unit>`), whose material is
 the batch's with that unit's folder in full as a subject's is shown (its budgets and its `material_cut`), the
 prerequisites outside the batch of that unit as a batch shows them, and each other unit of the batch read as a
@@ -187,12 +188,21 @@ has <c> characters, over yolo.review.max_batch_chars (<m>)`, `the whole batch st
 finding of criterion `parts` and severity `minor`, added after the rules below: `this batch was reviewed in parts: no
 judge saw two units' full text together, so defects visible only across units may be missed`. The finding is a note: it
 SHALL NOT change the verdict, and a READY batch stays READY with it. `l4 yolo findings` SHALL show a batch that carries
-it, READY or not, with the note in full and a `Resolve:` line that says it is a note (and still says that every subject is
-READY when none is open; the exit code is unchanged), and `l4 yolo status` SHALL name the
+it, READY or not, with the note in full and a `Resolve:` line that says it is a note (and, without `--all`, still says that every
+subject is READY when none is open; the exit code is unchanged), and `l4 yolo status` SHALL name the
 batches of the current review that were judged in parts (`reviewed in parts: <batches> (no judge saw two units' full
-text together)`, and `review.in_parts` in `--json`). A part whose
-verdict is NEEDS_REVISION and names no finding SHALL get the harness finding `verdict` (L4-YOLO-023) before the merge,
-so that another part's findings cannot hide it and the merged verdict is never READY because of it. The other rules of
+text together)`, and `review.in_parts` in `--json`). The note is not counted among the minor findings, in the text or in
+`l4 yolo findings --json` (`minor`), and it SHALL NOT be carried into the accepted findings of a unit: `l4 yolo accept`
+records every finding of the subject, the note too, but the run of a unit, its accepted block, the report and the merge
+gate of a `merge: auto` plan (L4-YOLO-028, L4-YOLO-031) leave it out, so no verifier has to answer it and it holds no
+merge. A part whose verdict is NEEDS_REVISION or BLOCKED and names no finding SHALL get the harness finding `verdict`
+(L4-YOLO-023; its criterion is not `schema`, `unit_missing` or `completeness`, so the batch is still reused) before the
+merge, so that another part's findings cannot hide it and the merged verdict is never READY because of it: for a BLOCKED
+part, the other parts' `batch_acceptance` findings, moved to the assumptions on a batch with no acceptance profile,
+would leave a BLOCKED verdict with no finding, which the rule of L4-YOLO-023 for a subject that only groups units makes
+READY. A part that is BLOCKED only by `batch_acceptance` and is merged with a part that is NEEDS_REVISION with a major
+finding gives BLOCKED, which is stricter than a whole-batch call (the rules run once, on the merged verdict, not on each
+part: a known limit). The other rules of
 L4-YOLO-004 and L4-YOLO-023 SHALL then be applied once, to the merged verdict, with the whole batch's cuts. The batch's entry
 SHALL have the whole batch's material key, so that a later review of the same material reuses it (L4-YOLO-022), and
 `parts` (`[{part, material, judge, verdict, findings, assumptions, missing}]`, with `reused_from` for a part that was
@@ -227,9 +237,11 @@ a batch before its reply is cut.]
   `batch_acceptance` finding
 - **When** the batch's verdict is made
 - **Then** the first is NEEDS_REVISION with F once and the minor finding; with one part BLOCKED it is BLOCKED; the
-  second is READY with the finding among its assumptions; and a part that is NEEDS_REVISION with no finding, merged
+  second is READY with the finding among its assumptions; a part that is NEEDS_REVISION with no finding, merged
   with a part that is READY with one minor finding, gives NEEDS_REVISION with the harness finding `verdict`, never
-  READY
+  READY; and a part that is BLOCKED with no finding, merged with a part whose only finding is `batch_acceptance` (or
+  that is BLOCKED by it alone), gives BLOCKED with the harness finding `verdict`, never READY, also when the BLOCKED
+  part is a kept part reused from an earlier review
 
 #### Scenario: SCN-YOLO-276 (−) A batch that fits and a unit keep today's prompt · L4-YOLO-098
 - **Given** a batch under the bound, a unit subject, a batch with one unit left to review (the others done), and a

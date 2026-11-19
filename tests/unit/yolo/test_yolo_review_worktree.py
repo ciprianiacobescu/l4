@@ -515,6 +515,18 @@ def test_findings_worktree_renders_the_latest_dry_run(world, monkeypatch, capsys
     assert world.store().read().head is None  # nothing was recorded
 
 
+def test_findings_worktree_all_on_a_ready_dry_run_has_no_closing_line(world, monkeypatch, capsys):
+    ready_world(world)
+    judge(monkeypatch, answer(), answer(), answer())
+    assert world.l4("review", "p1", "--worktree") == 0
+    capsys.readouterr()
+    assert world.l4("findings", "p1", "--worktree") == 0
+    assert "every subject of the latest dry run is READY (--all lists them)" in capsys.readouterr().out
+    assert world.l4("findings", "p1", "--worktree", "--all") == 0
+    out = capsys.readouterr().out
+    assert f"{A}: READY" in out and "every subject" not in out
+
+
 def test_findings_worktree_json_has_the_ledger_structure(world, monkeypatch, capsys):
     ready_world(world)
     judge(monkeypatch, answer(), answer("NEEDS_REVISION", [GAP]), answer())
@@ -660,3 +672,26 @@ def test_the_worktree_line_names_the_acceptance_and_the_judgement_time(world, mo
     )
     ready = next(x for x in out.splitlines() if x.startswith(f"  {B}:"))
     assert ready.endswith(f"READY (reused), judged {T1}") and out.count("(reused)") == 3
+
+
+# --- L4-YOLO-099: a cached part older than the latest plan.reviewed splits nothing (as in the ledger) -----------------
+
+
+def _cached_part(at, material="m-part", subject="batch:b1/openspec:a"):
+    return {"kind": "batch-part", "subject": subject, "at": at, "material": material, "entry": {}}
+
+
+def test_a_cached_part_older_than_the_latest_plan_reviewed_does_not_split_its_batch():
+    from l4.yolo.review_worktree import _kept_in_cache
+
+    cached = {
+        "old": _cached_part("2026-11-01T10:00:00Z", "old"),
+        "new": _cached_part("2026-11-01T12:00:00Z", "new", "batch:b1/openspec:b"),
+    }
+    reviewed = [
+        PlanEvent("plan.reviewed", "2026-11-01T09:00:00Z"),
+        PlanEvent("plan.reviewed", "2026-11-01T11:00:00Z"),  # the latest: a CI or --local review that finished
+    ]
+    assert _kept_in_cache(cached, reviewed) == {"new"}
+    assert _kept_in_cache(cached, []) == {"old", "new"}  # no finished review on the ledger: both are kept
+    assert _kept_in_cache(cached, [PlanEvent("plan.activated", "2026-11-01T13:00:00Z")]) == {"old", "new"}

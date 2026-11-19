@@ -2507,7 +2507,9 @@ def run_findings(
     lines = fnd.render(plan_id, ctx.target, review, history_of, **options)
     for line in lines:
         ctx.say(line)
-    if not lines or (subject is None and fnd.all_ready(review)):  # the notes of batches in parts are no open finding
+    if not lines or (
+        subject is None and not show_all and fnd.all_ready(review)
+    ):  # the notes of batches in parts are no open finding
         ctx.say(f"{plan_id}: every subject of the latest review is READY (--all lists them)")
     if force is not None:
         for line in _force_lines(force):
@@ -2709,7 +2711,7 @@ def _accepted_findings(state: PlanState) -> dict[str, tuple[str, dict[str, Any],
     """finding id -> (subject, the finding, its item) for every finding the activation froze (L4-YOLO-028)."""
     out: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
     for subject, item in state.activated_accepted.items():
-        for finding in item.get("findings") or ():
+        for finding in fnd.carried(item.get("findings")):
             if isinstance(finding, Mapping):
                 out[fnd.finding_id(subject, finding)] = (subject, dict(finding), item)
     return out
