@@ -629,7 +629,7 @@ case is a base that is not the default branch: see 7.15.
      `.l4/config.yaml`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as your
      last fetch left it. Install the pinned `l4`, or use `.l4/bin/l4`. To run the older one anyway, pass
      `--allow-older-cli`: the command runs and prints a warning. `l4 yolo cancel` and the `--withdraw` forms only
-     warn, so you can always stop a plan. An `l4` older than 0.4.60 has no such check.
+     warn, so you can always stop a plan. An `l4` newer than the pin only warns. An `l4` older than 0.4.60 has no such check.
 2. Clone the project.
 3. Switch to `<base>`.
 4. Pull.

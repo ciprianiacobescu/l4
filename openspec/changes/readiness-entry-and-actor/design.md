@@ -56,8 +56,8 @@ plan before activation; an active plan is untouched; the ledger and the status s
 person-level plan action; doctor says what a single judge costs; an older CLI does not write for a newer pin by
 accident.
 
-**Non-Goals:** an actor policy for `l4 yolo activate` (D6); a CI-side notice about older writers (D5); a check of a
-newer CLI (D5); a guard in CLIs older than this one; ordering of the plan file itself.
+**Non-Goals:** an actor policy for `l4 yolo activate` (D6); a CI-side notice about older writers (D5); a refusal of a
+newer CLI (it only warns, D5); a guard in CLIs older than this one; ordering of the plan file itself.
 
 ## Decisions
 
@@ -139,7 +139,7 @@ prompt version, as SCN-YOLO-181 does, and by reading the lines above):
 - **A person whose `l4` is 0.4.60 while the repository still pins 0.4.59**: that CLI calls every 0.4.59 review stale,
   while the pinned CI calls it current and judges nothing; a `--local` review by the newer CLI records version 5, which
   the pinned CI then calls stale and judges again. The way out is the pinned `l4` (`.l4/bin/l4`, or the pinned
-  install). L4-OPS-026 checks only an older CLI; whether a newer one should warn is an open question (D5).
+  install). L4-OPS-026 refuses an older CLI, and a newer one only warns (settled, D5).
 
 How it fails safe: a stale review can only stop an activation or cost a review; it can never let a plan activate
 on material no judge saw.
@@ -236,6 +236,10 @@ caught; the guard protects from the next pin move on, once a person's CLI is 0.4
 `refs/remotes/origin/<base>` can hold an older pin (no refusal, never a false one). A pin without a version (a copy of
 the action, a fetched pin by commit) is not checked. The pinned harness could tell from `run.started{harness_version}`
 of a local command that an older CLI wrote to a unit; that notice is an open question.
+
+Settled by the owner's delegate for 0.4.60: an older CLI is refused (a stop and a withdrawal only warn); a newer CLI
+only warns, on stderr, for the same commands; a notice in CI about local writes of older CLIs is not in 0.4.60; an
+unknown pin means no check. What follows is the question as it was asked.
 
 Open questions:
 

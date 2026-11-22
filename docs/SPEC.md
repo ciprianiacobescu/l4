@@ -7540,7 +7540,9 @@ run and print the warning `warning: this l4 is <v>, older than the harness this 
 the install line to stderr. A stop or a withdrawal (`yolo cancel`, `yolo accept --withdraw`, `yolo waive --withdraw`)
 and a command that writes only a local file (`questions accept|answer --no-push`, `feedback add`, `feedback submit`,
 `feedback withdraw`, `yolo draft`, `lessons promote`) MUST NOT be refused and SHALL print the warning. Every other
-command, an `l4` of the pinned version or newer, and every command in a CI job SHALL behave as before. The warning MUST
+command, an `l4` of the pinned version and every command in a CI job SHALL behave as before. An `l4` newer than the pin
+SHALL only warn, on stderr, for the commands above (never refuse): `warning: this l4 is <v>, newer than the harness this
+repository pins (<p>, <source>): CI runs <p>, so a rule of <v> may differ there`, and the install line. The warning MUST
 go to stderr, so a `--json` output stays one document.
 
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
@@ -17850,11 +17852,12 @@ scenario is a spec defect (§26).
 - **Then** the first is refused and its fix names `uv tool install --force
   git+https://github.com/<owner>/<repo>@v0.4.62`; the other three give no pin and the command runs as before
 
-#### SCN-OPS-59 (+) The pinned version, a newer l4 and a CI job are unchanged · L4-OPS-026
+#### SCN-OPS-59 (+) The pinned version and a CI job are unchanged; a newer l4 only warns · L4-OPS-026
 - **Given** a pin of 0.4.60, then a pin of 0.4.59, with an `l4` of 0.4.60; and a pin of 0.4.62 in a job with
   `GITHUB_ACTIONS=true`
 - **When** `l4 retry --unit <id> --reason r --no-run` runs
-- **Then** no warning and no refusal comes from this rule in any of the three
+- **Then** the pin of 0.4.60 and the CI job give no warning and no refusal from this rule; the pin of 0.4.59 gives a
+  warning on stderr that this `l4` is newer than the pin, and the command runs
 
 #### SCN-OPS-60 (+) A stop and a local write only warn; a read says nothing · L4-OPS-026
 - **Given** the repository of SCN-OPS-56

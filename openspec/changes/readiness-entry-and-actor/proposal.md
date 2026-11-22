@@ -54,8 +54,8 @@ What the 0.4.59 source does (read for this change; design.md has the lines):
   `.l4/config.yaml` (vendored, fetched), or the `# vX.Y.Z` comment of the setup action's `uses:` line (action). It reads
   them at `origin/<base>` as last fetched, else in the working tree. When the CLI is older, the command exits 2 before it
   reads or writes anything else, unless `--allow-older-cli` is given (then a warning). A stop (`l4 yolo cancel`, a
-  `--withdraw`) and a command that writes only a local file warn and run. An unknown pin, an equal or newer CLI, and every
-  CI job change nothing.
+  `--withdraw`) and a command that writes only a local file warn and run. A newer CLI only warns on stderr. An unknown
+  pin, an equal CLI, and every CI job change nothing.
 - **Documentation** (L4-YOLO-104): the runbook, the skill and the CHANGELOG.
 
 Non-goals:
