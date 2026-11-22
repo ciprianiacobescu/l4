@@ -1,7 +1,8 @@
 Read `design.md` first (D1-D7). Requirement: L4-VER-086 (`docs/SPEC.md`), scenarios SCN-VER-343..349. This change is
 SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `types.py`, `report.py`, `generate.py` and
-`fixunit.py`, in different functions), and it can be left out at integration (then also revert its edits to `docs/SPEC.md`: L4-VER-086, SCN-VER-343..349, row 141, and its sentence in
-L4-VER-067, the step-5 row of 10.2 and `verify.generated` in 12.1). Run single test files only (`uv run --frozen pytest
+`fixunit.py`, in different functions), and it can be left out at integration. Then also revert its edits to
+`docs/SPEC.md` (L4-VER-086, SCN-VER-343..349, row 141, its sentence in L4-VER-067, the step-5 row of 10.2 and
+`verify.generated` in 12.1), `CHANGELOG.md` and `docs/runbook.md`. Run single test files only (`uv run --frozen pytest
 <file> -x -q`), never a whole directory, never two runs at once, and never a wait loop on `pgrep`.
 
 ## 1. The rule (D1)
@@ -34,8 +35,8 @@ L4-VER-067, the step-5 row of 10.2 and `verify.generated` in 12.1). Run single t
   split the test-to-file mapping out of `_test_blobs`, and carry in `_generate_step` before `gap_findings`
   (`src/l4/verifier/ladder.py`); `carried=` in `ui_gap_finding` (`src/l4/verifier/generate.py`) and `gap_findings`;
   the closed set of `unclosed_holds` (`src/l4/verifier/ui_step.py`; leave `lost_notes` as it is, design D3) and of
-  `_candidates` (`src/l4/verifier/fixunit.py`); the row in `_generated_rows` (`src/l4/verifier/report.py`). Run the files of 2.1,
-  then `tests/unit/verifier/test_generate.py`, `tests/unit/verifier/test_hold_binding.py` and
+  `_candidates` (`src/l4/verifier/fixunit.py`); the row in `_generated_rows` (`src/l4/verifier/report.py`). Run the
+  files of 2.1, then `tests/unit/verifier/test_generate.py`, `tests/unit/verifier/test_hold_binding.py` and
   `tests/unit/verifier/test_ladder_hold_fix.py`, one at a time.
 
 ## 3. Checks

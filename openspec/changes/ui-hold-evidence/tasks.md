@@ -1,5 +1,5 @@
 Read `design.md` first (D1-D9). Requirements: L4-VER-083, L4-VER-084 and L4-VER-085 (`docs/SPEC.md`), scenarios
-SCN-VER-331..342. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
+SCN-VER-331..342 and 350. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
 runs at once, and never a wait loop on `pgrep`. Secrets in tests: use a token shape the redactor knows (`"glpat-" +
 "A1b2C3d4E5f6G7h8I9j0"`, as `tests/unit/implementer/test_excerpt_redaction.py` does); build a private-key block from
 parts so that no test file holds a key marker as one string.
@@ -13,8 +13,10 @@ parts so that no test file holds a key marker as one string.
   - in `tests/unit/verifier/test_generate.py` (follow its fakes for `run_e2e` and the writer): a head run whose report
     fails the generated test with a body that holds `>` and `E` lines under an absolute worktree path gives an outcome
     `fails_at_head` whose `excerpt` holds those lines with the path relative and whose `code` is the bounded copy; the
-    file written to the tree is the raw code; an outcome of any other status has `excerpt == ""`; with two attempts
-    (first `fails_at_head`, then `lint_failed`) the outcome's code is the second reply's and its excerpt is empty;
+    file written to the tree is the raw code; an outcome whose last written test did not fail at the head has `excerpt
+    == ""`; with two attempts (first `fails_at_head`, then `lint_failed`) the outcome's code is the second reply's and
+    its excerpt is empty; with a first `fails_at_head` and a second attempt that gives no code (a writer error) the
+    outcome is `writer_failed` and keeps the first test's code and excerpt together (SCN-VER-350);
   - in `tests/unit/verifier/test_report_m15.py`: `verdict_json` writes `generated[].excerpt` when it is set and no key
     when it is empty; `code` is the bounded copy; a token that straddles 4,000 characters of the raw code is not in
     the written `verdict.json` in part (SCN-VER-332 for this file);
@@ -84,7 +86,7 @@ parts so that no test file holds a key marker as one string.
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342, change-table row 137 and the amendments to L4-VER-006,
+- [ ] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342 and 350, change-table row 137 and the amendments to L4-VER-006,
   L4-VER-067 and the step-5 row of 10.2. Check them against the code and tell the orchestrator where they differ; do
   not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the skill. Run `uv run --frozen python
   scripts/check_spec.py docs/SPEC.md`.

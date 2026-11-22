@@ -8,27 +8,28 @@ round, as a criterion and as its UI hold, becomes one fix task.
 
 ### Requirement: L4-VER-083 A UI hold shows the test step 5 wrote and why it failed at the head
 When step 5 ends a UI criterion with a test that the writer wrote and that was not accepted, its outcome SHALL keep a
-bounded copy of the last test written: the whole code redacted (a private-key block with one marker removed to the
-edge, as for L4-VER-078), then cut at the last line end before 4,000 characters (a single longer line at 4,000), then
-redacted again. When that test failed at the head (`fails_at_head`), the outcome SHALL also keep an excerpt of the head
-run's failure of the file's failing tests, as the retry prompt shows a failure (L4-IMP-064: per test its `E` lines, the
+bounded copy of the last test written: the whole code redacted (a private-key block with one marker removed to the edge,
+as for L4-VER-078), then cut at the last line end before 4,000 characters (a single longer line at 4,000), then redacted
+again. When that test failed at the head (`fails_at_head`), the outcome SHALL also keep an excerpt of the head run's
+failure of the file's failing tests, as the retry prompt shows a failure (L4-IMP-064: per test its `E` lines, the
 deepest repository frame and its location, the last location; at most 8 lines per test, 8 tests, 40 lines and 3,000
 characters; paths relative to the worktree and the gate's tmp root shown as `<tmp>`; the body redacted whole before a
-line is dropped and the result redacted again). The code and the excerpt SHALL come from the same attempt. The file
-written to the trees, its hash and its removal SHALL be unchanged. `verdict.json` SHALL store the copy as
-`generated[].code`, as before but redacted before the cut, and the excerpt as `generated[].excerpt` when it is not
-empty; a reused round SHALL keep both, and a record without `excerpt` (0.4.59) SHALL restore with none.
+line is dropped and the result redacted again). The excerpt SHALL be that of the attempt that wrote the kept code (an
+attempt that gives no code, a writer error, an invalid reply or `not_testable`, leaves the code and the excerpt of the
+attempt before it). The file written to the trees, its hash and its removal SHALL be unchanged. `verdict.json` SHALL
+store the copy as `generated[].code`, as before but redacted before the cut, and the excerpt as `generated[].excerpt`
+when it is not empty; a reused round SHALL keep both, and a record without `excerpt` (0.4.59) SHALL restore with none.
 The hold's verdict question (L4-VER-067) SHALL carry them in its `### Harness notes` subsection (L4-IMP-102): the
 excerpt under `Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the
-repository):`, each line after four spaces; then the code under `Harness note: the test step 5 wrote at its last
-attempt, <path> (<status>; not committed, the file is removed after the run; at most 4,000 characters):`, each line as
-four spaces, its number right-aligned in four columns, two spaces and the line. They SHALL NOT be in the hold's text,
-its title or its Context, so the hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL
-say in one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt).
+repository):`, each line after four spaces; then the code under `Harness note: the last test step 5 wrote, <path> (step
+5 ended <status>; not committed, the file is removed after the run; at most 4,000 characters):`, each line as four
+spaces, its number right-aligned in four columns, two spaces and the line. They SHALL NOT be in the hold's text, its
+title or its Context, so the hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL say in
+one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt).
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
 table, with one list item per such outcome (criterion, status, attempts, path) and its failure and code as one block
-indented by six spaces. With no written test (`not_testable`, a writer that gave no code, `waived`) nothing SHALL be
-added. Every piece SHALL pass the redactor again where it is written.
+indented by six spaces. With no written test (a first reply that is `not_testable` or gives no code, `waived`) nothing
+SHALL be added. Every piece SHALL pass the redactor again where it is written.
 
 #### Scenario: SCN-VER-331 (+) The hold's question shows the generated test and its failure at the head
 - **Given** a UI criterion whose generated test `e2e/test_l4_c_<hex>.py` fails at the head with the body lines
@@ -61,8 +62,8 @@ added. Every piece SHALL pass the redactor again where it is written.
   and the notes read back are the notes written
 
 #### Scenario: SCN-VER-335 (−) Nothing is added without a written test
-- **Given** UI holds whose step 5 ended `not_testable`, `writer_failed` before any code, and an older outcome with no
-  code and no excerpt
+- **Given** UI holds whose step 5 ended `not_testable` on its first reply, `writer_failed` before any code, and an older
+  outcome with no code and no excerpt
 - **When** their questions are raised and the report is written
 - **Then** no question has a `### Harness notes` subsection, their Context is that of 0.4.59, and the report has no
   `## Generated UI tests that were not accepted` section
@@ -137,3 +138,10 @@ exist and what each answer settles SHALL be unchanged.
 - **When** both rounds are aggregated and planned
 - **Then** both verdicts are FAIL, the hold's finding keeps its id, title, severity and source and cites C, and each
   fix unit has the one task of SCN-VER-338
+
+#### Scenario: SCN-VER-350 (+) A later attempt that gives no code keeps the first test and its failure together
+- **Given** a first attempt whose test fails at the head with `E       AssertionError: Locator expected to be visible`,
+  and a second attempt whose reply is a writer error
+- **When** step 5 ends the criterion and the round raises its UI hold question
+- **Then** the outcome is `writer_failed` and keeps the first test's code and its excerpt; the `### Harness notes` hold
+  the failure and the first test's code, and the code's heading says that step 5 ended `writer_failed`

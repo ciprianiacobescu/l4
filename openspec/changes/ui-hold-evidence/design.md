@@ -56,15 +56,18 @@ test, 8 tests, 40 lines and 3,000 characters. The head run collects the generate
 the generated tests and nothing else. No other status gets one.
 
 `GeneratedOutcome` gains `excerpt: str = ""` as its last field (the positional call at 252-255 stays valid). The
-`outcome` closure of `generate_ui_test` passes `verdict.excerpt` and, as `code`, the evidence copy of the code:
-`_redact_keys(redact, _cut_at_line(_redact_keys(redact, code), MAX_CODE_CHARS))` with `redact =
-wb.redactor.redact_text` and `MAX_CODE_CHARS = 4000` (`report.py:65`; move the constant where both modules read it).
-That is: the whole code redacted (and a private-key block with one marker removed to the edge, L4-VER-078), then cut at
-the last line end before 4,000 characters (a single longer line at 4,000), then redacted again. A cut after the
-redaction can only drop text, never uncover it. Give the helper a public name in `l4.implementer.excerpt` (not starting
-with `test`), for example `redacted_cut(text, redact, limit)`. The raw code is still what is written to the trees (278,
-292) and hashed (293): only the outcome's copy is bounded. The code and the excerpt of an outcome always come from the
-same attempt: the closure takes both from the last `_Verdict` and the last reply.
+`outcome` closure of `generate_ui_test` passes `kept_excerpt` and, as `code`, the evidence copy of the code:
+`_redact_keys(redact, _cut_at_line(_redact_keys(redact, code), MAX_CODE_CHARS))` with `redact = wb.redactor.redact_text`
+and `MAX_CODE_CHARS = 4000` (`report.py:65`; move the constant where both modules read it). That is: the whole code
+redacted (and a private-key block with one marker removed to the edge, L4-VER-078), then cut at the last line end before
+4,000 characters (a single longer line at 4,000), then redacted again. A cut after the redaction can only drop text,
+never uncover it. Give the helper a public name in `l4.implementer.excerpt` (not starting with `test`), for example
+`redacted_cut(text, redact, limit)`. The raw code is still what is written to the trees (278, 292) and hashed (293):
+only the outcome's copy is bounded. The code and the excerpt of an outcome are those of one attempt: `generate_ui_test`
+sets `kept_excerpt = ""` where it sets `code` (274) and `kept_excerpt = last.excerpt` right after it sets `last` (`""`
+unless that attempt ended `fails_at_head`), and an attempt that gives no code (a writer error, an invalid reply,
+`not_testable`) leaves both of the attempt before it. So a first attempt that failed at the head followed by a writer
+error shows the first test and its failure, with the status `writer_failed`.
 
 ### D2. `verdict.json` and a reused round
 
@@ -85,10 +88,10 @@ has neither an excerpt nor (code and a path). Else the lines, joined by `\n`:
 
 - when `excerpt`: `Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the
   repository):`, an empty line, and each line of the excerpt after four spaces;
-- when `code` and `path`: an empty line when an excerpt came before, `Harness note: the test step 5 wrote at its last
-  attempt, <path> (<status>; not committed, the file is removed after the run; at most 4,000 characters):`, an empty
-  line, and each line of the code as four spaces, its number right-aligned in four columns, two spaces and the line
-  (an empty line of code is its number alone).
+- when `code` and `path`: an empty line when an excerpt came before, `Harness note: the last test step 5 wrote, <path>
+  (step 5 ended <status>; not committed, the file is removed after the run; at most 4,000 characters):`, an empty line,
+  and each line of the code as four spaces, its number right-aligned in four columns, two spaces and the line (an empty
+  line of code is its number alone).
 
 `_ui_hold_lines` adds one sentence to the Context when the notes are not empty: with an excerpt, `The harness notes
 below show the test step 5 wrote and why it failed at the head: read them to tell a wrong test from wrong code.`;
