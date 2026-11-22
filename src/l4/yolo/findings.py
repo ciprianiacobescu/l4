@@ -11,10 +11,10 @@ import json
 import re
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from l4.yolo.model import JudgeFailure, PlanEvent, PlanState
+from l4.yolo.model import JudgeFailure, PlanEvent
 
 # A finding of these criteria is the harness saying that no review happened for the item (never reused, never a round).
 HARNESS_CRITERIA = frozenset({"schema", "unit_missing", "completeness"})
@@ -41,39 +41,6 @@ def carried(findings: Sequence[Any] | None) -> list[Any]:
     (L4-YOLO-098), which is no defect, so no verifier can answer it and the merge gate must not wait for it. The
     acceptance itself keeps every finding, so its `findings_sha` is the one the review entry has."""
     return [f for f in findings or () if not (isinstance(f, Mapping) and f.get("criterion") == IN_PARTS)]
-
-
-# The criteria a judge's answer can carry (the enum of `schemas/readiness.schema.json`; a test holds them equal). Every
-# other criterion is the harness speaking: an allowlist, so a criterion added later is never overrulable by default.
-JUDGE_CRITERIA = frozenset(
-    {
-        "outcome", "testability", "interfaces", "failure_cases", "feasibility", "duplicate_scope", "contradiction",
-        "missing_dependency", "batch_acceptance",
-    }
-)  # fmt: skip
-MAX_OVERRULED = 5  # the overrules of one subject a judge reads (L4-YOLO-107)
-OVERRULED_TEXT_CHARS = 2000
-OVERRULED_REASON_CHARS = 1000
-
-
-def effective(subject: str, entry: Mapping[str, Any], held: Collection[str]) -> tuple[str, list[dict[str, Any]]]:
-    """The verdict and findings of a subject once the findings an overrule holds for (`held`: finding ids) are taken
-    out (L4-YOLO-106, design D4). Nothing held: the entry as it is. A finding left that is a harness finding or is
-    blocking keeps the entry's verdict; else a major one makes it NEEDS_REVISION; else READY (minor findings stay).
-    The harness's note on a batch in parts (`parts`, minor) is no defect, so it does not keep a verdict."""
-    findings = [dict(f) for f in entry.get("findings") or () if isinstance(f, Mapping)]
-    verdict = str(entry.get("verdict"))
-    rest = [f for f in findings if finding_id(subject, f) not in held]
-    if len(rest) == len(findings):  # nothing held is in this entry: nothing to overrule, the entry stands
-        return verdict, findings
-    if any(
-        f.get("severity") == "blocking" or (f.get("criterion") not in JUDGE_CRITERIA and f.get("criterion") != IN_PARTS)
-        for f in rest
-    ):
-        return verdict, rest
-    if any(f.get("severity") == "major" for f in rest):
-        return "NEEDS_REVISION", rest
-    return "READY", rest
 
 
 # --- reading the ledger -----------------------------------------------------------------------------------------------
@@ -375,27 +342,6 @@ def rounds_not_ready(events: Sequence[PlanEvent], subject: str) -> int:
     return len(versions)
 
 
-def overruled_for_review(state: PlanState) -> dict[str, list[dict[str, str]]]:
-    """The rebuttal the judge of a later review reads (L4-YOLO-107, design D7): per subject, the recorded overrules
-    (`PlanState.overruled`: every one that is not withdrawn, holding or not), newest first, at most `MAX_OVERRULED`,
-    each as `{criterion, severity, text, reason}` with the text and the reason cut."""
-    by_subject: dict[str, list[Mapping[str, Any]]] = {}
-    for record in sorted(state.overruled.values(), key=lambda r: str(r.get("at") or ""), reverse=True):
-        by_subject.setdefault(str(record.get("subject")), []).append(record)
-    return {
-        subject: [
-            {
-                "criterion": str(r.get("criterion") or ""),
-                "severity": str(r.get("severity") or ""),
-                "text": str(r.get("text") or "")[:OVERRULED_TEXT_CHARS],
-                "reason": str(r.get("reason") or "")[:OVERRULED_REASON_CHARS],
-            }
-            for r in rows[:MAX_OVERRULED]
-        ]
-        for subject, rows in by_subject.items()
-    }
-
-
 # --- how to resolve a finding (design D1) -------------------------------------------------------------------------
 
 
@@ -542,10 +488,6 @@ class _Facts:
     accept_refusal: Any = None  # the `accept.Refusal` (message, fix) of a not-READY subject that cannot be accepted
     why: str | None = None  # `accept.why_not_holds` of an acceptance that no longer holds
     reused_from: str | None = None  # the time of the judgement a reused entry stands for
-    overrules: dict[str, Mapping[str, Any]] = field(
-        default_factory=dict
-    )  # finding id -> the overrule that holds for it
-    cleared: bool = False  # the overrules that hold leave the subject READY: it does not stop the activation
 
 
 def _subjects(review: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
@@ -590,8 +532,6 @@ def _facts(
     holds: Mapping[str, bool] | None,
     can_accept: Callable[[str], Any] | None,
     why: Mapping[str, str] | None = None,
-    overruled: Mapping[str, Mapping[str, Any]] | None = None,
-    overrule_holds: Mapping[str, bool] | None = None,
 ) -> list[_Facts]:
     out: list[_Facts] = []
     for subject, entry in _subjects(review):
@@ -609,13 +549,9 @@ def _facts(
         since = diff(earlier[-1].get("findings") or (), findings) if earlier else None
         accept = (accepted or {}).get(subject)
         accept_holds = bool((holds or {}).get(subject, False)) if accept else False
-        taken = {
-            i: r for i, r in (overruled or {}).items() if r.get("subject") == subject and (overrule_holds or {}).get(i)
-        }  # the overrules that hold for this subject
-        cleared = bool(taken) and effective(subject, entry, set(taken))[0] == "READY"
         refusal = None
         available = False
-        if verdict != "READY" and not cleared and not (accept and accept_holds) and can_accept is not None:
+        if verdict != "READY" and not (accept and accept_holds) and can_accept is not None:
             refusal = can_accept(subject)
             available = refusal is None
         out.append(
@@ -634,17 +570,9 @@ def _facts(
                 accept_refusal=refusal,
                 why=(why or {}).get(subject) if accept and not accept_holds else None,
                 reused_from=str(entry["reused_from"]) if entry.get("reused_from") else None,
-                overrules=taken,
-                cleared=cleared,
             )
         )
     return out
-
-
-def _overrule_doc(record: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    if record is None:
-        return None
-    return {"by": record.get("by"), "actor": record.get("actor"), "reason": record.get("reason"), "holds": True}
 
 
 def _resolver(plan_id: str, base: str, units: Mapping[str, UnitInfo] | None):
@@ -682,8 +610,6 @@ def render(
     can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
     why: Mapping[str, str] | None = None,
-    overruled: Mapping[str, Mapping[str, Any]] | None = None,
-    overrule_holds: Mapping[str, bool] | None = None,
 ) -> list[str]:
     """The text of `l4 yolo findings` for the latest review (`review` is the data of its `plan.reviewed` event;
     `history_of(subject)` is `history(...)` of the ledger). `can_accept(subject)` is the caller's `accept.check`:
@@ -691,13 +617,10 @@ def render(
     resolver = _resolver(plan_id, base, units)
     lines: list[str] = []
     for fact in _facts(
-        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept,
-        why=why, overruled=overruled, overrule_holds=overrule_holds,
-    ):  # fmt: skip
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept, why=why
+    ):
         held = fact.accepted is not None and fact.holds and fact.verdict != "READY"
         note = f" (accepted by {fact.accepted.get('by')}: it does not stop the activation)" if held else ""
-        if fact.cleared:
-            note = " (cleared by an overrule: it does not stop the activation)"
         lines.append(f"{fact.subject}: {fact.verdict}{note}")
         if fact.reused_from:
             lines.append(f"  reused: judged {fact.reused_from} on the same material")
@@ -706,17 +629,8 @@ def render(
         for f in (
             shown if show_all else [f for f in shown if f.get("severity") != "minor" or f.get("criterion") == IN_PARTS]
         ):
-            ident = finding_id(fact.subject, f)
-            mark = ""
-            if (o := fact.overrules.get(ident)) is not None:
-                mark = f" (overruled by {o.get('by')} ({o.get('actor')}): {o.get('reason')})"
-            lines.append(f"  {ident} [{f.get('severity')}/{f.get('criterion')}] {f.get('text')}{mark}")
+            lines.append(f"  {finding_id(fact.subject, f)} [{f.get('severity')}/{f.get('criterion')}] {f.get('text')}")
             lines.append(f"    Resolve: {resolver(fact.subject, f)}")
-            if mark == "" and f.get("severity") == "blocking" and f.get("criterion") in JUDGE_CRITERIA:
-                lines.append(
-                    "    Or, when a person has checked that it is false: "
-                    f'l4 yolo overrule {plan_id} {ident} --reason "..." (a person\'s decision)'
-                )
         if minors and not show_all:
             n = len(minors)
             lines.append(f"  {n} minor finding{'s' if n != 1 else ''} (--all shows {'them' if n != 1 else 'it'})")
@@ -736,9 +650,7 @@ def render(
                 f"  accepted by {fact.accepted.get('by')} ({fact.accepted.get('actor')}): "
                 f"{fact.accepted.get('reason')} ({state})"
             )
-        if fact.cleared:
-            pass  # nothing to accept: the overrules leave it READY
-        elif fact.accept_available:
+        if fact.accept_available:
             lines.append(f"  accept: l4 yolo accept {plan_id} {fact.subject} --reason TEXT")
         elif fact.accept_refusal is not None:
             lines.append(f"  accept: not available: {fact.accept_refusal.message} ({fact.accept_refusal.fix})")
@@ -758,17 +670,14 @@ def render_json(
     can_accept: Callable[[str], Any] | None = None,
     only: str | None = None,
     why: Mapping[str, str] | None = None,
-    overruled: Mapping[str, Mapping[str, Any]] | None = None,
-    overrule_holds: Mapping[str, bool] | None = None,
 ) -> dict[str, Any]:
     """The same facts as `render`, as a JSON-serialisable document (`schema: l4/yolo-findings@1`). Every finding of a
     shown subject is listed, minor ones too, in the order of `render`."""
     resolver = _resolver(plan_id, base, units)
     subjects: list[dict[str, Any]] = []
     for fact in _facts(
-        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept,
-        why=why, overruled=overruled, overrule_holds=overrule_holds,
-    ):  # fmt: skip
+        review, history_of, show_all=show_all, only=only, accepted=accepted, holds=holds, can_accept=can_accept, why=why
+    ):
         since = None
         if fact.since is not None:
             since = {
@@ -793,11 +702,9 @@ def render_json(
                         "severity": f.get("severity"),
                         "text": f.get("text"),
                         "resolve": resolver(fact.subject, f),
-                        "overruled": _overrule_doc(fact.overrules.get(finding_id(fact.subject, f))),
                     }
                     for f in _by_severity(fact.findings)
                 ],
-                "cleared_by_overrule": fact.cleared,
                 "minor": sum(
                     1 for f in fact.findings if f.get("severity") == "minor" and f.get("criterion") != IN_PARTS
                 ),

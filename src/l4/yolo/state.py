@@ -34,10 +34,6 @@ time without a zone is read as UTC).
 `plan.force_accepted` (L4-YOLO-057) keeps its data plus `at` as `force_accepted` in any status but final; a later one
 replaces it as a whole and `plan.force_acceptance_withdrawn` clears it.
 
-`plan.finding_overruled` (L4-YOLO-105) keeps its data plus `at` in `overruled`, by finding id, in any status but final,
-and only when its `actor` is `person`; a later one for the same finding replaces it and `plan.overrule_withdrawn`
-removes it. `plan.activated{overruled}` is kept as `activated_overruled` (a re-activation replaces it).
-
 `plan.extended{extend}` (L4-YOLO-050) raises the limits of an activated plan that is not final, in any status, and
 changes nothing else: no status, no wait or stop reason, no `stale_merges`. Before the activation it is ignored.
 
@@ -154,9 +150,6 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             for base_unit, refs in (data.get("attempt_base") or {}).items():  # R13: the first record of a unit stands
                 state.attempt_base.setdefault(str(base_unit), int(_number(refs)))
             state.activated_by = _text(data.get("by"))
-            state.activated_overruled = {
-                str(k): dict(v) for k, v in (data.get("overruled") or {}).items() if isinstance(v, dict)
-            }  # a re-activation replaces
             state.activated_actor = _text(data.get("actor"))
             state.activated_marker = _text(data.get("marker"))
             state.activated_accepted = {  # frozen for the unit run (D7, D8); a re-activation replaces
@@ -189,12 +182,6 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
                 state.waived[finding] = dict(data)
         elif kind == "plan.waiver_withdrawn":
             state.waived.pop(_text(data.get("finding")) or "", None)
-        elif kind == "plan.finding_overruled":
-            finding = _text(data.get("finding"))
-            if finding and state.status not in _FINAL and data.get("actor") == "person":  # the command writes no other
-                state.overruled[finding] = {**data, "at": event.at}
-        elif kind == "plan.overrule_withdrawn":
-            state.overruled.pop(_text(data.get("finding")) or "", None)
         elif kind == "unit.dispatched" and unit:
             state.current = unit
             if state.used.attempts.get(unit, 0) > stale_at.get(unit, state.used.attempts.get(unit, 0)):
