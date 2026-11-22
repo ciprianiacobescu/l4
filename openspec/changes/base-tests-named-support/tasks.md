@@ -72,7 +72,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
 
 ## 4. Checks
 
-- [ ] 4.1 `docs/SPEC.md` holds L4-VER-079..081, SCN-VER-312..321 and change-table row 136. Check them against the code
+- [x] 4.1 `docs/SPEC.md` holds L4-VER-079..081, SCN-VER-312..321 and change-table row 136. Check them against the code
   and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the
   skill. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
