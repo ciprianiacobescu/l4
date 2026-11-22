@@ -3209,6 +3209,26 @@ prerequisite, the plan entry or the review prompt voids it: the subject must be 
 needed. The status and the activation refusal say why in one line (`other material`, or `other findings of the same
 material`, with the accepted and the latest material and findings and when each was judged).
 
+**When a blocking finding is false.** A person who has checked a judge's blocking finding and found it false (for
+example a `missing_dependency` that names a list no unit has) may overrule that one finding instead of editing the spec
+to answer it:
+
+```sh
+l4 yolo overrule <plan-id> <F-id> --reason "<why the finding is false>"
+```
+
+The command prints the finding, asks for the plan id to be typed (`--yes` replaces that), and records
+`plan.finding_overruled` with the finding, the subject's material, the reason and who overruled it. The subject is then
+judged on its other findings: with none blocking or major left it no longer stops the activation; with a major one left
+it needs an acceptance, which a `BLOCKED` subject whose blocking findings are all overruled can now get. The activation
+records the overrule, and nothing of it reaches the implementer, the verifier or the merge gate. The overrule ends when
+the subject's material changes (its folder, a prerequisite, its plan entry or the review prompt): `l4 yolo status` then
+says `no longer holds`. The next judge of the subject reads the finding and the reason, and is told to raise it again
+only when the text still has the defect. Only a person in a terminal can overrule, whatever `accept_by_agents` says; an agent
+prints the command for the person. A harness finding (`schema`, `unit_missing`, `completeness`, `material`, `verdict`,
+`parts`) and a major or minor finding cannot be overruled. `l4 yolo overrule <plan-id> <F-id> --withdraw --reason
+"<why>"` removes it. `--all --force` (below) stays the way out for the whole plan.
+
 **When the judge cannot run.** If no judge can answer (a usage limit, a failing tool chain) there is no review to
 iterate on. First ask CI: `l4 yolo review <plan-id>`. If that cannot work either, a person may accept the whole plan as
 it is, with no model review:

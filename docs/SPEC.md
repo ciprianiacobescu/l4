@@ -547,6 +547,7 @@ of the harness package.
 | `l4 yolo findings PLAN [SUBJECT] [--all] [--json] [--worktree]` | The findings of the latest review, each with an id, how to resolve it and the change since the previous judgement; with `--worktree`, those of the latest dry run `review --worktree` kept in the local cache, against the previous dry run (L4-YOLO-021) | none |
 | `l4 yolo accept PLAN (SUBJECT \| --all --force) --reason TEXT [--withdraw] [--yes]` | Accept a subject's latest review as it is, with a reason for the implementer; audited, never for a blocking or material finding (L4-YOLO-027). `--all --force` is a person's decision for every subject of the plan, with no model review (L4-YOLO-057). A person's `--yes` replaces the typed plan id (L4-YOLO-063) | `plan.accepted` or `plan.acceptance_withdrawn`; `plan.admitted` and `plan.force_accepted` or `plan.force_acceptance_withdrawn` (push with a lease) |
 | `l4 yolo waive PLAN FINDING --reason TEXT [--withdraw] [--yes] [--no-run]` | Waive an accepted finding of an active plan: the merge guard counts it as answered and the harness merges the unit itself; audited, the same rules as accept for who may waive; a person's `--yes` replaces the typed plan id (L4-YOLO-031, L4-YOLO-063) | `plan.finding_waived` or `plan.waiver_withdrawn` (push with a lease), then a run |
+| `l4 yolo overrule PLAN FINDING --reason TEXT [--withdraw] [--yes]` | Overrule one blocking finding of a judge in the latest review that a person checked and found false, before the activation: the subject is then judged on its other findings, the overrule ends when the subject's material changes, the next judge of the subject reads the reason, and nothing of it is carried to the unit; a person's decision in a terminal, never an agent's; never a harness finding or a major or minor one (L4-YOLO-105, L4-YOLO-106, L4-YOLO-107) | `plan.finding_overruled` or `plan.overrule_withdrawn` (push with a lease) |
 | `l4 yolo activate PLAN --reason TEXT [--no-run]` | Freeze the reviewed inputs and start the plan (L4-YOLO-005). Refused with exit 2 unless the plan is admitted, the latest review is for the current digests (a force acceptance that holds for every subject replaces the review, L4-YOLO-061), every unit and batch is READY, `merge` and `forge.merge_policy` agree, the target exists on `origin`, and no other plan is active on the target | `plan.activated` on `refs/l4/plans/<id>` (push with a lease), forge call |
 | `l4 yolo go PLAN --reason TEXT [--accept-findings \| --force] [--yes] [--json] [--no-push] [--local] [--wait DURATION]` | One command from a committed plan to an active plan: preflight, push, check, review, findings, accept and activate over the existing commands, from where the plan is, stopping at the first step that cannot pass with one stop code (20 to 29) and one `Next:` command; a person's run activates after typing the plan id (`--yes` skips it), an agent's run stops at a person's step (activation, `--force`, the cancel of another plan) with `next_by: person` in `--json`; `--json` prints one document (`l4/yolo-go@1`) (L4-YOLO-080 to L4-YOLO-089) | none |
 | `l4 yolo status [PLAN] [--json]` | The plan status, each unit with its phase and what it waits for, the batches, the usage against the limits, the stop reason and `Next:` (L4-YOLO-015) | none |
@@ -7602,7 +7603,7 @@ was read on; L4-YOLO-068); older events without them still fold.
 **L4-YOLO-005** Activation is one person's decision. `l4 yolo activate PLAN --reason TEXT` SHALL record `plan.activated` with the frozen unit digests, the plan digest, the
 limits and the acceptances that hold (`accepted`), and then start a run on the target. It MUST be refused, with exit 2
 and the cause, unless: the plan is admitted; the latest review is for the current digests; every unit and batch is READY,
-or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027), unless a force acceptance that holds for every subject replaces the review (L4-YOLO-061); `merge` and `forge.merge_policy` agree; the target exists
+or NEEDS_REVISION with an acceptance that holds (L4-YOLO-027), each judged without the findings a holding overrule names (L4-YOLO-106), unless a force acceptance that holds for every subject replaces the review (L4-YOLO-061); `merge` and `forge.merge_policy` agree; the target exists
 on `origin`; no other plan is active on the target. Its output MUST list every accepted subject with who accepted it,
 whether a person or an agent, and the reason. Nothing MUST run from a plan before activation. Activation freezes the
 plan digest (`activated_digest`) with the unit digests. From then on, `plan.admitted`, `plan.refused` and
@@ -7826,7 +7827,7 @@ adapter is tool-less, and say so.
 
 **L4-YOLO-027** A person can accept a subject's remaining findings on record. `l4 yolo accept PLAN SUBJECT --reason TEXT` SHALL record `plan.accepted` of the subject's latest verdict (key,
 findings, hash, reason, `by`, `actor`) after the person types the plan id. It MUST be refused for
-BLOCKED, a blocking finding, the subject's `material_cut`, fewer than `yolo.review.accept_after_rounds` (2)
+BLOCKED, a blocking finding (from 0.4.60, not one a holding overrule names, L4-YOLO-106), the subject's `material_cut`, fewer than `yolo.review.accept_after_rounds` (2)
 versions of its text not READY, an active plan and an agent unless `yolo.review.accept_by_agents` is true at
 `origin/<base>`. It holds while the latest entry keeps the key and hash. A person's `--yes` replaces the typed plan id
 (L4-YOLO-063).
@@ -8264,6 +8265,55 @@ older than the pin, how to install the pinned one, and `--allow-older-cli`. The 
 the same about judges where it tells what to do when no judge can run, and `references/adopt.md` SHALL say it where it
 shows role chains and, in its upgrade section, that the local `l4` must be moved with the pin. The CHANGELOG SHALL have
 the entries under Unreleased, with the upgrade cost of prompt version 5.
+
+**L4-YOLO-105 A person can overrule one blocking finding of a judge.** `l4 yolo overrule PLAN FINDING --reason TEXT [--withdraw] [--yes]` SHALL record `plan.finding_overruled{finding,
+subject, criterion, severity, text, material, reason, by, actor: person, marker: null, confirmed, judged_at,
+harness_version}` in one leased write, after the person has seen the finding and typed the plan id (`--yes` replaces
+the typed id, L4-YOLO-063). It MUST be refused (exit 2, nothing recorded) for every caller that `l4.actor.actor` does
+not name a person, before the plan is fetched and whatever `yolo.review.accept_by_agents` says; the MCP server MUST
+offer no tool that runs it, and `l4 yolo go` MUST NOT run it. It MUST also be refused, with the cause and the fix: by
+the plan status rule of L4-YOLO-027; for a plan with no review; for an id that is not a finding of the latest
+`plan.reviewed` (the refusal lists its blocking findings); for an entry with no material key; for a finding whose
+criterion is not one of the judge's (`outcome`, `testability`, `interfaces`, `failure_cases`, `feasibility`,
+`duplicate_scope`, `contradiction`, `missing_dependency`, `batch_acceptance`), so never for `schema`, `unit_missing`,
+`completeness`, `material`, `verdict` or `parts`; for a finding whose severity is not `blocking` (the fix is
+`l4 yolo accept`); and for an empty reason or one over 1,000 characters. `--withdraw` SHALL record
+`plan.overrule_withdrawn{finding, reason, by, actor, marker}`; it MUST NOT be refused for who runs it, and is refused
+after the activation and when the finding has no overrule. The plan fold MUST ignore a `plan.finding_overruled` whose
+`actor` is not `person`; a later one for the same finding replaces the earlier.
+
+**L4-YOLO-106 What an overrule clears, and how long.** An overrule SHALL hold while the latest review's entry of its subject has the overrule's `material` and holds a finding
+whose id is the overrule's `finding`; a review of changed material voids it, a reuse of the same material keeps it. For
+the activation, the status, `l4 yolo go` and `l4 yolo accept`, a subject SHALL be judged on its findings without the
+ones a holding overrule names: when one of those left is a harness finding or `blocking`, the entry's verdict stands;
+else when one is `major`, the subject is NEEDS_REVISION and needs an acceptance that holds (L4-YOLO-027), which a
+BLOCKED entry whose every blocking finding is overruled MUST NOT refuse for being BLOCKED; else it SHALL count as READY.
+An acceptance SHALL clear a subject only while that rule makes it NEEDS_REVISION, so a withdrawn overrule makes its
+blocking finding stop the activation again. `plan.accepted` SHALL record the ids it relied on as `overruled`.
+`plan.activated` SHALL record `overruled: {<finding>: {subject, criterion, severity, text, reason, by, actor, at}}` for
+every holding overrule of a subject of the plan, and the activation's output SHALL list each. An overruled finding MUST
+NOT be carried to the unit: it is left out of the accepted items' `findings`, so the implementer's prompt, the
+verifier's judge and the merge gate never see it. `l4 yolo status` (text and `--json`) SHALL list every recorded
+overrule of the plan's subjects with its reason and whether it holds (`; no longer holds: the subject's material
+changed`); `l4 yolo findings` SHALL mark an overruled finding and a subject it clears, and SHALL give, for a blocking
+judge finding with no overrule, the overrule command as a person's way out, as SHALL the refusal of `l4 yolo accept`
+for a blocking finding; the plan report SHALL list the overruled findings of each unit and its batch.
+
+**L4-YOLO-107 The judge of a later review reads the person's reason.** Every judge call of a subject (a unit, a batch, and each part of a batch) SHALL show, at the end of its `plan entry`
+section, the subject's recorded overrules that are not withdrawn, whether they hold or not, newest first and at most
+five: a harness note that a person overruled these findings of an earlier review of this subject as false for the
+reasons given, that the judge judges the text shown now, and that it raises such a finding again only when the text
+shown still has the defect and then says why the reason does not apply; and per overrule one data block with the
+finding's criterion, severity and text (at most 2,000 characters) and the reason (at most 1,000). The note MUST name
+no unit and no batch outside data blocks. It MUST NOT be part of the subject's material key, MUST NOT change the
+templates, and a subject with no overrule SHALL be asked byte for byte as without it; the readiness prompt version is not
+changed by it.
+
+**L4-YOLO-108 Documentation of the overrule.** The runbook's procedure for a review that is not READY (12.2a) SHALL say when a person overrules a finding (a blocking
+finding of a judge that the person checked and found false), the command, what it records, that it ends when the
+subject's material changes, that the next judge reads the reason, that an agent never runs it and prints the person's
+command, and that `--all --force` remains the plan-wide way out. The skill's `references/plan.md` SHALL say the same
+where it tells an agent not to accept a blocking finding. The CHANGELOG SHALL have the entry under Unreleased.
 
 ## 13. Memory and lessons
 
@@ -9769,6 +9819,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed; the check is fail-safe. `l4.implementer.browser_tests` (new): `collectable_tests` (what pytest would collect: `python_files`, no fixture, `Test*` classes without `__init__`), `match_task_tests` (a report id by module suffix, the module read as `evidence.testsran.file_of_test` does with a file inside the e2e directory before an exact match outside it, and by exact class, two fitting files left `ambiguous`), `selecting_option` (`-m`/`-k`), `shared_with_unit_gate`. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the collectable tests of the Python files under `e2e_test_dir(gates.e2e)` that the red commit added or whose own definition it changed (read from git, so a resumed red counts; a git error is `e2e.task_tests_unread`); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`; only a failing or erroring task test, a timed-out gate, no report, a collection error of a mapped task module, a failed build or a server that is not ready refuse, and a test the report does not show is `e2e.task_tests_unseen`; `_e2e_skip_reason` (`e2e.task_run_skipped`: a selecting command or a directory the unit gate also runs); `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt says the step that completes the task runs them, and that they are frozen only when `PromptContext.e2e_frozen` (the green prompt says so in both forms). `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for a green step, passed by `loop._check_step` only when `task_runs_e2e` (in `l4.implementer.tdd`) is true. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556, 562..564; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; a task test the report does not show is run first at step 3; browser tests in another language, a support-only change and a pytest configuration that overrides `python_files` are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_browser_tests`, `test_deadline`) |
 | 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
 | 135 | `readiness-entry-and-actor` | the readiness review's `plan entry` block shows every object `id` first, then `depends_on`, then the other keys sorted (a unit, a batch and each part of a batch), so a judge no longer reads a unit's prerequisites as the previous unit's; the readiness prompt version is 5, so a review of 0.4.59 is stale before the activation (status, activation refusal, one full review in CI; acceptances bound to the old material no longer hold, rounds are kept, a force acceptance holds) and an active plan is neither stopped nor reviewed again (L4-YOLO-101); `plan.activated`, `plan.resumed` and `plan.cancelled` record `actor`, `marker` and `harness_version`, `l4 yolo status` and the plan report show the kind, an older event shows none, and nothing is refused for it (L4-YOLO-102); `l4 retry`, `l4 resume` and `l4 restart` record the actor in their unit events (L4-OPS-025); doctor CFG-013 warns about a judge chain of one profile and says a review-only judge belongs in `roles.plan_judges` (L4-YOLO-103); outside CI a command that writes is refused (exit 2, before it reads anything) when the running `l4` is older than the repository's pin (`harness.version`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as last fetched), unless `--allow-older-cli`; a stop and a local-only write warn (L4-OPS-026); the runbook, the skill and the CHANGELOG say so (L4-YOLO-104; L4-YOLO-025, L4-YOLO-098, SCN-YOLO-56, SCN-YOLO-276 amended; `openspec/changes/readiness-entry-and-actor/`) | a ten-unit plan whose judge raised a false `depends_on` finding twice; a consumer that cut `roles.judges` to one judge for a review; a retry run with an older local `l4`; the unit tests (`test_yolo_readiness_entry_order`, `test_yolo_prompt_upgrade`, `test_yolo_plan_actor`, `test_checks_cfg_013`, `test_cli_pin`, `test_readiness_entry_and_actor_docs`) |
+| 139 | `readiness-overrule` | a person overrules one blocking finding of a judge that they checked and found false: `l4 yolo overrule PLAN FINDING --reason TEXT [--withdraw] [--yes]` records `plan.finding_overruled` (person only, before anything is fetched, whatever `accept_by_agents` says; no MCP tool; never a harness finding or a major or minor one; the status rule of an acceptance) (L4-YOLO-105); it holds while the subject's latest entry has its material and the finding, the subject is judged on its other findings (READY with none blocking or major; an acceptance for a major left, which a BLOCKED entry no longer refuses), `plan.activated{overruled}` records it, nothing of it is carried to the unit, and status, findings, the activation and the report show it (L4-YOLO-106); every later judge call of the subject reads the finding and the reason in data blocks, outside the material key, so no key and no prompt version moves (L4-YOLO-107); the runbook, the skill and the CHANGELOG say so (L4-YOLO-108; L4-YOLO-005 and L4-YOLO-027 amended; `openspec/changes/readiness-overrule/`) | a plan whose weak judge raised seven false findings in five rounds; the unit tests (`test_yolo_overrule_rules`, `test_yolo_commands_overrule`, `test_yolo_overrule_activation`, `test_yolo_readiness_overrule_note`, `test_readiness_overrule_docs`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -19311,6 +19362,82 @@ scenario is a spec defect (§26).
 - **Then** the runbook names CFG-013, `roles.plan_judges` beside `roles.judges` and `--allow-older-cli`; `plan.md` and
   `adopt.md` name CFG-013 and `roles.plan_judges`; `adopt.md`'s upgrade section says to move the local `l4` too; the
   CHANGELOG's Unreleased section names prompt version 5, CFG-013, `--allow-older-cli` and the actor of `plan.activated`
+
+#### SCN-YOLO-296 (+) A person overrules a false blocking finding · L4-YOLO-105
+- **Given** plan `p1` reviewed with units A and B READY and `batch:b1` NEEDS_REVISION whose only finding `F` is
+  `missing_dependency`, `blocking`, "two units list themselves in depends_on", and a person in a terminal
+- **When** `l4 yolo overrule p1 <F> --reason "no unit lists itself; checked the plan file"` runs and the person types
+  `p1`
+- **Then** it prints the finding, records `plan.finding_overruled` with `subject: batch:b1`, the entry's `material`,
+  `actor: person` and `confirmed: typed`, prints `overruled: <F> of batch:b1 by <by> (person): …`, and exits 0
+
+#### SCN-YOLO-297 (−) An agent is refused before anything is read · L4-YOLO-105
+- **Given** the plan of SCN-YOLO-296, `yolo.review.accept_by_agents: true` on the base, and `CLAUDECODE=1`; then no
+  marker and no terminal
+- **When** `l4 yolo overrule p1 <F> --reason r --yes` runs
+- **Then** both exit 2 with `overruling a finding is a person's decision, never an agent's` and the person's command,
+  no ref is fetched and nothing is recorded; the MCP server's tools hold none that runs `l4 yolo overrule`
+
+#### SCN-YOLO-298 (−) Only a judge's blocking finding of the latest review is overruled · L4-YOLO-105
+- **Given** in turn a `schema_invalid` BLOCKED entry, a `material` finding, a `verdict` finding, a `parts` finding, a
+  `major` `testability` finding, an id of an older review and an entry with no `material`
+- **When** `l4 yolo overrule p1 <id> --reason r` runs
+- **Then** each exits 2 with its own cause (a harness finding; `only a blocking finding is overruled` with the fix
+  `l4 yolo accept p1 <subject> --reason "..."`; `not a finding of the latest review` with the blocking ids; the
+  material-key text), and nothing is recorded
+
+#### SCN-YOLO-299 (+) The overruled plan activates and nothing is carried · L4-YOLO-106
+- **Given** the overrule of SCN-YOLO-296
+- **When** `l4 yolo status p1`, `l4 yolo findings p1` and `l4 yolo activate p1 --reason go --no-run` run, and the first
+  unit of the plan starts
+- **Then** the status lists `overruled: <F> of batch:b1 by <by> (person): …` and no problem; the findings show
+  `batch:b1: NEEDS_REVISION (cleared by an overrule: …)` and the mark on `F`; the activation records `overruled` with
+  `F` and no accepted item for `batch:b1`, and prints the overrule; the unit's `.l4/review-accepted.json` holds no `F`;
+  the report lists `F` with the reason
+
+#### SCN-YOLO-300 (+) What is left decides · L4-YOLO-106
+- **Given** in turn an entry BLOCKED with blocking `F1` overruled and major `F2`; NEEDS_REVISION with blocking `F1`
+  overruled and minor `F3`; NEEDS_REVISION with blocking `F1` overruled and blocking `F4`
+- **When** `l4 yolo activate p1 --reason go` runs, and for the first `l4 yolo accept p1 <subject> --reason r` after two
+  judged versions
+- **Then** the first is refused until the acceptance, which is not refused as BLOCKED and records `overruled: [F1]`,
+  and then activates; the second activates; the third is refused naming `F4`
+
+#### SCN-YOLO-301 (−) A changed material ends the overrule · L4-YOLO-106
+- **Given** the overrule of SCN-YOLO-296, then a pushed change of unit A's spec, and a new review that raises `F` again
+  on the batch's new material
+- **When** `l4 yolo status p1` and `l4 yolo activate p1 --reason go` run
+- **Then** the status shows the overrule with `; no longer holds: the subject's material changed`, and the activation
+  is refused with `F`; a review that reuses the batch's old material instead keeps the overrule
+
+#### SCN-YOLO-302 (−) A withdrawal by anyone makes the activation strict again · L4-YOLO-106
+- **Given** the overrule of SCN-YOLO-300's first case and the acceptance that relied on it
+- **When** an agent (`CLAUDECODE=1`) runs `l4 yolo overrule p1 <F1> --withdraw --reason r`, and then
+  `l4 yolo activate p1 --reason go`
+- **Then** `plan.overrule_withdrawn{actor: agent}` is recorded, and the activation is refused with `F1` although the
+  acceptance still holds by its key
+
+#### SCN-YOLO-303 (−) No overrule after the activation, and none from another actor · L4-YOLO-106
+- **Given** an active plan `p1`; and a ledger holding a `plan.finding_overruled` whose `actor` is `agent`
+- **When** a person runs `l4 yolo overrule p1 <F> --reason r`, and the second plan is folded
+- **Then** the first exits 2 with the status rule's text and records nothing; the fold of the second has no overrule
+
+#### SCN-YOLO-304 (+) The next review shows the rebuttal and keeps the key · L4-YOLO-107
+- **Given** the overrule of SCN-YOLO-296, then a pushed change of unit A's spec
+- **When** the CI plan step reviews the plan
+- **Then** the batch's prompt (and each part's, when it is split) holds the note and a data block with `F`'s text and
+  the reason after the plan entry; the batch's material key equals the key of the same material with no overrule; A's
+  and B's prompts hold no note
+
+#### SCN-YOLO-305 (+) A subject with no overrule is asked as before · L4-YOLO-107
+- **Given** a plan with no `plan.finding_overruled`
+- **When** the review builds its prompts
+- **Then** every prompt and every material key equals the one the review builds without this change
+
+#### SCN-YOLO-306 (+) The documentation names the overrule · L4-YOLO-108
+- **When** the runbook, the skill's `references/plan.md` and the CHANGELOG are read
+- **Then** each names `l4 yolo overrule`, says it is a person's decision for one blocking finding of a judge, and that
+  it ends with the subject's material; `plan.md` says an agent prints the command for the person
 
 ### 23.21 Experience graph (KG)
 
