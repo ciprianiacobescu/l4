@@ -6,6 +6,47 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Added
+- `verification.md` has a new section, `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)`, and
+  `verdict.json` a new key, `step_flakes`. They list each test that failed once in a red, green or chore step and
+  passed when the step ran its test gate again. The section is not a finding and does not change the verdict
+  (L4-VER-082).
+
+### Changed
+- A step that would fail an attempt only because one to five pre-existing tests failed now runs its test gate once
+  more, as `test-recheck`, on the same tree. This covers `red broke existing tests` and `green broke existing tests`,
+  in red, green and a fix, tests or refactor chore. A test that passes in that run does not fail the attempt; one that
+  fails again still does, and the reason then ends with `; failed again on a re-run (L4-IMP-105): <ids>`. The re-run
+  costs one more gate run. It starts only when the soft deadline leaves room for it. It never covers a test in a file
+  the unit changed, a hung test or a test missing from the report. The ledger records `task.tests_rechecked`, an event
+  an older harness ignores (L4-IMP-105).
+- An answer that unfreezes a frozen file for a task's green step now gives that green a new window of attempts. This
+  holds for a person's, an agent's or the delegate's answer. The window is renewed once per question, at most twice per
+  task between two `l4 retry`, `l4 resume` or `l4 restart`, and the ledger records `task.attempts_renewed`. Attempt
+  numbers go on, and the task's own text renews nothing (L4-IMP-104).
+- Step 1 now keeps at head, for its run of the base's tests, a support file that a task's reviewed text names when
+  only that task's red commit changed it. At most three such files per task. The file is listed under `Pre-existing
+  tests changed with an allowance` with the task and the text's source. Before, step 1 reverted the file, and only a
+  person's `[test-infra]` tag let the unit pass. A unit in flight keeps such a file on its next round, because 0.4.59
+  already recorded the task's text (L4-VER-079).
+
+### Fixed
+- A base-tests blocker now says which support files the run reverted and which tasks changed them, and its failing
+  tests reach the fix task with their failure text. In a TypeScript consumer an unchanged base test failed only because
+  step 1 reverted a module-graph data file that task 1.1's text had told red to change. The blocker named the test and
+  the first line of its message. The fix chore found nothing to fix at head and committed only its tick, and round 2
+  failed the same way. Now the detail starts with `with the unit's test and support files at their base version
+  (support files reverted: ...)`, each failing base test has a `failures` record with `gate: base-tests` and an excerpt
+  (L4-VER-078), and the fix proposal, the fix chore's prompt and its questions carry the failure block (L4-VER-080).
+- A `same_failure` escalation of a round with a base-tests blocker now starts with the reverted support files, their
+  tasks and the way out: a person tags that task `[test-infra]` when the change is intended, or fixes the code, then
+  runs `l4 retry`. Before, the text named only the finding's id (L4-VER-081).
+- An unfreeze that the delegate accepted after two failed green attempts no longer leaves the task one attempt. Three
+  times in two consumer units the next run had attempt 3 of 3, and once the breaker halted the unit on a second wrong
+  line of the same test (L4-IMP-104).
+
 ## 0.4.59 (2026-11-19)
 
 ### Added
