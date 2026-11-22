@@ -169,12 +169,9 @@ the overrule is withdrawn.
 
 ### D9. Why it is safe
 
-- It is narrower than what a person can already do. A person could already clear a blocking finding with
-  `--all --force`; the overrule clears one finding, not every subject, bound to the subject's material, which a
-  prerequisite's change also moves, and it keeps every other finding of the subject in force. Two things are new, and
-  both are a person's: an overrule survives a change of the plan file that leaves the subject's entry as it was (a
-  force acceptance is voided by any change of the plan file), and the person's reason reaches later judges of the
-  subject (D7).
+- It never lets anyone do what they could not do before. A person could already clear a blocking finding with
+  `--all --force`; the overrule does less: one finding, not every subject, bound to the subject's material, which a
+  prerequisite's change also moves, and it keeps every other finding of the subject in force.
 - An agent cannot run it, whatever the configuration, and the fold ignores an event with another actor.
 - A harness finding, a major or minor finding, a finding of another review and an entry without a material key are
   refused. An unknown or changed material never holds.
