@@ -396,6 +396,7 @@ def run_review_worktree(
             refuse_fresh_of_prior=record,
             failed_before=findings.failed_before(read.events, PROMPT_VERSION),
             kept=kept,
+            overruled=findings.overruled_for_review(state),
         )
     except ReviewIncomplete as exc:
         _incomplete(ctx, store, read, state, admission, exc, parsed, file.text, rev, record, cache_file, sandboxes)
