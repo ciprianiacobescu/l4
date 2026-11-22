@@ -90,7 +90,12 @@ The rule is in `kept_files` only. `_allowance` and `_unfrozen_source` are not ch
 `check_tests`, and a file that matches both a test glob and a support glob could otherwise widen L4-VER-030.
 `split_allowed` is not changed either: the file is kept, so the tests that read it run against the head version.
 
-The reason string holds no `people`, so `check_base_tests` lists it with the allowances (283), under `## Pre-existing
+`_kept` returns the set of paths the two people rules kept (only people's commits, or a person's commit last), and
+`check_base_tests` lists a kept file as a person's line only when it is in that set. It no longer reads the reason text
+(`"people" not in why`): the reason of a named file embeds the plan id (`plan:<id>@<digest>`) and `_allowance`'s embeds
+a source or a question text, so an id with the word in it filed the file as a person's. The routing of `_allowance`'s
+files moves to the same set: `_allowance` itself is unchanged, and the files it frees go to the same list as before
+except in that misfiled case. The kept file is listed with the allowances (283), under `## Pre-existing
 tests changed with an allowance (L4-VER-031)` of `verification.md`. The `kept_files` docstring changes: a harness
 change to a support file is now read by that listing and by the judge, whose diff holds the file (`_git_diff`).
 

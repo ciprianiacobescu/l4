@@ -83,3 +83,5 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   in `test_base_tests_named_support.py`, then `base_tests._in_report` and the lazy base reference of `_kept`.
 - [x] 5.2 The lead of L4-VER-080 says `(a harness commit)` for a file only a harness commit with no task changed, and
   `(a person)` only when a person's commit did (SCN-VER-327).
+- [x] 5.3 `check_base_tests` files a kept file as a person's line by the set `_kept` returns, not by the word `people` in
+  the reason (SCN-VER-326); `_allowance` is unchanged.

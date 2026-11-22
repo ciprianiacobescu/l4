@@ -458,6 +458,30 @@ def test_scn_ver_324_a_data_file_no_base_test_id_maps_to_stays(tmp_path, git_env
     }
 
 
+@pytest.mark.parametrize("via", ["kept", "paths"])
+def test_scn_ver_326_a_plan_named_people_does_not_file_the_kept_file_as_a_persons(
+    tmp_path, git_environ, via
+):  # SCN-VER-326
+    source = "plan:people-ops@d"  # the reason text embeds the source: routing must not read it
+    repo, base, red, tasks = named_repo(tmp_path, git_environ)
+    repo.events.append(named(red, via=via, source=source))
+    ctx = ctx_of(repo, base, red, tasks)
+    wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    wb.baselines[base] = BASE
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    [line] = [a for a in out.allowed_tests if a.startswith(f"{MODULES} kept at head")]
+    assert source in line and out.human_tests == []
+
+
+def test_scn_ver_326_a_file_only_people_changed_is_still_a_persons_line(tmp_path, git_environ):  # SCN-VER-326
+    repo, base = new_repo(tmp_path, git_environ, {MODULES: GRAPH, "test/arch/repo.test.ts": REPO_TEST})
+    repo.write({MODULES: GRAPH_RED})
+    head = repo.commit_as_human("a person edits the graph")
+    wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    out = check_base_tests(wb, ctx_of(repo, base, head, []), prior=[], round_no=1)
+    assert [h for h in out.human_tests if h.startswith(f"{MODULES} kept at head")] and out.allowed_tests == []
+
+
 def test_scn_ver_325_with_no_base_report_nothing_is_kept_by_the_named_rule(tmp_path, git_environ, monkeypatch):
     path = "test/arch/data.ts"  # SCN-VER-325
     wb, ctx, _ = _hosting_run(tmp_path, git_environ, path, [])
