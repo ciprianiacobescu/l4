@@ -23,6 +23,14 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - When the test step 5 wrote fails at the head, the writer's second attempt is told why, not only which tests failed: its
   retry reason holds the same excerpt. A second test is still kept only when it fails at the merge base and passes at
   the head (L4-VER-084).
+- A UI criterion that a unit did not change is carried from the base instead of becoming a UI hold: its scenario is word
+  for word the base spec's (L4-VER-009), every test that traces it is a passing `pass_to_pass` test in a file the unit
+  did not change, and nobody ever rejected it or its UI hold. Step 5 cannot make a test that fails at the merge base for
+  behaviour the base already has, so such a criterion always ended as a hold; a follow-up that changed one web file
+  raised holds for its merged parent's criteria that only the owner could answer. A carried criterion is listed
+  (`verify.generated` with `status: carried`, its row of the generated UI tests table, step 5's note, its minor gap
+  finding) and still needs the judge's pass. A scenario restated under `MODIFIED` with any word changed is a new
+  criterion, as before (L4-VER-086).
 
 ### Fixed
 - A reviewer who rejects a criterion and its UI hold in the same round now gets one fix task for that behaviour, with
