@@ -76,6 +76,6 @@ nothing. That rule belongs to the fix-chore work of this release.
   `src/l4/verifier/failures.py` (`shown_failure_ids`), `src/l4/verifier/ladder.py` (`integrity()`),
   `src/l4/verifier/fixloop.py` (`repeated_failure` or its caller).
 - `plugins/l4/skills/l4/references/spec.md`, `docs/runbook.md` (the row of `a pre-existing test fails on the unit's
-  code`), `docs/SPEC.md` (L4-VER-079..081, SCN-VER-312..321 and 324..326, change-table row 136), `CHANGELOG.md`.
+  code`), `docs/SPEC.md` (L4-VER-079..081, SCN-VER-312..321 and 324..328, change-table row 136), `CHANGELOG.md`.
 - Ledger: `verify.base_tests` gains `support_reverted` (at most 20 entries). No new event, no configuration key.
 - Cost: none. The run of the base's tests is the same run; a kept file is one fewer file reverted.

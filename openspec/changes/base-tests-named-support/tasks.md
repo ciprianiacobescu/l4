@@ -85,3 +85,5 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   `(a person)` only when a person's commit did (SCN-VER-327).
 - [x] 5.3 `check_base_tests` files a kept file as a person's line by the set `_kept` returns, not by the word `people` in
   the reason (SCN-VER-326); `_allowance` is unchanged.
+- [x] 5.4 Tests that kill the surviving mutants of the named rule: exact path, a link or a deletion, another reason
+  (SCN-VER-328, `test_base_tests_named_support.py`). Nothing in the code changed.

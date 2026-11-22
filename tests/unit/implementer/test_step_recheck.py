@@ -42,9 +42,9 @@ def failing(report: TestReport | None, *ids: str, message: str = "boom") -> Test
 class FakeFlaky:
     """FAKE: wraps `wb.run_gate` of a bench. Run 1 (the first `test` run after `install`) fails `ids`; the re-run does
     what `rerun` says: `pass` (the real report), `fail` (the same ids fail again), `other` (another test that passed in
-    run 1 fails), `gone` (a test of run 1 is missing), or one of `unusable` (no report), `collection`, `vacuous` and
-    `lacks` (a report that cannot be used). `seconds` is the duration run 1 reports; `calls` lists the names of every
-    gate the step ran."""
+    run 1 fails), `gone` (a test of run 1 is missing), `skipped` (the regressed ids are skipped), or one of `unusable`
+    (no report), `collection`, `vacuous` and `lacks` (a report that cannot be used). `seconds` is the duration run 1
+    reports; `calls` lists the names of every gate the step ran."""
 
     def __init__(self, bench, *ids: str, rerun: str = "pass", seconds: float = 1.0, message: str = "boom") -> None:
         self.ids, self.rerun, self.seconds, self.message = ids, rerun, seconds, message
@@ -72,6 +72,8 @@ class FakeFlaky:
                 report = replace(report, tests={i: TestCase(i, "skipped") for i in report.tests})
             elif self.rerun == "lacks":  # the regressed test is not in the re-run's report
                 report = replace(report, tests={i: c for i, c in report.tests.items() if i != PRE})
+            elif self.rerun == "skipped":  # the regressed test is skipped in the re-run: it did not pass
+                report = replace(report, tests={**report.tests, **{i: TestCase(i, "skipped") for i in self.ids}})
             elif self.rerun == "gone":
                 report = replace(report, tests={i: c for i, c in report.tests.items() if i != OTHER})
             return replace(out, report=report)
@@ -129,6 +131,16 @@ def test_scn_imp_572_a_test_that_fails_again_fails_the_attempt_with_both_runs_in
     out = run_green(bench.wb, TASK, red, attempt=1)
     assert out.status == "failed"
     assert out.reason == f"green broke existing tests: {PRE}{AGAIN}{PRE}"
+    [event] = rechecks(bench)
+    assert event["stopped"] == "failed" and event["failing"] == [PRE] and event["flaky"] == []
+    assert bench.events("task.done") == []
+
+
+def test_scn_imp_572_a_regressed_test_that_is_skipped_in_the_re_run_is_not_flaky(make_bench):
+    bench, red = green_bench(make_bench)
+    FakeFlaky(bench, PRE, rerun="skipped")
+    out = run_green(bench.wb, TASK, red, attempt=1)
+    assert out.status == "failed" and out.reason == f"green broke existing tests: {PRE}{AGAIN}{PRE}"
     [event] = rechecks(bench)
     assert event["stopped"] == "failed" and event["failing"] == [PRE] and event["flaky"] == []
     assert bench.events("task.done") == []

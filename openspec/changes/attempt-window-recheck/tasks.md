@@ -77,3 +77,8 @@ the name `test-recheck`.
   do not edit `docs/SPEC.md`, `CHANGELOG.md` or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py
   docs/SPEC.md`.
 - [x] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 5. Review fixes
+
+- [x] 5.1 A test that failed in run 1 and is skipped in the re-run is not flaky: the attempt fails (SCN-IMP-572,
+  `test_step_recheck.py`). Nothing in the code changed.

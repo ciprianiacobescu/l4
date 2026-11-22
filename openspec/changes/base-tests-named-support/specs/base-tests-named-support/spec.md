@@ -137,3 +137,11 @@ the way out. The code SHALL stay `same_failure`. With no such entry
 - **When** step 1 raises the blocker
 - **Then** the lead names the first as `(a harness commit)` and `support_reverted` holds `people: false` for it; the
   second is `(a person)`
+
+#### Scenario: SCN-VER-328 (−) A name that is not the path, a link, a deleted file and another reason are reverted
+- **Given** a data file `x.ts` that red changed and whose task names `x.tsx` (and the reverse, and `x` and `sub/x.ts`);
+  a named file that is a link at head, a link at the base, or deleted at head; and a `task.unfrozen` of reason
+  `human_answer`, `delegate_answer` or none that holds a source, the red commit and a `kept` entry for the file
+- **When** step 1 runs the base's tests
+- **Then** every such file is reverted: the rule reads the exact path, a regular file at both revisions and the reason
+  `named_by_task`

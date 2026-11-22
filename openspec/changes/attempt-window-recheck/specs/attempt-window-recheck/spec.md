@@ -64,7 +64,8 @@ branch or this step changed. Before run 1 the step SHALL record the worktree's u
 it SHALL remove what is new since, as L4-VER-076 does. There SHALL be no re-run when that cannot be done, or when the
 armed soft deadline leaves less than twice run 1's duration plus the larger of 60 seconds and a tenth of run 1's
 duration. The step's guards after a gate run SHALL run after the re-run. When the re-run is usable and every regressed test passes in it,
-and no test that passed in run 1 fails or is missing in it, the regressed tests SHALL be flaky. The step SHALL then go
+and no test that passed in run 1 fails or is missing in it, the regressed tests SHALL be flaky (a test skipped in the
+re-run did not pass: it is not flaky). The step SHALL then go
 on with run 1's report, each flaky test's case taken from the re-run, and judge it again with the same checks. That
 report is also the one any later reader of the step's report, and the next task's baseline, reads (L4-IMP-088). In
 every other case the attempt SHALL fail with run 1's reason. A re-run that ran and failed adds `; failed again on a
@@ -81,7 +82,7 @@ test, a test the unit's branch or the step changed, a hung test and a test missi
   recorded, the task is committed green, and `keep_tested` holds the test as passed
 
 #### Scenario: SCN-IMP-572 (−) A test the step broke fails twice and fails the attempt
-- **Given** the step of SCN-IMP-571 whose re-run fails `tests.test_stack::test_ready` again
+- **Given** the step of SCN-IMP-571 whose re-run fails `tests.test_stack::test_ready` again, or skips it
 - **When** the step judges its gate
 - **Then** the attempt fails with `green broke existing tests: tests.test_stack::test_ready; failed again on a re-run
   (L4-IMP-105): tests.test_stack::test_ready` and `task.tests_rechecked{stopped: failed}`

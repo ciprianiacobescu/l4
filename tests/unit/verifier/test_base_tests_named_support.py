@@ -1,6 +1,7 @@
 """A support file that a task's reviewed text names and its red step changed stays at head for the run of the base's
 tests (L4-VER-079). L4-VER-079 is slippable: its code is `base_tests._named_red_change`, and these are its tests."""
 
+import os
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -503,3 +504,71 @@ def test_scn_ver_325_the_base_reference_is_fetched_only_for_a_named_file(tmp_pat
     )
     out = check_base_tests(wb, ctx_of(repo, base, head, [(UNIT, make_task("1.1"))]), prior=[], round_no=1)
     assert out.findings == []
+
+
+# what the rule does not widen to (SCN-VER-328): each test below kills a mutant of `_names_red_change` or `_regular`
+
+
+@pytest.mark.parametrize(
+    ("changed", "text_names"),
+    [
+        ("test/arch/x.ts", "test/arch/x.tsx"),
+        ("test/arch/x.tsx", "test/arch/x.ts"),
+        ("test/arch/x.ts", "test/arch/x"),
+        ("test/arch/sub/x.ts", "x.ts"),
+        ("test/arch/x.ts", "test/arch"),
+    ],
+)
+def test_scn_ver_328_a_path_the_text_does_not_name_exactly_is_reverted(tmp_path, git_environ, changed, text_names):
+    repo, base, red, tasks = named_repo(tmp_path, git_environ, base={changed: "x\n"}, red={changed: "x\ny\n"})
+    repo.events.append(named(red, path=text_names))
+    ctx = ctx_of(repo, base, red, tasks)
+    assert kept_files(ctx, [changed], BASE) == {}
+    repo.events.append(named(red, path=changed, seq=2))  # the control: named exactly, the same file stays
+    assert list(kept_files(ctx, [changed], BASE)) == [changed]
+
+
+def _link(repo, path, target="../elsewhere.ts"):
+    (repo.path / path).unlink()
+    os.symlink(target, repo.path / path)
+
+
+def test_scn_ver_328_a_named_file_that_is_a_link_at_head_is_reverted(tmp_path, git_environ):
+    path = "test/arch/data.ts"
+    repo, base, _, tasks = named_repo(tmp_path, git_environ, base={path: "export const a = 1;\n"})
+    _link(repo, path)
+    red = repo.commit("red 1.1 replaces the file by a link", task="1.1", tdd="red")
+    repo.events.append(named(red, path=path))
+    assert kept_files(ctx_of(repo, base, red, tasks), [path], BASE) == {}
+
+
+def test_scn_ver_328_a_named_file_that_is_a_link_at_the_base_is_reverted(tmp_path, git_environ):
+    path = "test/arch/data.ts"
+    repo, base0, _, _ = named_repo(tmp_path, git_environ, base={path: "export const a = 1;\n"})
+    repo.git("reset", "-q", "--hard", base0)
+    _link(repo, path)
+    base = repo.commit("the base holds a link")
+    (repo.path / path).unlink()
+    repo.write({path: "export const a = 1;\n"})
+    red = repo.commit("red 1.1 makes it a file", task="1.1", tdd="red")
+    repo.events.append(named(red, path=path))
+    assert kept_files(ctx_of(repo, base, red, [(UNIT, make_task("1.1"))]), [path], BASE) == {}
+
+
+def test_scn_ver_328_a_named_file_deleted_at_head_is_reverted(tmp_path, git_environ):
+    path = "test/arch/data.ts"
+    repo, base, _, tasks = named_repo(tmp_path, git_environ, base={path: "export const a = 1;\n"})
+    repo.delete(path)
+    red = repo.commit("red 1.1 deletes the file", task="1.1", tdd="red")
+    repo.events.append(named(red, path=path))
+    assert kept_files(ctx_of(repo, base, red, tasks), [path], BASE) == {}
+
+
+@pytest.mark.parametrize("reason", ["human_answer", "delegate_answer", "", None])
+def test_scn_ver_328_an_unfreeze_of_another_reason_keeps_nothing_by_this_rule(tmp_path, git_environ, reason):
+    repo, base, red, tasks = named_repo(tmp_path, git_environ)
+    data = {"task": "1.1", "paths": [], "red_sha": red, "source": SOURCE, "kept": [{"path": MODULES, "why": "x"}]}
+    if reason is not None:
+        data["reason"] = reason
+    repo.events.append(event("task.unfrozen", 1, **data))  # a source and a kept entry, but not `named_by_task`
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {}
