@@ -2911,7 +2911,11 @@ is a fix task.`, which the delegate's fallback reads, L4-DLG-025) and then says 
 appended to a test file a red step of the unit wrote are kept, that an edit of any other existing test file or of a
 test-support file is put back whatever the answer says, that a missing check can go into a new test file, and that
 otherwise a person commits the change and then answers. The fix chore's note SHALL NOT change. The blocks SHALL be built
-by the prompt code, so no template version changes. A `tests` feedback item, and a finding that one was not addressed,
+by the prompt code, so no template version changes. A retake whose step edited an existing test file, so that `review_test_chore` put the edit back (`guard.test_tamper`), and
+kept no test file, SHALL NOT be ticked `already-done`: the attempt SHALL fail with a reason that names each restored
+test file and says that a missing check goes into new tests, with new names, in a new test file, because the test files
+of an earlier take may not be edited; a retake that kept nothing and restored no test file keeps the `already-done` rule
+of L4-IMP-108 (a restored test-support file is not a test file here). A `tests` feedback item, and a finding that one was not addressed,
 was already a test chore before this requirement (L4-VER-006): only what the chore is told changes. [V, the same unit:
 the verifier judged the item not addressed because the new browser test did not call a helper the item asked for; the
 fix unit's test chore edited that browser test, which the earlier take had added, the guard put the edit back, and its
@@ -14076,6 +14080,15 @@ scenario is a spec defect (§26).
 - **When** the attempt runs
 - **Then** it fails with a reason that starts `no tests added:` and names `e2e/test_layout.py::test_regions`, the task
   is not ticked and no `task.done{tdd: "already-done"}` is recorded
+
+#### SCN-IMP-601 (−) A retake whose edit of an earlier take's test file was put back fails, and is not ticked · L4-IMP-111, L4-IMP-108
+- **Given** a test chore that retakes a `tests` feedback item, whose step rewrites `tests/test_discount.py`, a test file of
+  an earlier take, and adds no other file
+- **When** the attempt runs
+- **Then** the rewrite is put back (`guard.test_tamper`), the attempt fails with a reason that names
+  `tests/test_discount.py` and says the missing check goes in a new test file, the task is not ticked and no
+  `task.done{tdd: "already-done"}` is recorded; a first take with the same step fails `no tests added:`, and a retake
+  whose step changes only a test-support file is still `already-done`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

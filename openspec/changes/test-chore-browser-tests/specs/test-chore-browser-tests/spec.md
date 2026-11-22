@@ -81,6 +81,15 @@ of the e2e report in `e2e_tests` when there are any. A test chore with no browse
 - **Then** it fails with a reason that starts `no tests added:` and names `e2e/test_layout.py::test_regions`, the task
   is not ticked and no `task.done{tdd: "already-done"}` is recorded
 
+#### Scenario: SCN-IMP-601 (−) A retake whose edit of an earlier take's test file was put back fails, and is not ticked
+- **Given** a test chore that retakes a `tests` feedback item, whose step rewrites `tests/test_discount.py`, a test file of
+  an earlier take, and adds no other file
+- **When** the attempt runs
+- **Then** the rewrite is put back (`guard.test_tamper`), the attempt fails with a reason that names
+  `tests/test_discount.py` and says the missing check goes in a new test file, the task is not ticked and no
+  `task.done{tdd: "already-done"}` is recorded; a first take with the same step fails `no tests added:`, and a retake
+  whose step changes only a test-support file is still `already-done`
+
 ### Requirement: L4-IMP-109 A test chore that adds no test says what each gate found
 A test chore's attempt that adds no test SHALL fail with a reason that starts `no tests added: ` and names each gate and
 what it found, joined by `; `: `this step kept no new test file and appended no test` first when the review kept no
@@ -146,7 +155,11 @@ keeps the fix chore's first sentence (`Harness note: this is a fix task.`) and t
 tests appended to a test file a red step of the unit wrote are kept, that an edit of any other existing test file or of
 a test-support file is put back whatever the answer says, that a missing check can go into a new test file, and that
 otherwise a person commits the change and then answers. The fix chore's note SHALL NOT change. The blocks SHALL be built
-by the prompt code, so no template version changes.
+by the prompt code, so no template version changes. A retake whose step edited an existing test file, so that `review_test_chore` put the edit back (`guard.test_tamper`), and
+kept no test file, SHALL NOT be ticked `already-done`: the attempt SHALL fail with a reason that names each restored
+test file and says that a missing check goes into new tests, with new names, in a new test file, because the test files
+of an earlier take may not be edited; a retake that kept nothing and restored no test file keeps the `already-done` rule
+of L4-IMP-108 (a restored test-support file is not a test file here).
 
 #### Scenario: SCN-IMP-597 (+) The test chore's question says what a test chore may keep
 - **Given** a test chore that reports status blocked with one technical question

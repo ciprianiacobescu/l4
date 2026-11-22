@@ -2629,6 +2629,7 @@ class TestChoreReview:
     kept: list[str] = field(default_factory=list)  # new or appended-to test files that stay
     non_test: list[str] = field(default_factory=list)  # changed files that are no test file: the attempt fails
     restored: list[str] = field(default_factory=list)  # paths put back to the base (a replay does not expect them)
+    tampered: list[str] = field(default_factory=list)  # the test files among them, recorded as `guard.test_tamper`
 
 
 def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> TestChoreReview:
@@ -2654,6 +2655,7 @@ def review_test_chore(wb: Workbench, base: str, own_tests: Collection[str]) -> T
             else:
                 _put_back(wb, base, path, existed)
                 review.restored.append(path)
+                review.tampered.append(path)
                 why = _APPEND_RULE if path in own_tests else ""
                 wb.emit("guard.test_tamper", path=path, phase="single", **({"reason": why} if why else {}))
         else:
@@ -3622,6 +3624,15 @@ def _no_tests_text(wb: Workbench, kept: Sequence[str], e2e: _E2eFound) -> str:
     return "no tests added: " + "; ".join(clauses)
 
 
+def _retake_edit_text(tampered: Sequence[str]) -> str:
+    """L4-IMP-111: a retake whose edits of existing test files were put back is not done: the item may still lack the
+    check the edit was to add. The earlier take's test files may not be edited (D9), so the check goes in a new file."""
+    return (
+        f"the edit of {_list(sorted(tampered))} was put back: a test file of an earlier take may not be edited, and "
+        "the item may still lack a check. Add the missing check as new tests, with new names, in a new test file"
+    )
+
+
 BROWSER_ONLY = (
     "the discrimination runs use the unit gate, which does not run browser tests: these browser tests passed in the "
     "e2e gate, and the harness cannot check that they fail when the code is wrong"
@@ -3700,13 +3711,14 @@ def run_single(
             )
         return GreenOutcome("failed", step.reason, excerpt=step.excerpt)
     kept: list[str] = []
+    tampered: list[str] = []
     if adds_tests:
         review = review_test_chore(wb, base, own_tests)
         if review.non_test:
             wb.discard_changes()
             shown = ", ".join(sorted(review.non_test)[:MAX_LISTED])
             return GreenOutcome("failed", f"a test chore may add tests only: it changed non-test files: {shown}")
-        kept = review.kept
+        kept, tampered = review.kept, review.tampered
         release_replay(wb, review.restored)
     elif kind == "refactor" and not _freeze_refactor(wb, task, base):
         wb.discard_changes()
@@ -3761,10 +3773,13 @@ def run_single(
     added_e2e = sorted(chore_e2e.passed)
     added = [*added_unit, *added_e2e]
     if adds_tests and not reason and not added:
-        if retake and not kept:  # a retake that kept a test file no gate counted is not discarded with the task ticked
+        if retake and not kept and tampered:  # L4-IMP-111: an edit put back is a check the item still lacks
+            reason = _retake_edit_text(tampered)
+        elif retake and not kept:  # a retake that kept a test file no gate counted is not discarded, ticked
             wb.discard_changes()
             return _already_done(wb, task, findings, attempt)
-        reason = _no_tests_text(wb, kept, e2e_found)
+        else:
+            reason = _no_tests_text(wb, kept, e2e_found)
     elif adds_tests and not reason and attempt == 1 and (decided := decision_calling_code_wrong(wb, findings)):
         # the chore may not change the code, so tests that all pass against code the decision calls wrong assert what
         # the code does now (F1, MF-7); told once, the agent may explain in its notes, and the gate judges attempt 2

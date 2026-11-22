@@ -208,7 +208,9 @@ at the fix unit's base is the one that take committed (no person changed it sinc
 Not proposed in this change, because it loosens the tamper guard for a test that may since carry a criterion's proof (a
 `verify.extra_proof` tied to the file's content) and that a person may have relied on; and because the case is already
 unblocked without it: with D3 a new browser test file with the missing check counts, and D8 tells the agent so. The
-cost is a duplicate test. It is an open question for the owner's delegate.
+cost is a duplicate test. The owner's delegate ruled: not proposed. Its consequence is in L4-IMP-111: a retake whose
+edit of an earlier take's test file was put back, and that kept no test file, fails with a reason that names the file and
+says a missing check goes in a new test file; it is not ticked `already-done`, because the edit was the check it lacked.
 
 ### D10. Fail-safe and upgrade
 

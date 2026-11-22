@@ -162,6 +162,36 @@ def test_scn_imp_600_a_retake_whose_browser_test_no_gate_counted_fails_and_is_no
     assert bench.wb.head() == bench.before and bench.wb.is_clean()
 
 
+def test_scn_imp_601_a_retake_that_edits_an_earlier_takes_test_file_fails_and_is_not_ticked(make_bench, monkeypatch):
+    from .conftest import TESTS
+
+    edited = TESTS.replace("== 45.0", "== 45.5")  # an edit of a file the unit's red step froze: put back, not appended
+    step = Step(writes={"tests/test_discount.py": edited}, structured=result("single"))
+    bench, done, calls = chore(make_bench, monkeypatch, step, retake=True)
+    assert done.status == "failed", done.reason
+    assert "tests/test_discount.py" in done.reason and "new test file" in done.reason
+    assert [e["tdd"] for e in bench.events("task.done") if e["task"] == "1.2"] == []
+    assert "[ ] 1.2" in (bench.wb.ref.path / "tasks.md").read_text()
+    tampered = [e["path"] for e in bench.events("guard.test_tamper") if e["phase"] == "single"]
+    assert tampered == ["tests/test_discount.py"]
+    assert bench.wb.head() == bench.before and bench.wb.is_clean()
+
+
+def test_scn_imp_601_a_first_take_that_edits_a_test_file_keeps_failing_no_tests_added(make_bench, monkeypatch):
+    from .conftest import TESTS
+
+    step = Step(writes={"tests/test_discount.py": TESTS.replace("== 45.0", "== 45.5")}, structured=result("single"))
+    _, done, _ = chore(make_bench, monkeypatch, step)
+    assert done.status == "failed" and done.reason.startswith("no tests added:")
+
+
+def test_scn_imp_601_a_retake_that_edits_a_test_support_file_only_is_still_already_done(make_bench, monkeypatch):
+    step = Step(writes={"tests/conftest.py": "X = 1\n"}, structured=result("single"))
+    bench, done, _ = chore(make_bench, monkeypatch, step, retake=True, e2e=False)
+    assert done.status == "ok", done.reason  # the ruling names test files; a support file is not one
+    assert [e["tdd"] for e in bench.events("task.done") if e["task"] == "1.2"] == ["already-done"]
+
+
 def test_a_retake_whose_run_was_skipped_is_not_discarded_with_the_task_ticked(make_bench, monkeypatch):
     bench, done, calls = chore(make_bench, monkeypatch, WRITE_BROWSER, retake=True, selecting=True)
     assert done.status == "failed" and "the e2e gate did not run" in done.reason

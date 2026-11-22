@@ -106,7 +106,13 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 ## 5. Checks
 
-- [x] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..600, change-table row 138 and the L4-VER-006 amendment.
+- [x] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..601, change-table row 138 and the L4-VER-006 amendment.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 6. Review ruling: a retake that edits an earlier take's test file
+
+- [x] 6.1 Test first (`test_scn_imp_601_*` in `tests/unit/implementer/test_test_chore_browser.py`), then fail the
+  attempt of a retake that kept no test file and had a test-file edit put back (`TestChoreReview.tampered`,
+  `_retake_edit_text` in `src/l4/implementer/tdd.py`); L4-IMP-111 and SCN-IMP-601 say so.
