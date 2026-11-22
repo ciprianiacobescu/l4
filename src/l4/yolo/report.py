@@ -76,23 +76,6 @@ def _accepted_lines(plan: Plan, state: PlanState, unit_id: str, batch_id: str, f
     return lines
 
 
-def _overruled_lines(state: PlanState, unit_id: str, batch_id: str) -> list[str]:
-    """The review findings a person overruled for the unit (its own subject and its batch's), from the activation
-    (`plan.activated{overruled}`): the finding, who overruled it and why (L4-YOLO-106)."""
-    lines: list[str] = []
-    for subject in (unit_id, f"batch:{batch_id}"):
-        rows = {i: o for i, o in state.activated_overruled.items() if o.get("subject") == subject}
-        if not rows:
-            continue
-        lines.append(f"- Overruled review findings ({subject}):")
-        for ident, o in sorted(rows.items()):
-            lines.append(
-                f"  - {ident} [{o.get('criterion', '')}/{o.get('severity', '')}] {o.get('text', '')}: overruled by "
-                f"{o.get('by', '?')} ({o.get('actor', '?')}): {o.get('reason', '')}"
-            )
-    return lines
-
-
 def promotion_sentence(plan: Plan) -> str:
     if plan.promotion is None:
         return "No promotion target is set. Promotion was not performed."
@@ -200,7 +183,6 @@ def render_report(
                 f"- Usage: {_usd(folded.cost_usd)}, {folded.iteration} run(s), {folded.restarts + 1} attempt(s)"
             )
         lines += _accepted_lines(plan, state, unit.id, batch_of.get(unit.id, ""), folded)
-        lines += _overruled_lines(state, unit.id, batch_of.get(unit.id, ""))
         lines += _delegate_lines((delegate or {}).get(unit.id, ()))
         lines.append("")
     lines += ["## Batches", ""]

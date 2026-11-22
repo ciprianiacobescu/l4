@@ -23,10 +23,9 @@ SECTION_2_1 = {
 EXTRA = {"s1", "mcp serve", "mcp install"}  # M1.6: not a SPEC 2.1 command; the harness's S1 data-set tool
 EXTRA |= {"skills install", "skills status"}  # skills-install: L4-SKL-003
 YOLO_WORDS = (
-    "draft", "check", "review", "findings", "accept", "waive", "overrule", "activate", "status", "cancel", "resume",
-    "go",
+    "draft", "check", "review", "findings", "accept", "waive", "activate", "status", "cancel", "resume", "go",
 )  # fmt: skip
-YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031; overrule: L4-YOLO-105
+YOLO = {f"yolo {w}" for w in (*YOLO_WORDS, "report")}  # yolo-mode D6; waive: L4-YOLO-031
 EXTRA |= YOLO
 
 # minimal valid argv per command, including options that are required
@@ -67,7 +66,6 @@ ARGV = {
     "yolo findings": ["yolo", "findings", "p1"],
     "yolo accept": ["yolo", "accept", "p1", "openspec:a", "--reason", "go"],
     "yolo waive": ["yolo", "waive", "p1", "F-0a1b2c", "--reason", "go"],
-    "yolo overrule": ["yolo", "overrule", "p1", "F-0a1b2c", "--reason", "go"],
     "yolo activate": ["yolo", "activate", "p1", "--reason", "go"],
     "yolo status": ["yolo", "status"],
     "yolo cancel": ["yolo", "cancel", "p1", "--reason", "why"],

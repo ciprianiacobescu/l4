@@ -434,19 +434,11 @@ class ReviewView:
     force: tuple[dict[str, Any], ...] = ()
     covered: bool = False
     problem_subjects: tuple[str, ...] = ()  # the subject of each line of `problems`, in the same order (`l4 yolo go`)
-    # every recorded overrule of a subject of the plan (L4-YOLO-105): finding, subject, criterion, severity, text,
-    # reason, by, actor, at, holds (`accept.overrule_holds`)
-    overruled: tuple[dict[str, Any], ...] = ()
-    verdicts: dict[str, str] = field(default_factory=dict)  # a problem subject -> its verdict once its overrules count
 
     @property
     def forced(self) -> list[dict[str, Any]]:
         """The force items that hold: their subjects are cleared whatever a current review says of them."""
         return [f for f in self.force if f["holds"]]
-
-    def held(self, subject: str) -> set[str]:
-        """The finding ids of `subject` that a holding overrule takes out of its review."""
-        return {o["finding"] for o in self.overruled if o["holds"] and o["subject"] == subject}
 
     @property
     def cleared(self) -> list[dict[str, Any]]:
@@ -485,9 +477,6 @@ def _first_line(findings: Any) -> str:
     criterion = top.get("criterion")
     head = text[0] if text else "no text"
     return f"{criterion}: {head}" if criterion else head
-
-
-_OVERRULE_KEYS = ("subject", "criterion", "severity", "text", "reason", "by", "actor", "at")
 
 
 def _review_view(
@@ -530,26 +519,11 @@ def _review_view(
     problems = []
     subjects: list[str] = []
     accepted: list[dict[str, Any]] = []
-    verdicts: dict[str, str] = {}
     held = accepting.holds(state, latest)
-    overrule_held = accepting.overrule_holds(state, latest)
-    overrules = tuple(
-        {**{k: record.get(k) for k in _OVERRULE_KEYS}, "finding": finding, "holds": overrule_held.get(finding, False)}
-        for finding, record in state.overruled.items()
-        if record.get("subject") in wanted
-    )
     for name in wanted:
         verdict = state.review[name]
-        group, _, ident = name.partition(":") if name.startswith("batch:") else ("units", "", name)
-        entry = (latest.get("batches" if group == "batch" else "units") or {}).get(ident) or {}
-        shown = entry.get("findings")
-        if entry.get("verdict") is not None:  # what is left once the findings a person overruled are taken out
-            ids = {o["finding"] for o in overrules if o["holds"] and o["subject"] == name}
-            verdict, left = accepting.effective(name, entry, ids)
-            shown = left if ids else entry.get("findings")
         if name in cleared_by_force or verdict == "READY":  # a subject a force acceptance overrode is cleared (D5)
             continue
-        verdicts[name] = verdict
         given = state.accepted.get(name)
         if given is not None:
             holds = bool(held.get(name)) and verdict == "NEEDS_REVISION"
@@ -561,8 +535,10 @@ def _review_view(
             )  # fmt: skip
             if holds:
                 continue
+        group, _, ident = name.partition(":") if name.startswith("batch:") else ("units", "", name)
+        entry = (latest.get("batches" if group == "batch" else "units") or {}).get(ident) or {}
         label = f"batch {ident}" if group == "batch" else name
-        line = f"{label}: {verdict}: {_first_line(shown)}"
+        line = f"{label}: {verdict}: {_first_line(entry.get('findings'))}"
         if given is not None:
             why = accepting.why_not_holds(given, accepting.entry_of(latest, name), review_at)
             line += f" (the acceptance by {given.get('by')} was for {why})"
@@ -570,7 +546,7 @@ def _review_view(
         subjects.append(name)
     return ReviewView(
         "current", tuple(problems), accepted=tuple(accepted), force=force, covered=covered,
-        problem_subjects=tuple(subjects), overruled=overrules, verdicts=verdicts,
+        problem_subjects=tuple(subjects),
     )  # fmt: skip
 
 
@@ -1176,7 +1152,6 @@ def run_review(
             sandbox_for=sandbox_for,
             failed_before=fnd.failed_before(read.events, PROMPT_VERSION),
             kept=fnd.kept_keys(read.events, PROMPT_VERSION),
-            overruled=fnd.overruled_for_review(state),
         )
     except ReviewIncomplete as exc:
         _record_incomplete(
@@ -1390,15 +1365,9 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     # an acceptance that holds is frozen with the activation; an agent's come first (the person sees them first)
     cleared = sorted(view.cleared, key=lambda a: a["actor"] != "agent")
     accepted = {
-        a["subject"]: {
-            "findings": [f for f in a["findings"] if fnd.finding_id(a["subject"], f) not in view.held(a["subject"])],
-            "reason": a["reason"], "by": a["by"], "actor": a["actor"],
-        }  # an overruled finding is never carried to the unit (L4-YOLO-106)
+        a["subject"]: {"findings": a["findings"], "reason": a["reason"], "by": a["by"], "actor": a["actor"]}
         for a in cleared
-    }  # fmt: skip
-    overruled = {
-        o["finding"]: {k: o[k] for k in _OVERRULE_KEYS} for o in view.overruled if o["holds"]
-    }  # every overrule that holds, for the report and the record
+    }
     for f in view.forced:  # a subject a holding force acceptance overrode: no findings, the person's reason (D5)
         accepted[f["subject"]] = {
             "findings": [],
@@ -1412,7 +1381,6 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
         merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
         accepted=accepted, actor=who[0], marker=who[1], harness_version=__version__, **extra,
-        **({"overruled": overruled} if overruled else {}),
     )  # fmt: skip
     _append(store, [event], read.head)
     for a in cleared:
@@ -1420,8 +1388,6 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
         ctx.say(f"accepted: {a['subject']} by {a['by']} ({a['actor']}): {a['reason']}{mark}")
     for f in view.forced:
         ctx.say(accepting.force_line(f["subject"], f["by"], f["reason"]))
-    for finding, o in overruled.items():
-        ctx.say(f"overruled: {finding} of {o['subject']} by {o['by']} ({o['actor']}): {o['reason']}")
     ctx.say(f"{plan_id}: activated on {parsed.target} ({len(parsed.unit_ids())} unit(s), merge: {parsed.merge})")
     if not no_run:
         ctx.say(start_run_line(ctx.app, ctx.cfg))
@@ -1870,17 +1836,6 @@ def _describe(
         }
         if view.prompt_changed:
             out["review"]["prompt_changed"] = True
-        if view.overruled:
-            out["review"]["overruled"] = [
-                {
-                    "finding": o["finding"],
-                    "subject": o["subject"],
-                    "by": o["by"],
-                    "reason": o["reason"],
-                    "holds": o["holds"],
-                }
-                for o in view.overruled
-            ]
         if view.kind == "current" and (in_parts := fnd.batches_in_parts(read.events, PROMPT_VERSION)):
             out["review"]["in_parts"] = in_parts
         if view.kind != "current" and (incomplete := fnd.latest_incomplete(read.events, PROMPT_VERSION)) is not None:
@@ -2292,9 +2247,6 @@ def _render(d: dict[str, Any]) -> str:
             else ""
         )
         lines.append(f"  review: {d['review']['state']}{changed}{covered}")
-        for o in d["review"].get("overruled", []):
-            gone = "" if o["holds"] else "; no longer holds: the subject's material changed"
-            lines.append(f"  overruled: {o['finding']} of {o['subject']} by {o['by']} (person): {o['reason']}{gone}")
         if d["review"].get("in_parts"):
             lines.append(
                 f"    reviewed in parts: {', '.join(d['review']['in_parts'])} "
@@ -2594,8 +2546,6 @@ def run_findings(
         "why": accepting.whys(state, review, _latest_review_at(read.events)),
         "can_accept": _acceptor(ctx, state, read.events, review),
         "only": subject,
-        "overruled": state.overruled,
-        "overrule_holds": accepting.overrule_holds(state, review),
     }
 
     def history_of(name: str) -> list[dict[str, Any]]:
@@ -2719,7 +2669,6 @@ def run_accept(
         verdict=latest["verdict"], findings=found, findings_sha=fnd.findings_sha(found), reason=text, by=ctx.who(),
         actor=who[0], marker=who[1], rounds=fnd.rounds_not_ready(read.events, subject),
         confirmed="--yes" if yes else "typed", judged_at=latest.get("reused_from") or _latest_review_at(read.events),
-        **({"overruled": sorted(relied)} if (relied := accepting.held_ids(state, subject, latest)) else {}),
     )  # fmt: skip
     _append(store, [event], read.head)
     ctx.say(f"accepted: {subject} by {event.data['by']} ({who[0]}): {text}")
@@ -2805,82 +2754,6 @@ def _run_force_accept(app: AppContext, *, plan_id: str, reason: str, withdraw: b
         f"{reason}"
     )
     ctx.say(f"Next: l4 yolo activate {plan_id} --reason TEXT")
-    return ExitCode.OK
-
-
-def run_overrule(app: AppContext, *, plan: str, finding: str, reason: str, withdraw: bool, yes: bool) -> ExitCode:
-    """`l4 yolo overrule PLAN FINDING --reason TEXT [--withdraw] [--yes]` (L4-YOLO-105, readiness-overrule D1): a
-    person who checked a judge's blocking finding and found it false overrules that one finding, bound to the material
-    of its subject. An agent is refused before anything is fetched, whatever `yolo.review.accept_by_agents` says. A
-    person sees the finding and types the plan id (`--yes` replaces that). Writes one event with the lease. A
-    withdrawal is never refused for who runs it: it only makes the activation stricter. Exit 2 for every refusal, with
-    the cause and the fix; nothing is recorded then."""
-    text = reason.strip()
-    if not text:
-        raise L4Exit(ExitCode.USAGE_ERROR, "overrule: --reason must say why (why the finding is false)")
-    if len(text) > MAX_REASON:
-        raise L4Exit(ExitCode.USAGE_ERROR, f"overrule: --reason has {len(text)} characters; at most {MAX_REASON}")
-    plan_id = _plan_id(plan)
-    who = accepting.actor(app.environ, _stdin_tty())
-    if not withdraw and who[0] != "person":  # before anything is fetched; no key changes this
-        why = f"{who[1]} is set" if who[1] else "stdin is not a terminal"
-        raise L4Exit(
-            ExitCode.USAGE_ERROR,
-            f"overrule: overruling a finding is a person's decision, never an agent's ({why}), whatever "
-            "yolo.review.accept_by_agents says\n"
-            f'Fix: a person runs, in a terminal: l4 yolo overrule {plan_id} {finding} --reason "..."',
-        )
-    ctx = _open(app)
-    _sync(ctx, who="overrule")
-    _valid(ctx, _file(ctx, plan_id, "overrule"), "overrule")
-    store = ctx.store(plan_id)
-    read = store.read()
-    state = fold_plan(plan_id, read.events)
-    if withdraw:
-        if accepting.status_refusal(state) is not None:
-            raise L4Exit(
-                ExitCode.USAGE_ERROR,
-                f"overrule: {plan_id} is {state.status}: the overrules were frozen at its activation and the runs "
-                "read the frozen ones, so a withdrawal now would change nothing\n"
-                f"Fix: cancel the plan (l4 yolo cancel {plan_id}), or change the spec and review again "
-                f"(l4 yolo review {plan_id})",
-            )
-        if finding not in state.overruled:
-            raise L4Exit(ExitCode.USAGE_ERROR, f"overrule: {finding} has no overrule: nothing to withdraw")
-        event = _event(
-            "plan.overrule_withdrawn", finding=finding, reason=text, by=ctx.who(), actor=who[0], marker=who[1]
-        )
-        _append(store, [event], read.head)
-        ctx.say(f"{plan_id}: the overrule of {finding} is withdrawn")
-        ctx.say(f"Next: l4 yolo status {plan_id}")
-        return ExitCode.OK
-    refusal = accepting.status_refusal(state)
-    if refusal is not None:
-        raise L4Exit(ExitCode.USAGE_ERROR, f"overrule: {refusal.message}\nFix: {refusal.fix}")
-    review = _latest_review(read.events)
-    if review is None:
-        raise L4Exit(ExitCode.USAGE_ERROR, f"overrule: {plan_id} has no review yet: run l4 yolo review {plan_id}")
-    found = accepting.overrule_check(plan_id, review, finding)
-    if isinstance(found, accepting.Refusal):
-        raise L4Exit(ExitCode.USAGE_ERROR, f"overrule: {found.message}\nFix: {found.fix}")
-    subject, item, entry = found
-    ctx.say(f"{finding} [{item.get('criterion')}/{item.get('severity')}] of {subject}: {item.get('text')}")
-    if not yes:
-        _confirm(
-            ctx,
-            plan_id,
-            f"Type the plan id ({plan_id}) to overrule {finding}: the activation will not wait for it",
-            "overrule",
-        )
-    event = _event(
-        "plan.finding_overruled", finding=finding, subject=subject, criterion=item.get("criterion"),
-        severity=item.get("severity"), text=item.get("text"), material=entry["material"], reason=text, by=ctx.who(),
-        actor="person", marker=None, confirmed="--yes" if yes else "typed",
-        judged_at=entry.get("reused_from") or _latest_review_at(read.events), harness_version=__version__,
-    )  # fmt: skip
-    _append(store, [event], read.head)
-    ctx.say(f"overruled: {finding} of {subject} by {event.data['by']} (person): {text}")
-    ctx.say(f"Next: l4 yolo status {plan_id}")
     return ExitCode.OK
 
 

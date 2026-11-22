@@ -361,12 +361,6 @@ _SPECS: dict[str, tuple[str, Callable[[], list[click.Parameter]]]] = {
         _flag("--yes", "yes", help="Do not ask for the plan id (a person, or an agent the target lets accept)."),
         _flag("--no-run", "no_run", help="Do not start the harness's CI on the base branch after the push."),
     ]),
-    "yolo overrule": ("A person overrules one blocking finding of a judge that they checked and found false.", lambda: [
-        click.Argument(["plan"]), click.Argument(["finding"]),
-        _opt("--reason", "reason", required=True, help="Why the finding is false (kept in the plan ledger)."),
-        _flag("--withdraw", "withdraw", help="Withdraw an overrule."),
-        _flag("--yes", "yes", help="Do not ask for the plan id (a person at a terminal only)."),
-    ]),
     "yolo activate": ("Activate a reviewed delivery plan, then start a run.", lambda: [
         click.Argument(["plan"]),
         _opt("--reason", "reason", required=True, help="Why the plan is activated (kept in the plan ledger)."),

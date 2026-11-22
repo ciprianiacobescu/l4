@@ -926,7 +926,7 @@ def _gather(go: _Go) -> tuple[Facts, _Seen]:
             person_refusals[subject] = _accept_refusal(
                 plan, state, read.events, subject, latest, target, ("person", None)
             )
-    blocked = tuple(s for s in view.problem_subjects if view.verdicts.get(s, state.review.get(s)) == "BLOCKED")
+    blocked = tuple(s for s in view.problem_subjects if state.review.get(s) == "BLOCKED")
     blocker = None
     if go.actor[0] != "person" and not view.problems and (view.kind == "current" or view.covered):
         blocker = commands._activation_blocker(ctx, plan, at.plan)  # an agent is told, a person's activation checks
