@@ -15,20 +15,26 @@ from l4.exitcodes import L4Exit
 from l4.vcs.git import Git, GitError
 from l4.yolo import findings as findings_mod
 from l4.yolo.digest import MISSING
+from l4.yolo.findings import JUDGE_CRITERIA, effective, finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
 
 log = logging.getLogger("l4.yolo.accept")
 __all__ = [
     "AGENT_MARKERS",
+    "JUDGE_CRITERIA",
     "SKIPPED_WORDS",
     "Refusal",
     "actor",
     "check",
+    "effective",
     "entry_of",
     "force_holds",
     "force_line",
     "force_subjects",
+    "held_ids",
     "holds",
+    "overrule_check",
+    "overrule_holds",
     "status_refusal",
     "target_config",
     "target_full_config",
@@ -108,11 +114,19 @@ def check(
         return None
     plan = state.plan_id
     kind = actor if isinstance(actor, str) else actor[0]
-    found = latest_entry.get("findings") or []
+    # a finding a person overruled (L4-YOLO-105) is not one of the subject's: its verdict and findings are what is left
+    verdict, found = effective(subject, latest_entry, held_ids(state, subject, latest_entry))
     refusal = status_refusal(state)
     if refusal is not None:
         return refusal
-    if latest_entry.get("verdict") == "BLOCKED":
+    judge_blocking = [x for x in found if x.get("severity") == "blocking" and x.get("criterion") in JUDGE_CRITERIA]
+    way_out = (
+        f"; or, when a person has checked that {finding_id(subject, judge_blocking[0])} is false: "
+        f'l4 yolo overrule {plan} {finding_id(subject, judge_blocking[0])} --reason "..."'
+        if judge_blocking
+        else ""
+    )
+    if verdict == "BLOCKED":
         harness = [x for x in found if x.get("criterion") in _HARNESS_CRITERIA]
         if harness:
             return Refusal(
@@ -121,14 +135,14 @@ def check(
             )
         return Refusal(
             f"{subject} is BLOCKED: the judge could not judge it or says it cannot be built",
-            f"fix the spec, push it and run l4 yolo review {plan}",
+            f"fix the spec, push it and run l4 yolo review {plan}{way_out}",
         )
     blocking = [x for x in found if x.get("severity") == "blocking" and x.get("criterion") != "material"]
     if blocking:
         return Refusal(
             f"{subject} has a blocking finding ({blocking[0].get('criterion')}): the implementer would build the "
             "wrong thing, so it cannot be accepted",
-            f"fix the spec, push it and run l4 yolo review {plan}",
+            f"fix the spec, push it and run l4 yolo review {plan}{way_out}",
         )
     if any(x.get("criterion") == "material" for x in found):
         return Refusal(
@@ -137,7 +151,7 @@ def check(
             "shorten the file or raise yolo.review.max_file_chars (or max_folder_chars) in .l4/config.yaml on the "
             "base branch",
         )
-    if latest_entry.get("verdict") == "READY":
+    if verdict == "READY":
         return Refusal(f"{subject} is READY: nothing to accept", f"l4 yolo activate {plan} --reason TEXT")
     rounds, needed = findings_mod.rounds_not_ready(events, subject), cfg_target.accept_after_rounds
     if rounds < needed:
@@ -195,6 +209,87 @@ def holds(state: PlanState, latest_review: Mapping[str, object]) -> dict[str, bo
             sha = findings_mod.findings_sha(entry.get("findings") or [])
         result[subject] = accepted.get("findings_sha") == sha
     return result
+
+
+# --- the overrule of one blocking finding (L4-YOLO-105 to -107; readiness-overrule D2, D3) -----------------------
+
+
+def _holds_for(record: Mapping[str, Any], finding: str, entry: Mapping[str, Any] | None) -> bool:
+    """An overrule holds while the entry of its subject has its `material` and still holds the finding."""
+    if entry is None or entry.get("material") is None or record.get("material") != entry.get("material"):
+        return False
+    subject = str(record.get("subject"))
+    return any(finding_id(subject, f) == finding for f in entry.get("findings") or () if isinstance(f, Mapping))
+
+
+def overrule_holds(state: PlanState, latest_review: Mapping[str, object]) -> dict[str, bool]:
+    """Per recorded overrule (finding id): the latest review's entry of its subject has the overrule's `material` and
+    holds a finding of that id. A review of changed material voids it; a reuse of the same material keeps it."""
+    return {
+        finding: _holds_for(record, finding, _entry_of(latest_review, str(record.get("subject"))))
+        for finding, record in state.overruled.items()
+    }
+
+
+def held_ids(state: PlanState, subject: str, entry: Mapping[str, Any] | None) -> set[str]:
+    """The ids of the findings of `subject`'s `entry` that an overrule holds for."""
+    return {
+        finding
+        for finding, record in state.overruled.items()
+        if record.get("subject") == subject and _holds_for(record, finding, entry)
+    }
+
+
+def overrule_check(
+    plan: str, review: Mapping[str, Any], finding: str
+) -> tuple[str, dict[str, Any], Mapping[str, Any]] | Refusal:
+    """What `l4 yolo overrule PLAN FINDING` may overrule in the latest review: `(subject, the finding, its entry)`, or
+    the `Refusal` for a finding that is not one of the review's, an entry with no material key, a harness finding (the
+    judge's criteria are an allowlist) and a finding that is not blocking."""
+    blocking: list[str] = []
+    for subject in _subjects_of(review):
+        entry = _entry_of(review, subject)
+        for found in (entry.get("findings") or ()) if entry else ():
+            if not isinstance(found, Mapping):
+                continue
+            ident = finding_id(subject, found)
+            if found.get("severity") == "blocking" and found.get("criterion") in JUDGE_CRITERIA:
+                blocking.append(ident)
+            if ident == finding and entry is not None:
+                return _overrulable(plan, subject, dict(found), entry, finding)
+    return Refusal(
+        f"{finding} is not a finding of the latest review of {plan} (its blocking findings: "
+        f"{', '.join(blocking) or 'none'})",
+        f"l4 yolo findings {plan}",
+    )
+
+
+def _subjects_of(review: Mapping[str, Any]) -> list[str]:
+    units = review.get("units") if isinstance(review.get("units"), Mapping) else {}
+    batches = review.get("batches") if isinstance(review.get("batches"), Mapping) else {}
+    return [*units, *(f"batch:{b}" for b in batches)]  # type: ignore[union-attr]
+
+
+def _overrulable(
+    plan: str, subject: str, found: dict[str, Any], entry: Mapping[str, Any], finding: str
+) -> tuple[str, dict[str, Any], Mapping[str, Any]] | Refusal:
+    if entry.get("material") is None:
+        return Refusal(
+            f"the review of {subject} predates material keys, so an overrule could not be bound to it",
+            f"l4 yolo review {plan}",
+        )
+    criterion, severity = found.get("criterion"), found.get("severity")
+    if criterion not in JUDGE_CRITERIA:
+        return Refusal(
+            f"{finding} is a harness finding ({criterion}): no judge raised it, so there is nothing to overrule",
+            f"l4 yolo findings {plan}",
+        )
+    if severity != "blocking":
+        return Refusal(
+            f"{finding} is {severity}: only a blocking finding is overruled, and a {severity} finding is accepted",
+            f'l4 yolo accept {plan} {subject} --reason "..."',
+        )
+    return subject, found, entry
 
 
 def _short(value: object) -> str:
