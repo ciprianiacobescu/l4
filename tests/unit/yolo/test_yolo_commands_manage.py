@@ -165,7 +165,10 @@ def test_cancel_records_who_and_why(world, capsys):
     active_world(world)
     assert world.l4("cancel", "p1", "--reason", "wrong scope") == 0
     event = world.events()[-1]
-    assert event.type == "plan.cancelled" and event.data == {"by": "alex@example.com", "reason": "wrong scope"}
+    # 0.4.60 (L4-YOLO-102): the event also records who acted (the test is no terminal: an agent) and the harness
+    data = dict(event.data)
+    assert data.pop("harness_version") and (data.pop("actor"), data.pop("marker")) == ("agent", None)
+    assert event.type == "plan.cancelled" and data == {"by": "alex@example.com", "reason": "wrong scope"}
     assert fold_plan("p1", world.events()).status == "cancelled"
 
 

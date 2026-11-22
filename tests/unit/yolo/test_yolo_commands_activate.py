@@ -662,7 +662,7 @@ def test_status_after_activation_lists_the_force_items(world, forge, person, cap
     assert world.l4("status", "p1") == 0
     out = capsys.readouterr().out
     lines = out.splitlines()
-    at = lines.index("  activated by alex@example.com")
+    at = lines.index("  activated by alex@example.com (person)")  # 0.4.60 (L4-YOLO-102): the kind is shown
     expected = [
         f"  {s}: force-accepted without review by alex@example.com ({FORCE_REASON})" for s in (A, B, "batch:b1")
     ]

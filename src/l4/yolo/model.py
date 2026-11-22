@@ -241,6 +241,8 @@ class PlanState(BaseModel):
     waived: dict[str, dict[str, Any]] = Field(default_factory=dict)  # finding id -> `plan.finding_waived` (L4-YOLO-031)
     force_accepted: dict[str, Any] | None = None  # the latest `plan.force_accepted` data plus `at` (L4-YOLO-057)
     activated_by: str | None = None
+    activated_actor: str | None = None  # `plan.activated{actor}`: person or agent (L4-YOLO-102)
+    activated_marker: str | None = None
     completed_revision: str | None = None
 
 

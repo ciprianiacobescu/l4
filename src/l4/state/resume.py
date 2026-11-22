@@ -22,6 +22,7 @@ import logging
 
 import click
 
+from l4.actor import command_actor
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
 from l4.context import AppContext
@@ -60,6 +61,7 @@ def resume_unit(
     reason: str,
     signal: str | None = None,
     by: str | None = None,
+    actor: tuple[str, str | None] | None = None,
     extend_fix_rounds: int | None = None,
     extend_feedback_rounds: int | None = None,
     note: bool = False,
@@ -103,7 +105,7 @@ def resume_unit(
     note_task, note_fix_unit = note_binding(state) if note else (None, None)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
-        resume_extend_fix_rounds=extra or None, resume_extend_feedback_rounds=more_feedback or None,
+        resume_actor=actor, resume_extend_fix_rounds=extra or None, resume_extend_feedback_rounds=more_feedback or None,
         note_task=note_task, note_fix_unit=note_fix_unit,
     )  # fmt: skip
 
@@ -135,6 +137,7 @@ def run_resume(
         provider,
         ref,
         reason=reason,
+        actor=command_actor(app.environ),
         extend_fix_rounds=extend_fix_rounds,
         extend_feedback_rounds=extend_feedback_rounds,
         note=True,

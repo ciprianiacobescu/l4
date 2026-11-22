@@ -57,6 +57,7 @@ def test_a_spec_push_to_an_escalated_unit_starts_it_again(world):
     assert (extended["fix_rounds"], extended["signal"]) == (1, f"spec_edit:{pushed}")
     [retried] = [e for e in log if e["type"] == "unit.retried"]
     assert (retried["reason"], retried["signal"], retried["by"]) == ("spec edited", f"spec_edit:{pushed}", "push")
+    assert "actor" not in retried and "marker" not in retried  # L4-OPS-025, SCN-OPS-55: a push is no person's command
     assert ("escalated", "implementing", "spec_edited") in phase_changes(world)
     assert [e["type"] for e in log if e["type"] in ("budget.extended", "unit.retried")] == [
         "budget.extended",
