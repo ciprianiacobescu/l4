@@ -26,6 +26,10 @@ FINDINGS = ["F-6eb0cc43"]
 PRE = "tests.test_pricing::test_total_adds_prices"  # a test of the base, in a file the unit does not change
 OTHER = "tests.test_pricing::test_total_of_nothing_is_zero"
 FIX = Step(writes={"src/pytdd/pricing.py": IMPL}, structured=result("single"))
+PRICING_TESTS = (
+    "from pytdd import total\n\n\ndef test_total_adds_prices():\n    assert total([1.25, 2.5]) == 3.75\n\n\n"
+    "def test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+)
 AGAIN = "; failed again on a re-run (L4-IMP-105): "
 
 
@@ -38,8 +42,9 @@ def failing(report: TestReport | None, *ids: str, message: str = "boom") -> Test
 class FakeFlaky:
     """FAKE: wraps `wb.run_gate` of a bench. Run 1 (the first `test` run after `install`) fails `ids`; the re-run does
     what `rerun` says: `pass` (the real report), `fail` (the same ids fail again), `other` (another test that passed in
-    run 1 fails), `unusable` (no report), `gone` (a test of run 1 is missing). `seconds` is the duration run 1
-    reports; `calls` lists the names of every gate the step ran."""
+    run 1 fails), `gone` (a test of run 1 is missing), or one of `unusable` (no report), `collection`, `vacuous` and
+    `lacks` (a report that cannot be used). `seconds` is the duration run 1 reports; `calls` lists the names of every
+    gate the step ran."""
 
     def __init__(self, bench, *ids: str, rerun: str = "pass", seconds: float = 1.0, message: str = "boom") -> None:
         self.ids, self.rerun, self.seconds, self.message = ids, rerun, seconds, message
@@ -61,6 +66,12 @@ class FakeFlaky:
                 report = failing(report, OTHER)
             elif self.rerun == "unusable":
                 report = None
+            elif self.rerun == "collection":  # a module that did not collect
+                report = replace(report, collection_errors=["tests.test_broken"])
+            elif self.rerun == "vacuous":  # every test skipped: none executed
+                report = replace(report, tests={i: TestCase(i, "skipped") for i in report.tests})
+            elif self.rerun == "lacks":  # the regressed test is not in the re-run's report
+                report = replace(report, tests={i: c for i, c in report.tests.items() if i != PRE})
             elif self.rerun == "gone":
                 report = replace(report, tests={i: c for i, c in report.tests.items() if i != OTHER})
             return replace(out, report=report)
@@ -140,9 +151,10 @@ def test_a_test_that_passed_in_run_1_and_is_missing_in_the_re_run_is_a_new_failu
     assert rechecks(bench)[0]["new_failures"] == [OTHER]
 
 
-def test_an_unusable_re_run_fails_the_attempt_and_says_so(make_bench):
+@pytest.mark.parametrize("rerun", ["unusable", "collection", "vacuous", "lacks"])
+def test_an_unusable_re_run_fails_the_attempt_and_says_so(make_bench, rerun):
     bench, red = green_bench(make_bench)
-    FakeFlaky(bench, PRE, rerun="unusable")
+    FakeFlaky(bench, PRE, rerun=rerun)
     out = run_green(bench.wb, TASK, red, attempt=1)
     assert out.status == "failed" and out.reason == f"green broke existing tests: {PRE}; its re-run was not usable"
     assert rechecks(bench)[0]["stopped"] == "unusable"
@@ -178,6 +190,22 @@ def test_scn_imp_573_a_test_in_a_file_the_unit_changed_gets_no_re_run(make_bench
     no_rerun(bench, flaky)
 
 
+def test_scn_imp_573_a_test_in_a_file_the_step_changed_gets_no_re_run(make_bench):
+    """A `[test-infra]` task may edit a test file in green; a regressed test of that file is the step's own."""
+    edit = Step(
+        writes={"src/pytdd/pricing.py": IMPL, "tests/test_pricing.py": "# edited by the step\n" + PRICING_TESTS},
+        structured=result("green"),
+    )
+    task = replace(TASK, title=f"{TASK.title} [test-infra]")
+    bench = make_bench([red_step(), edit])
+    red = run_red(bench.wb, task, attempt=1)
+    assert red.status == "ok", red.reason
+    flaky = FakeFlaky(bench, PRE)
+    out = run_green(bench.wb, task, red, attempt=1)
+    assert out.status == "failed" and out.reason == f"green broke existing tests: {PRE}"
+    no_rerun(bench, flaky)
+
+
 def test_scn_imp_573_a_hung_test_gets_no_re_run(make_bench):
     bench, red = green_bench(make_bench)
     flaky = FakeFlaky(bench, PRE, message=f"{TIMEOUT_MARKER} the test ran longer than 5s")
@@ -200,6 +228,8 @@ def test_scn_imp_573_a_regressed_id_the_report_lacks_gets_no_re_run(make_bench):
     bench, red = green_bench(make_bench)
 
     class Gone(FakeFlaky):
+        """FAKE: run 1's report lacks the regressed id."""
+
         def run_gate(self, name, command, **kw):
             out = self.original(name, command, **kw)
             self.calls.append(name)
@@ -258,6 +288,7 @@ def test_a_file_run_1_wrote_is_removed_before_the_re_run_and_the_step_s_own_file
     original = flaky.run_gate
 
     def writing(name, command, **kw):
+        """FAKE gate: run 1 leaves an untracked file; the re-run checks that it is gone."""
         if name == "test" and "test" not in flaky.calls:
             (bench.wb.worktree / "run1-leftover.txt").write_text("x")  # an untracked file run 1 leaves
         if name == "test-recheck":
@@ -328,6 +359,7 @@ def test_scn_imp_575_a_production_file_a_test_wrote_during_the_re_run_fails_red(
     original = flaky.run_gate
 
     def writing(name, command, **kw):
+        """FAKE gate: a test that writes a production file while the re-run runs."""
         if name == "test-recheck":  # a test that writes a production file while the re-run runs
             (bench.wb.worktree / "src/pytdd/pricing.py").write_text(STUB + "# written by a test\n")
         return original(name, command, **kw)

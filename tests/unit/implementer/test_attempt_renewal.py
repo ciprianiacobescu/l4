@@ -135,6 +135,22 @@ def test_an_event_of_another_task_or_fix_unit_credits_nothing(make_bench, monkey
     assert len(renewed(bench)) == 2  # the earlier one of the other fix unit is the other, and this one is new
 
 
+def test_a_red_commit_of_the_run_is_followed_by_the_renewal_check(make_bench, monkeypatch):
+    """No resumed red: the red step commits in this run, and the answer that opens a frozen file is credited then."""
+    bench = make_bench([red_step(), LAZY, LAZY, LAZY])
+    stand_in(monkeypatch, grant("Q-001"))
+    run_task(bench.wb, TASK)
+    [event] = renewed(bench)
+    assert (event["questions"], event["failed"]) == (["Q-001"], 0)
+    types = [e["type"] for e in map(__import__("json").loads, bench.wb.ledger.path.read_text().splitlines())]
+    assert (
+        types.index("task.red_ok")
+        < types.index("task.attempts_renewed")
+        < types.index("step.started", types.index("task.red_ok"))
+    )
+    assert greens(bench) == [1, 2, 3]  # a window of its own: the attempt numbers start at 1
+
+
 # --- SCN-IMP-568: what renews nothing ----------------------------------------------------------------------------
 
 

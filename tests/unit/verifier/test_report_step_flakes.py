@@ -109,6 +109,7 @@ def test_scn_ver_322_a_verified_unit_lists_the_test_that_passed_on_its_green_ste
     real, seen = Workbench.run_gate, []
 
     def flaky_once(self, name, command, **kw):
+        """FAKE gate: the green step's first test run fails a base test once."""
         out = real(self, name, command, **kw)
         seen.append(name)
         if name == "test" and seen.count("test") == 2 and out.report is not None:  # red's run was the first
