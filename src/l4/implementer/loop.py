@@ -84,6 +84,7 @@ def _questions(
     exists: Callable[[str], bool] = lambda path: True,
     clauses: Sequence[ClauseAsk] = (),
     notes: Sequence[str] = (),
+    chore_kind: str = "fix",
 ) -> list[NewQuestion]:
     """The agent's questions, bound to this task (its own `blocking_tasks` are repository-influenced text and are not
     trusted), then one question for each new `unasserted` entry (`clauses`, L4-IMP-095). A blocked step without any
@@ -112,7 +113,7 @@ def _questions(
             title=q.title,
             kind=QuestionKind(q.kind),
             blocking_tasks=(task.key,),
-            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists),
+            context=_with_note(q, red, unit, chore_unit, guard_notes, forbidden, exists, chore_kind),
             asked=asked,
             notes=note_text,
             options=tuple(q.options),
@@ -134,7 +135,7 @@ def _questions(
     return [*own, *ask]
 
 
-def chore_question_note(unit: str | None) -> str:
+def chore_question_note(unit: str | None, kind: str = "fix") -> str:
     """What the harness adds to a technical question of a blocked fix chore (ci-evidence D11): an answer cannot free a
     test or support file in a fix task, so the question must not wait for one. `unit` is the unit that asked (a fix
     unit in a real run): `l4 retry` would be refused for it, so the way on is the answer, which D13 resolves to the
@@ -144,6 +145,14 @@ def chore_question_note(unit: str | None) -> str:
         if unit
         else 'l4 questions answer Q-NNN --unit <fix unit> --text "..."'
     )
+    if kind == "tests":  # L4-IMP-111: a test chore adds tests, so it says what it may keep
+        return (
+            f"{NOTE_PREFIX} this is a fix task. It adds tests: a new test file, and new tests appended to a test file "
+            "a red step of this unit wrote, are kept; an edit of any other existing test file, or of a test-support "
+            "file (`conftest.py`, a fixture), is put back whatever the answer says; a missing check can go into a new "
+            "test file. Otherwise a person must commit the change on the unit branch themselves, then answer this "
+            f"question (`{answer}`)."
+        )
     return (
         f"{NOTE_PREFIX} this is a fix task. It cannot unfreeze a test or test-support file (a test, `conftest.py`, a "
         "fixture), whatever the answer says: a fix step's change to one is put back. A person must commit the change "
@@ -184,6 +193,7 @@ def _with_note(
     guard_notes: Sequence[GuardNote] = (),
     forbidden: Sequence[str] = (),
     exists: Callable[[str], bool] = lambda path: True,
+    chore_kind: str = "fix",
 ) -> str:
     """The question's Context: its own text and the note of the case, last."""
     text_of = question.context
@@ -194,7 +204,7 @@ def _with_note(
         note = forbidden_note(found, unit=unit)  # no answer lifts the guard: not the unfreeze note, nor the fix chore's
         return f"{text_of}\n\n{note}" if text_of else note
     if chore_unit and question.kind == QuestionKind.TECHNICAL.value:
-        note = chore_question_note(chore_unit)
+        note = chore_question_note(chore_unit, chore_kind)
         return f"{text_of}\n\n{note}" if text_of else note
     if red is None or question.kind != QuestionKind.TECHNICAL.value:
         return text_of
@@ -233,13 +243,13 @@ def _suggest_edits(wb: Workbench, ids: Sequence[str], batch: Sequence[NewQuestio
 def _raise_blocked(
     wb: Workbench, task: Task, questions: Sequence[ResultQuestion], summary: str, step: int,
     red: RedOutcome | None = None, chore_unit: str | None = None, clauses: Sequence[ClauseAsk] = (),
-    phase: str = "", notes: Sequence[str] = (),
+    phase: str = "", notes: Sequence[str] = (), chore_kind: str = "fix",
 ) -> list[str]:  # fmt: skip
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     asked = f"{stamp} by {wb.selected.profile_name}, run {wb.run_id}, task {task.key}"
     batch = _questions(
         task, questions, summary, asked, red, wb.ref.name, chore_unit, wb.guard_notes, wb.protected.odd_forbidden,
-        lambda path: os.path.lexists(wb.worktree / path), clauses, notes,
+        lambda path: os.path.lexists(wb.worktree / path), clauses, notes, chore_kind,
     )  # fmt: skip
     ids = raise_questions(wb.ref.path, wb.ref.name, batch, redactor=wb.redactor)
     _suggest_edits(wb, ids, batch)
@@ -678,7 +688,7 @@ def _run_task(
             if done.status == "blocked":
                 ids = _raise_blocked(
                     wb, task, done.questions, done.summary, attempts["green"], chore_unit=wb.ref.id,
-                    clauses=done.clauses, phase="single",
+                    clauses=done.clauses, phase="single", chore_kind=chore_kind(wb.ref.path, task.title) or "fix",
                     notes=_question_notes(
                         wb, failure, excerpt, chore if (chore_kind(wb.ref.path, task.title) or "fix") == "fix" else None
                     ),
