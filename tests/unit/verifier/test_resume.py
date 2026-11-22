@@ -167,3 +167,32 @@ def test_merge_with_empty_first_parent_diff_is_not_a_subject(tmp_path, git_envir
     merge2 = merge_main(repo2)
     assert repo2.git("diff", "--name-only", "HEAD^1", "HEAD").split() == [f"{UNIT_DIR}/questions.md"]
     assert subject_sha(git2, merge2, [UNIT_DIR]) == code2
+
+
+def _ledger(*generated: dict) -> list:
+    from datetime import UTC, datetime
+
+    from l4.state.ledger import LedgerEvent
+
+    stamp = datetime(2026, 11, 1, tzinfo=UTC)
+    events = [LedgerEvent(stamp, "r-1", UNIT, 1, "run.started", {"iteration": 1})]
+    events += [LedgerEvent(stamp, "r-1", UNIT, n + 2, "verify.generated", g) for n, g in enumerate(generated)]
+    return events
+
+
+def test_a_ledger_written_by_0_4_59_folds_unchanged():  # L4-VER-083
+    from pathlib import Path
+
+    from l4.state.fold import fold
+    from l4.verifier.ui_step import previously_generated
+
+    old = _ledger(
+        {"criterion": "C-a", "test": "e2e/test_l4_c_a.py", "base": "fail", "head": "fail", "attempts": 2,
+         "status": "fails_at_head", "reason": "the test fails at the head: t::x", "model": "m", "tests": [],
+         "sha256": "", "support": "head"},
+        {"criterion": "C-b", "status": "waived", "by": "Q-004", "attempts": 0},
+        {"criterion": "C-c", "status": "not_testable", "attempts": 1, "covered_by": ["t::a"]},
+    )  # fmt: skip
+    state = fold(old, UNIT)
+    assert state.iteration == 1 and state == fold(old[:1], UNIT)  # the fold reads no `verify.generated` event
+    assert previously_generated(old, Path("."), None) == ({}, [])  # only an `accepted` outcome is recognised again
