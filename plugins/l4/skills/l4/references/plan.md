@@ -127,6 +127,10 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
 
+Do not cut `roles.judges` to one judge for a review: the review walks its chain and keeps what it answered, and a
+judge for reviews only goes in `roles.plan_judges`, which unit verification never reads. With one profile in
+`roles.judges` a unit's verification has no fallback judge; `l4 doctor` (CFG-013) warns.
+
 When no judge can run, first ask CI: `l4 yolo review <id>`. Never run `--force` (`l4 yolo accept <id> --all --force`),
 not even when `accept_by_agents` is true: it accepts the plan with no model review and is a person's decision. Print
 the command for the person:

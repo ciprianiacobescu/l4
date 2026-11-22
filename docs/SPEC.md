@@ -555,7 +555,7 @@ of the harness package.
 | `l4 yolo report PLAN` | Print `report.md` of the plan ref, complete or partial (L4-YOLO-015) | none |
 | `l4 eval [--impl P]… [--judge P]… [--ref-judge P] [--unit ID]… [--k N] --out DIR [--cell-timeout DUR] [--resume] [--idle-check CMD] [--runner] [--dry-run]` \| `--warm-cache` \| `--compare OLD [--new FILE \| --baseline-dir DIR] [--max-drop X] [--allow-seed-change] [--require-all] [--json]` | Measure profiles on the fixed seed set through the real implement and verify paths and write a scorecard (§20.1); compare two scorecards and exit 15 when a profile regressed | `--out` files; `--warm-cache` fills the uv cache of the eval |
 
-All commands MUST accept `--config PATH`, `--repo PATH`, `--log-format human|json` and `-v/-q`.
+All commands MUST accept `--config PATH`, `--repo PATH`, `--log-format human|json`, `-v/-q` and, from 0.4.60, `--allow-older-cli` (L4-OPS-026).
 
 The command dispatch table (`l4.commands.HANDLERS`: command name → `"module:function"`) is owned by delivery change 1
 (`bootstrap-core`, §21) and lists every command above from the start. Later changes plug in by creating the named
@@ -7517,6 +7517,31 @@ forge's run listing lags right after a dispatch, so two callers seconds apart ca
 with this machine's clock against the forge's timestamps, so a skewed clock shifts it by the skew. The started line carries
 no link, since GitHub's dispatch returns no run.
 
+**L4-OPS-025 Unit commands say who acted.** `l4 retry`, `l4 resume` and `l4 restart` SHALL record `actor` and `marker` (`l4.actor.actor`, stdin's terminal) in the
+`unit.retried`, `unit.resumed` and `unit.restarted` they write, beside `reason`, `by` and `signal`. The sweep's labels
+(`by: member`) and a spec-edit push (`by: push`) MUST NOT record them. The unit fold SHALL ignore both fields, and a
+ledger without them SHALL fold as before.
+
+**L4-OPS-026 An older l4 does not write for a newer pin.** Outside a CI job, a command that records an event or pushes a commit SHALL compare the running `l4`'s version with the
+version the repository pins, before it reads or writes anything else, with no fetch and no network. The pin SHALL be
+read from `refs/remotes/origin/<forge.base_branch>` when that ref exists (the base branch as last fetched), else from
+the working tree: for `harness.delivery` `vendored` or `fetched`, `harness.version` of `.l4/config.yaml`; for
+`action`, the `# vX.Y.Z` comment of the `uses:` line of `.github/workflows/l4.yml` that names the setup action at a
+40-hex sha; the configuration read without the schema. A copy of the action, a comment that is not a version, an absent
+or unreadable file, and a version that does not parse SHALL give no pin, and then nothing SHALL be said. When the
+running `l4` is older than the pin, these commands MUST exit 2 with `<command>: this l4 is <v>, older than the harness
+this repository pins (<p>, <source>): it would apply the rules of <v> to the repository's units and plans` and a
+`Fix:` line that names the pinned install (`.l4/bin/l4` when the repository has it) and `--allow-older-cli`: `run`
+(not `--dry-run`), `verify`, `archive`, `resume`, `retry`, `restart`, `plan --sweep`, `questions accept` and `answer`
+(not `--no-push`), `yolo review --local`, `yolo review --worktree --record`, `yolo accept`, `yolo waive`,
+`yolo activate`, `yolo resume` and `yolo go`. With `--allow-older-cli`, a common option of every command, they SHALL
+run and print the warning `warning: this l4 is <v>, older than the harness this repository pins (<p>, <source>)` and
+the install line to stderr. A stop or a withdrawal (`yolo cancel`, `yolo accept --withdraw`, `yolo waive --withdraw`)
+and a command that writes only a local file (`questions accept|answer --no-push`, `feedback add`, `feedback submit`,
+`feedback withdraw`, `yolo draft`, `lessons promote`) MUST NOT be refused and SHALL print the warning. Every other
+command, an `l4` of the pinned version or newer, and every command in a CI job SHALL behave as before. The warning MUST
+go to stderr, so a `--json` output stays one document.
+
 ### 12.5 Delivery plans and guarded automatic merge (YOLO)
 
 A person selects a batch of spec units, the order between them and the limits, has the plan reviewed, and activates it
@@ -7791,7 +7816,7 @@ budget, the configuration key and the fix.
 **L4-YOLO-025** The judge sees the check marks as they are. The review material SHALL show every `tasks.md` as the file has it, and say that a ticked task is delivered on the
 revision shown, that the harness does not implement it again, and that the judge reviews the open tasks without a
 `feasibility` or `duplicate_scope` finding only because work is done. The unit digest is unchanged (L4-YOLO-003). The
-readiness prompt version MUST be 4.
+readiness prompt version MUST be 5 (from 0.4.60: the plan entry's key order, L4-YOLO-101).
 
 **L4-YOLO-026** A review of the working tree before the push. `l4 yolo review PLAN --worktree` SHALL review the working tree's plan file and unit folders with the same prompt,
 rules and material keys, print the digests it reviewed, the verdicts, the findings (L4-YOLO-021) and the cost (`--json`:
@@ -8121,7 +8146,7 @@ on its own and in the other parts, and that this call reports what lies between 
 (ids reach the prompt only inside `<l4:data>` blocks). The cut of a unit read within 6,000 characters SHALL NOT be a
 `material_cut` and SHALL NOT be listed in `missing`. A part's material key SHALL be that of its own text, with the kind
 `batch-part`. A subject that is not split SHALL be asked with the prompt it gets today, byte for byte, and keep its
-material key, and the readiness prompt version SHALL stay 4. A part SHALL be asked as any call is (L4-YOLO-096,
+material key, and the readiness prompt version SHALL be that of L4-YOLO-025. A part SHALL be asked as any call is (L4-YOLO-096,
 L4-YOLO-097) and SHALL NOT be split again. When every part has a verdict, the batch's verdict SHALL be made from the
 parts' verdicts as the judge gave them: the worst verdict (BLOCKED, then NEEDS_REVISION, then READY), the parts'
 findings in part order with an exact repeat (criterion, severity and text) kept once, their assumptions and `missing`
@@ -8195,6 +8220,50 @@ reviewed in parts says so in `missing`. `docs/yolo-mode.md` SHALL say the same i
 skill SHALL name `roles.plan_judges` where `references/adopt.md` shows role chains, and `references/operate.md` (its
 error table) and `references/plan.md` SHALL give the message of an incomplete review and what to do. The CHANGELOG
 SHALL have the entry under Unreleased.
+
+**L4-YOLO-101 The plan entry shows each id before its prerequisites.** The `plan entry` data block of the readiness material (a unit subject, a batch subject and every part of a batch) SHALL
+show every object of the entry with its keys in this order: `id` when present, then `depends_on` when present, then
+every other key in sorted order, at every level (each unit of a batch the same); lists keep their order. The order
+MUST be the harness's own rule, not the models' declared order. The rest of the prompt (templates, notes, data blocks,
+the order of the sections) MUST NOT change. The readiness prompt version SHALL be 5. A review recorded with prompt
+version 4 SHALL then be stale wherever L4-YOLO-004 decides currency: before the activation (`new`, `admitted`,
+`reviewed`, `refused`) and for a plan stopped with `inputs_changed` or `unit_rejected`, `l4 yolo status` SHALL show
+`review: stale (the review prompt changed)` with the line `review prompt 4 at the review, 5 in this harness: every
+subject is judged again`, `l4 yolo activate` SHALL be refused with that line and `Fix: l4 yolo review <plan>`, and the
+next review SHALL judge every subject again. An acceptance bound to a version-4 entry SHALL no longer hold (L4-YOLO-027),
+the rounds counted for `yolo.review.accept_after_rounds` SHALL stay as they were, and a force acceptance that holds
+SHALL still hold (L4-YOLO-060). An active or waiting plan MUST NOT be stopped, reviewed again or shown as stale because
+of the version: its checks read the plan and unit digests frozen at the activation, and its status shows the review as
+it was made.
+
+**L4-YOLO-102 Plan events say who acted and with which harness.** `l4 yolo activate`, `l4 yolo resume` (with or without an `--extend-…`) and `l4 yolo cancel` SHALL record, in
+`plan.activated`, `plan.resumed` and `plan.cancelled`, `actor` and `marker` as `l4.actor.actor` gives them (the rule of
+L4-YOLO-031) and `harness_version` (the running `l4`'s version). The harness's own `plan.resumed{by: harness}` is
+unchanged. The plan fold SHALL keep `activated_actor` and `activated_marker` beside `activated_by`. `l4 yolo status`
+SHALL show `activated by <by> (<kind>)`, where `<kind>` is `person`, `agent: <marker>`, or `agent: no terminal` for an
+agent with no marker, and, for the latest person's `plan.resumed` after the latest activation that records `actor`,
+`resumed by <by> (<kind>)`; `--json` SHALL carry `activated_actor`, `activated_marker` and `resumed` (`{by, actor,
+marker, at}`). The plan report SHALL show `- Activated by: <by> (<kind>)` and, for a cancelled plan,
+`- Cancelled by: <by> (<kind>)`. An event without `actor` MUST fold as before and SHALL be shown without a kind, never
+as a person's. No command SHALL be refused because of the actor by this requirement.
+
+**L4-YOLO-103 Doctor warns about a judge chain with no fallback.** `l4 doctor` SHALL have the check CFG-013 (warn, every configuration scope). It SHALL fail as a warning when
+`roles.judges` names exactly one profile (counted once), with `roles.judges has one profile (<name>): unit
+verification has no fallback judge when it fails`, followed, when `roles.plan_judges` is empty, by `, and a judge for
+plan readiness reviews only belongs in roles.plan_judges, which unit verification never reads: do not cut roles.judges
+for a review`; and when `roles.plan_judges` names exactly one profile, with `roles.plan_judges has one profile
+(<name>): the plan review has no fallback judge (it does not fall back to roles.judges)`; both texts joined by `; `.
+Its fix SHALL name a second judge profile in the chain named and `roles.plan_judges` for a review-only judge. It SHALL
+pass with two or more judges in each chain that is set, and skip when `roles.judges` is empty (CFG-002). It MUST NOT
+change doctor's exit code.
+
+**L4-YOLO-104 Documentation of the entry order, the actor and the older CLI.** The runbook SHALL say, in its procedure to review a plan (12.2), that a chain of one judge has no fallback, that a
+judge for reviews only goes in `roles.plan_judges` and not in place of `roles.judges`, and that `l4 doctor` (CFG-013)
+warns; and, in its section on preparing a computer (5), that a person command that writes is refused from an `l4`
+older than the pin, how to install the pinned one, and `--allow-older-cli`. The skill's `references/plan.md` SHALL say
+the same about judges where it tells what to do when no judge can run, and `references/adopt.md` SHALL say it where it
+shows role chains and, in its upgrade section, that the local `l4` must be moved with the pin. The CHANGELOG SHALL have
+the entries under Unreleased, with the upgrade cost of prompt version 5.
 
 ## 13. Memory and lessons
 
@@ -8700,6 +8769,7 @@ user's `~/.local/bin`, run the warm-up of L4-PRV-048, and run no installer scrip
 | CFG-009 | warn | `roles.implementer` with two or more profiles and `implementer.escalate_after` neither 0 nor below `implementer.max_task_attempts` (`implementer.escalate_after (2) is not below implementer.max_task_attempts (2): no task moves to glm`), or two profiles of the chain with the same adapter and model (`profiles oc-a and oc-b run the same model (…): a move from oc-a to oc-b changes nothing`); a chain of one profile passes (L4-IMP-018) | set `escalate_after` below `max_task_attempts` or to 0; give the profiles different models |
 | CFG-011 | warn | kiro-cli profiles of `roles.judges` and `roles.clarifier` (L4-KJD-009): each line says the profile runs a tool-less harness agent with the prompt on stdin and no trust flag, and names `model <m> (<vendor>)` for a pinned model, or, for no model or `auto`, `model auto, routed to <vendors> (<source>)` (`listed <YYYY-MM-DD>` from the profile's latest probe, else `built-in`, or `built-in (no listing recorded yet)` when no probe of the profile is recorded) and that a pinned model makes the served model checkable; it warns on `options.agent` (the judge ignores it) and on `min_version` unset or below `2.32.0`; a `vendor:` on a kiro-cli profile with no model or `auto` that any role names is noted as ignored; never an error | pin `min_version: "2.32.0"`; drop `options.agent`; pin a model to choose the vendor |
 | CFG-012 | error | the soft deadline leaves room for a step (L4-IMP-076, L4-IMP-077): an error when `ci.time_budget` is a duration and `ci.time_budget` minus `ci.soft_deadline_margin` is below the 10-minute step floor (`ci.time_budget 21m minus soft_deadline_margin 20m leaves 1 min, less than one step (10 min): …`); a warning (its result's severity is `warn`) when a set `ci.time_budget` is shorter than the job's timeout (`CI_JOB_TIMEOUT`, else `L4_JOB_TIMEOUT_MINUTES`, else the `timeout-minutes` of the checked-out `.github/workflows/l4.yml`) by more than the margin; both texts joined by `; ` when both apply; `auto` passes | set `ci.time_budget: auto` (the job timeout), or a duration at least the margin plus 10 minutes |
+| CFG-013 | warn | a judge chain has a fallback (L4-YOLO-103): a warning when `roles.judges` names one profile (`roles.judges has one profile (<name>): unit verification has no fallback judge when it fails`, and, with no `roles.plan_judges`, that a judge for plan reviews only belongs in `roles.plan_judges`), or `roles.plan_judges` names one (`the plan review has no fallback judge (it does not fall back to roles.judges)`); passes with two or more in each chain that is set; skips an empty `roles.judges` (CFG-002); never changes the exit code | add a second judge profile to the chain named; put a review-only judge in `roles.plan_judges` |
 | SPEC-001 | error | ≥ 1 supported framework detected (SDD) ; legacy OpenSpec reported | — |
 | SPEC-002 | error | `openspec validate --all --strict --json` / Kiro validation of active units | — |
 | SPEC-003 | error | OpenSpec CLI root is the repo's (`root.source == nearest`) | — |
@@ -9698,6 +9768,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 132 | `readiness-judge-chain` | the plan readiness review walks its judge chain per subject and keeps what was answered: `roles.plan_judges` (empty: `roles.judges`; a judge role for L4-CFG-006, CFG-002, CFG-011, ENV-004, LIVE-001 and the skill's preflight script) is the review's chain; a call is asked of the first judge in chain order that is usable (`Factory.for_profile`, one profile's selection, and its sandbox) and not discarded for it; an `error` discards the judge for the review, a length stop or a schema break for that call, a limit cools it (`Factory.cool_limited`); a schema break with no judge left is BLOCKED as before; a judge that failed a material in an incomplete review since the latest `plan.reviewed` is asked it last; `yolo.review.timeout` (15m) bounds each call, a timeout that cannot be split ends the review for the run, and a CI job starts a call only with that much time left; a batch longer than `yolo.review.max_batch_chars` (default `0`: no size split), one with a part an incomplete review kept, or one whose whole call stops at the limit or times out is reviewed in parts (one per unit in full with the others read within 6,000 characters, and one summary part), merged into one verdict under the batch's material key with `parts`; an unsplit prompt and its key are unchanged (prompt version 4); a review that does not finish records `plan.review_incomplete` (answered entries reused by material key, failures, cost charged, a repeat not written), shown in `l4 yolo status` and the run log; `plan.reviewed` gains `judges`, `failures` and per-entry `judge` (L4-YOLO-095..100, L4-YOLO-004, L4-YOLO-022, L4-CFG-006, L4-AVL-010, SCN-YOLO-261..282) | the unit tests (`test_yolo_readiness_chain`, `test_yolo_readiness_parts`, `test_yolo_readiness_review`, `test_yolo_review_incomplete_cli`, `test_yolo_cycle_review_incomplete`, `test_plan_judges_config`, `test_readiness_judge_chain_docs`) |
 | 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed; the check is fail-safe. `l4.implementer.browser_tests` (new): `collectable_tests` (what pytest would collect: `python_files`, no fixture, `Test*` classes without `__init__`), `match_task_tests` (a report id by module suffix, the module read as `evidence.testsran.file_of_test` does with a file inside the e2e directory before an exact match outside it, and by exact class, two fitting files left `ambiguous`), `selecting_option` (`-m`/`-k`), `shared_with_unit_gate`. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the collectable tests of the Python files under `e2e_test_dir(gates.e2e)` that the red commit added or whose own definition it changed (read from git, so a resumed red counts; a git error is `e2e.task_tests_unread`); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`; only a failing or erroring task test, a timed-out gate, no report, a collection error of a mapped task module, a failed build or a server that is not ready refuse, and a test the report does not show is `e2e.task_tests_unseen`; `_e2e_skip_reason` (`e2e.task_run_skipped`: a selecting command or a directory the unit gate also runs); `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt says the step that completes the task runs them, and that they are frozen only when `PromptContext.e2e_frozen` (the green prompt says so in both forms). `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for a green step, passed by `loop._check_step` only when `task_runs_e2e` (in `l4.implementer.tdd`) is true. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556, 562..564; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; a task test the report does not show is run first at step 3; browser tests in another language, a support-only change and a pytest configuration that overrides `python_files` are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_browser_tests`, `test_deadline`) |
 | 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
+| 135 | `readiness-entry-and-actor` | the readiness review's `plan entry` block shows every object `id` first, then `depends_on`, then the other keys sorted (a unit, a batch and each part of a batch), so a judge no longer reads a unit's prerequisites as the previous unit's; the readiness prompt version is 5, so a review of 0.4.59 is stale before the activation (status, activation refusal, one full review in CI; acceptances bound to the old material no longer hold, rounds are kept, a force acceptance holds) and an active plan is neither stopped nor reviewed again (L4-YOLO-101); `plan.activated`, `plan.resumed` and `plan.cancelled` record `actor`, `marker` and `harness_version`, `l4 yolo status` and the plan report show the kind, an older event shows none, and nothing is refused for it (L4-YOLO-102); `l4 retry`, `l4 resume` and `l4 restart` record the actor in their unit events (L4-OPS-025); doctor CFG-013 warns about a judge chain of one profile and says a review-only judge belongs in `roles.plan_judges` (L4-YOLO-103); outside CI a command that writes is refused (exit 2, before it reads anything) when the running `l4` is older than the repository's pin (`harness.version`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as last fetched), unless `--allow-older-cli`; a stop and a local-only write warn (L4-OPS-026); the runbook, the skill and the CHANGELOG say so (L4-YOLO-104; L4-YOLO-025, L4-YOLO-098, SCN-YOLO-56, SCN-YOLO-276 amended; `openspec/changes/readiness-entry-and-actor/`) | a ten-unit plan whose judge raised a false `depends_on` finding twice; a consumer that cut `roles.judges` to one judge for a review; a retry run with an older local `l4`; the unit tests (`test_yolo_readiness_entry_order`, `test_yolo_prompt_upgrade`, `test_yolo_plan_actor`, `test_checks_cfg_013`, `test_cli_pin`, `test_readiness_entry_and_actor_docs`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -17694,6 +17765,62 @@ scenario is a spec defect (§26).
 - **When** `l4 restart` runs
 - **Then** the question and its answer stay as they were, byte for byte
 
+#### SCN-OPS-54 (+) A person's and an agent's retry record their kind · L4-OPS-025
+- **Given** a halted unit, once with a person in a terminal and once with `CLAUDECODE=1`
+- **When** `l4 retry --unit <id> --reason r --no-run` runs, and the same for `l4 resume` and `l4 restart`
+- **Then** each event holds `actor: person, marker: null`, then `actor: agent, marker: CLAUDECODE`, and the unit's
+  phase after it is the one 0.4.59 gives
+
+#### SCN-OPS-55 (−) A label and a spec edit record no actor · L4-OPS-025
+- **Given** a halted unit with the `l4:retry` label, and another whose folder a person changed after the stop
+- **When** the sweep and the next run take them
+- **Then** `unit.retried{by: member}` and `unit.retried{by: push}` hold no `actor` and no `marker`
+
+#### SCN-OPS-56 (−) An older l4 is refused before it reads anything · L4-OPS-026
+- **Given** a vendored repository whose `.l4/config.yaml` at `origin/main` has `harness.version: 0.4.62`, an `l4` of
+  0.4.60 run by a person outside CI, and no `.l4/bin/l4`
+- **When** `l4 retry --unit <id> --reason r` runs
+- **Then** it exits 2 with `retry: this l4 is 0.4.60, older than the harness this repository pins (0.4.62,
+  harness.version at origin/main)` and a `Fix:` line naming `--allow-older-cli`; no ref is fetched and no event is
+  written
+
+#### SCN-OPS-57 (+) --allow-older-cli runs it with a warning · L4-OPS-026
+- **Given** the repository of SCN-OPS-56
+- **When** `l4 retry --unit <id> --reason r --no-run --allow-older-cli` runs
+- **Then** the retry is recorded as without the guard, the warning is on stderr, and `run.started` records
+  `harness_version: 0.4.60`
+
+#### SCN-OPS-58 (+) The action pin is read from the comment of its uses: line · L4-OPS-026
+- **Given** an action adoption whose workflow has `uses: <owner>/<repo>/.github/actions/l4@<40 hex> # v0.4.62`, in turn
+  the same line with `# main`, with no comment, and a copy of the action (`uses: ./.github/actions/l4`)
+- **When** `l4 yolo activate p1 --reason go` runs with an `l4` of 0.4.60
+- **Then** the first is refused and its fix names `uv tool install --force
+  git+https://github.com/<owner>/<repo>@v0.4.62`; the other three give no pin and the command runs as before
+
+#### SCN-OPS-59 (+) The pinned version, a newer l4 and a CI job are unchanged · L4-OPS-026
+- **Given** a pin of 0.4.60, then a pin of 0.4.59, with an `l4` of 0.4.60; and a pin of 0.4.62 in a job with
+  `GITHUB_ACTIONS=true`
+- **When** `l4 retry --unit <id> --reason r --no-run` runs
+- **Then** no warning and no refusal comes from this rule in any of the three
+
+#### SCN-OPS-60 (+) A stop and a local write only warn; a read says nothing · L4-OPS-026
+- **Given** the repository of SCN-OPS-56
+- **When** `l4 yolo cancel p1 --reason r`, `l4 yolo accept p1 A --withdraw --reason r`, `l4 feedback add …`,
+  `l4 status`, `l4 yolo status p1`, `l4 doctor` and `l4 upgrade --dry-run` run
+- **Then** the first three run and print the warning to stderr, and the last four print nothing from this rule
+
+#### SCN-OPS-61 (−) The base as last fetched wins over a stale working tree · L4-OPS-026
+- **Given** a working tree whose `.l4/config.yaml` has `harness.version: 0.4.59` and a
+  `refs/remotes/origin/main` whose `.l4/config.yaml` has `0.4.62`, with an `l4` of 0.4.60; and then the same working
+  tree with no `refs/remotes/origin/main`
+- **When** `l4 yolo resume p1 --reason r` runs
+- **Then** the first is refused, naming `harness.version at origin/main`; the second reads the working tree and runs
+
+#### SCN-OPS-62 (+) A JSON output stays one document · L4-OPS-026
+- **Given** the repository of SCN-OPS-56
+- **When** `l4 yolo go p1 --reason r --json --allow-older-cli` runs
+- **Then** stdout holds exactly one JSON document and the warning is on stderr
+
 ### 23.20 Delivery plans (YOLO)
 
 #### SCN-YOLO-01 (−) An unknown field refuses the plan · L4-YOLO-001
@@ -17980,7 +18107,7 @@ scenario is a spec defect (§26).
 #### SCN-YOLO-56 (+) Ticked tasks reach the judge ticked, and the digest ignores them · L4-YOLO-025
 - **Given** a `tasks.md` with `- [x] 1.1 Add the parser` and `- [ ] 1.2 Add the command`
 - **When** the review material and the unit digest are made
-- **Then** the material holds `- [x] 1.1 Add the parser` and the note on ticked tasks, the event records `prompt_version: 4`, and the digest equals the digest of the same folder with `- [ ] 1.1 Add the parser`
+- **Then** the material holds `- [x] 1.1 Add the parser` and the note on ticked tasks, the event records `prompt_version: 5`, and the digest equals the digest of the same folder with `- [ ] 1.1 Add the parser`
 
 #### SCN-YOLO-57 (+) A dry run reads the uncommitted edit and writes nothing · L4-YOLO-026
 - **Given** an uncommitted edit of `openspec/changes/a/specs/x/spec.md`
@@ -19046,8 +19173,9 @@ scenario is a spec defect (§26).
 - **Given** a batch under the bound, a unit subject, a batch with one unit left to review (the others done), and a
   large batch (over 160,000 characters) with `yolo.review.max_batch_chars` at its default `0`
 - **When** the review builds and asks them
-- **Then** the batch under the bound and the unit are asked with the prompt of 0.4.58, byte for byte, and the same
-  material keys, and the prompt version is 4; the last two are asked whole; a unit whose reply stops at the limit goes
+- **Then** the batch under the bound and the unit are asked with the prompt of 0.4.58, byte for byte once their
+  `plan entry` block is rendered back with sorted keys (from 0.4.60 the entry has the order of L4-YOLO-101), with the
+  material keys of that prompt, and the prompt version is that of L4-YOLO-025; the last two are asked whole; a unit whose reply stops at the limit goes
   to the next judge unsplit
 
 #### SCN-YOLO-277 (+) A batch judged in parts, and a kept part, are reused · L4-YOLO-098, L4-YOLO-022
@@ -19095,6 +19223,94 @@ scenario is a spec defect (§26).
   `plan.review_incomplete` with a fix for each reason; `docs/yolo-mode.md` no longer says that L4 records no review;
   `adopt.md` names `roles.plan_judges`; `operate.md` and `plan.md` give the message of an incomplete review; the
   CHANGELOG's Unreleased section names the keys
+
+#### SCN-YOLO-283 (+) A batch entry shows each unit's id before its list · L4-YOLO-101
+- **Given** batch `b1` with units `openspec:a`, `openspec:b` (depends on `openspec:a`) and `openspec:c` (depends on
+  `openspec:b`, `acceptance_profile: none`)
+- **When** the review builds the batch subject and the unit subject of `openspec:b`
+- **Then** each `plan entry` block reads `id`, `depends_on`, `acceptance_profile` (and `units` last for the batch) for
+  every object, the list `["openspec:a"]` comes after `"id": "openspec:b"` and before `"id": "openspec:c"`, and
+  `plan.reviewed` records `prompt_version: 5`
+
+#### SCN-YOLO-284 (+) Only the entry changed · L4-YOLO-101
+- **Given** the unit and the batch under the bound of SCN-YOLO-276
+- **When** their prompts are built
+- **Then** each prompt, with its `plan entry` block rendered back with sorted keys, is byte for byte the prompt of 0.4.58
+  that SCN-YOLO-276 pins; a part of a batch shows the same entry order
+
+#### SCN-YOLO-285 (−) A review of 0.4.59 before the activation is judged again · L4-YOLO-101
+- **Given** plan `p1` reviewed with prompt version 4, units A and B READY and `batch:b1` NEEDS_REVISION with an
+  acceptance recorded on that review after two judged versions, and the plan not activated
+- **When** `l4 yolo status p1` and `l4 yolo activate p1 --reason go` run, and then the CI plan step
+- **Then** the status shows `review: stale (the review prompt changed)` and the version line; the activation exits 2
+  with the line and `Fix: l4 yolo review p1` and records nothing; the plan step judges A, B and the batch (no entry is
+  reused) and records `prompt_version: 5`; the acceptance no longer holds and the status says so; and a new
+  `l4 yolo accept p1 batch:b1` is not refused for rounds
+
+#### SCN-YOLO-286 (+) A force acceptance holds across the upgrade · L4-YOLO-101
+- **Given** plan `p1` force-accepted by a person on a version-4 review, its plan file and unit digests unchanged
+- **When** `l4 yolo activate p1 --reason go` runs
+- **Then** the plan is activated with no new review, as before the upgrade
+
+#### SCN-YOLO-287 (+) An active plan is neither stopped nor reviewed again · L4-YOLO-101
+- **Given** plan `p1` activated on a version-4 review, its plan file and unit digests unchanged
+- **When** the CI plan step runs and `l4 yolo status p1` runs
+- **Then** no `plan.reviewed`, `plan.stopped` or `plan.review_incomplete` is recorded, the plan stays `active`, and the
+  status shows no `(the review prompt changed)`; after a spec change of a pending unit the plan stops with
+  `inputs_changed` as before, and its next review judges every subject at version 5
+
+#### SCN-YOLO-288 (−) Kept answers and cached answers of 0.4.59 are not reused · L4-YOLO-101
+- **Given** plan `p1` whose latest event is a `plan.review_incomplete` of version 4 that answered A, and a dry-run cache
+  whose lines are of version 4
+- **When** the CI plan step reviews it, `l4 yolo status p1` runs, and `l4 yolo review p1 --worktree` runs
+- **Then** A is judged again, no judge is ordered by the old failures, the status shows no `incomplete` line, and the
+  dry run reuses no cached line
+
+#### SCN-YOLO-289 (+) A person's activation records and shows the kind · L4-YOLO-102
+- **Given** a reviewed plan `p1` and a person in a terminal with no agent marker
+- **When** `l4 yolo activate p1 --reason go --no-run` runs, then `l4 yolo status p1`, `l4 yolo status p1 --json` and
+  the plan report are read
+- **Then** `plan.activated` holds `by`, `actor: person`, `marker: null` and `harness_version`; the status shows
+  `activated by <by> (person)`, the JSON has `activated_actor: person`, and the report has `- Activated by: <by>
+  (person)`
+
+#### SCN-YOLO-290 (+) An agent's activation says so, and is not refused · L4-YOLO-102
+- **Given** the plan of SCN-YOLO-289, once with `CLAUDECODE=1` and once with no marker and no terminal on stdin
+- **When** `l4 yolo activate p1 --reason go --no-run` runs
+- **Then** it activates both times; the events hold `actor: agent` with `marker: CLAUDECODE` and with `marker: null`;
+  the status shows `(agent: CLAUDECODE)` and `(agent: no terminal)`
+
+#### SCN-YOLO-291 (+) A resume and a cancel record the kind · L4-YOLO-102
+- **Given** an active plan `p1` that the plan step stopped, and a person in a terminal
+- **When** `l4 yolo resume p1 --reason r --no-run` runs, then `l4 yolo status p1`, and later `l4 yolo cancel p1
+  --reason r` and the report
+- **Then** `plan.resumed` holds `actor: person`, `marker: null` and `harness_version` with no `--extend-…`; the status
+  shows `resumed by <by> (person)`; `plan.cancelled` holds `actor` and `marker`; the report shows `- Cancelled by: <by>
+  (person)`
+
+#### SCN-YOLO-292 (−) An older ledger folds and shows no kind · L4-YOLO-102
+- **Given** a ledger whose `plan.activated` and `plan.resumed` have no `actor`
+- **When** the plan is folded and `l4 yolo status p1` runs
+- **Then** the fold is the one of 0.4.59 plus `activated_actor: null`, the status shows `activated by <by>` with no
+  kind and no `resumed by` line, and the JSON has `activated_actor: null`
+
+#### SCN-YOLO-293 (−) One judge warns and says where a review-only judge goes · L4-YOLO-103
+- **Given** `roles.judges: [j1]` and no `roles.plan_judges`, and a configuration that passes every other check
+- **When** `l4 doctor` runs
+- **Then** CFG-013 is a warning with both sentences of `roles.judges`, and doctor exits 0
+
+#### SCN-YOLO-294 (+) A second judge, or the review's own chain, changes what it says · L4-YOLO-103
+- **Given** in turn `roles.judges: [j1]` with `roles.plan_judges: [j2, j3]`, `roles.judges: [j1, j2]` with no
+  `roles.plan_judges`, and `roles.judges: [j1, j2]` with `roles.plan_judges: [j3]`
+- **When** `l4 doctor` runs
+- **Then** the first warns with the `roles.judges` sentence only, the second passes with `roles.judges has 2
+  profiles`, and the third warns with the `roles.plan_judges` sentence only
+
+#### SCN-YOLO-295 (+) The documentation names the chain, the doctor row and the older CLI · L4-YOLO-104
+- **When** the runbook, the skill's `references/plan.md` and `references/adopt.md`, and the CHANGELOG are read
+- **Then** the runbook names CFG-013, `roles.plan_judges` beside `roles.judges` and `--allow-older-cli`; `plan.md` and
+  `adopt.md` name CFG-013 and `roles.plan_judges`; `adopt.md`'s upgrade section says to move the local `l4` too; the
+  CHANGELOG's Unreleased section names prompt version 5, CFG-013, `--allow-older-cli` and the actor of `plan.activated`
 
 ### 23.21 Experience graph (KG)
 

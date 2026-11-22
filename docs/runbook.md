@@ -622,6 +622,14 @@ case is a base that is not the default branch: see 7.15.
    - Vendored form: use `.l4/bin/l4` in the project. Type it from the repository root.
    - Fetched form: use `.l4/bin/l4` in the project. Type it from the repository root. It runs `uvx` with the pinned
      commit.
+   - Move it with the pin. From 0.4.60, outside CI, a command that records an event or pushes a commit (`l4 retry`,
+     `l4 resume`, `l4 restart`, `l4 questions accept` and `answer`, `l4 yolo accept`, `waive`, `activate`, `resume`,
+     `go`, and the others L4-OPS-026 lists) exits 2 before it reads anything when your `l4` is older than the pin:
+     `this l4 is <v>, older than the harness this repository pins (<p>, <where>)`. The pin is `harness.version` in
+     `.l4/config.yaml`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as your
+     last fetch left it. Install the pinned `l4`, or use `.l4/bin/l4`. To run the older one anyway, pass
+     `--allow-older-cli`: the command runs and prints a warning. `l4 yolo cancel` and the `--withdraw` forms only
+     warn, so you can always stop a plan. An `l4` older than 0.4.60 has no such check.
 2. Clone the project.
 3. Switch to `<base>`.
 4. Pull.
@@ -3053,6 +3061,11 @@ Each answer is kept. A review that finishes is recorded once as `plan.reviewed`,
 (`judge`) and, for the review, `judges` and `failures`. The log and `l4 yolo review --local` and `--worktree` print one
 line per failure: `<profile>: <subject>: <kind>: <detail>`. With one judge, a reply that breaks the schema twice is
 still BLOCKED.
+
+To give the review its own judge, set `roles.plan_judges`; do not cut `roles.judges` to one judge for a review. A chain
+of one judge has no fallback: when that judge fails, a unit's verification can wait for capacity (`waiting_capacity`),
+and a review whose chain has one judge ends incomplete. `l4 doctor` (CFG-013) warns when `roles.judges` or
+`roles.plan_judges` has one profile.
 
 If a call has no answer, the review is incomplete and does not record `plan.reviewed`. It records
 `plan.review_incomplete` instead: the subjects answered, the subjects left, each judge and its failure, and the cost,
