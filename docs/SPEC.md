@@ -2847,6 +2847,73 @@ SHALL be added. [V, a consumer's fix chore for a browser test that failed by ass
 message; its implementer asked a question that said it did not reproduce the failure, the delegate escalated it, and the
 person read a question without the one-line cause, which the round's `verdict.json` held.]
 
+**L4-IMP-108 A test chore counts the browser tests it writes.** When `gates.e2e` is configured (`e2e_configured`), a
+test chore (a `[chore]` task of kind `tests`) SHALL compute the browser tests of its step: the tests of
+`task_browser_tests(wb, base, None)` (L4-IMP-101: the tests pytest would collect from the Python files under
+`e2e_test_dir(gates.e2e)` that the step added or whose own definition it changed, between the step base and the work
+tree) whose file `review_test_chore` kept. When there is one, the attempt's test gate passed with no new failure and the
+run is not skipped (`_e2e_skip_reason`, read with the ids of the step's unit-gate report; a skip is
+`e2e.task_run_skipped{phase: "single"}`), the chore SHALL run `gates.build` (when it is configured) and then the e2e gate
+(`run_e2e`, name `e2e-test-chore`), before it counts its added tests. The attempt SHALL fail, as in green (L4-IMP-101),
+on a failed build, a server that is not ready (with the end of its log), a timed-out gate, no readable report, a
+collection error of a module that maps to a file of the step, or a browser test of the step with an id that failed or
+errored (`the task's browser tests do not pass: <ids>`, with their failure text as the excerpt). A browser test of the
+step SHALL count as an added test when the e2e report shows one of its ids `passed` and none failed or errored; one the
+report does not show, or shows only skipped, SHALL NOT count and SHALL be recorded as `e2e.task_tests_unseen{task, phase:
+"single", tests, ambiguous}`: an unseen test neither counts nor blocks by itself. The tests the chore adds SHALL be the
+unit gate's new passing tests and these browser tests together, and the retake rule (`_already_done`) and the "at least
+one new test must pass" rule of L4-VER-006 SHALL read them together. What the build and the e2e run write SHALL NOT be
+committed, a link a gate planted is removed and recorded (L4-SEC-020), and the step's own new and appended test files
+SHALL stay (the run's clean-up makes no test-path freeze). `task.tests_added` SHALL keep `files` and `tests` and SHALL
+hold the ids of the e2e report in `e2e_tests` when there are any. A test chore with no browser test, and a project
+without `gates.e2e`, SHALL run as before. [V, a TypeScript consumer whose browser tests are Python under `e2e/`: a
+person's `tests` feedback item asked for one browser test; the test chore's attempts 1, 3 and 4 failed `no tests added`
+because the unit gate (a Node command) does not run `e2e/`, attempt 5 passed only with a Node meta-test that reads the
+browser test's file, and the browser test never ran before verification: five attempts and nearly 80 minutes]
+
+**L4-IMP-109 A test chore that adds no test says what each gate found.** A test chore's attempt that adds no test SHALL
+fail with a reason that starts `no tests added: ` and names each gate and what it found, joined by `; `: `this step kept
+no new test file and appended no test` first when the review kept no file; then `the test gate (<gates.test.command>)
+reports no new passing test`; then, for the e2e gate, `the e2e gate is not configured, so a browser test does not
+count` when `gates.e2e` is not configured and a kept file lies under `e2e/`, `this step kept no browser test under
+<dir>/, so the e2e gate did not run` when it is configured and the step kept none, `the e2e gate did not run: <skip
+reason>` when the run was skipped, and `the e2e gate (<command>) reports none of this step's browser tests as passed:
+<path::name, ...>` when it ran. A command SHALL be shown on one line and cut at 120 characters, and a list SHALL be cut
+as every list of a reason is. The red step's own `no tests added` SHALL NOT change. [V, the same chore: three attempts
+failed with the bare `no tests added`, no excerpt and no word of which gate was read]
+
+**L4-IMP-110 A test chore's new tests are checked against the report that holds them.** The per-test cap of a test
+chore (L4-VER-052) SHALL read each added test from the report that holds it: a unit-gate id from the unit gate's report
+and a browser id from the e2e report. The discrimination runs of a test chore whose task cites a criterion
+(`discriminate_extra`, L4-VER-009) SHALL get the added unit-gate tests only, the only tests their runs (both of the unit
+gate) can reach. When the task cites a criterion and every added test is a browser test, no discrimination run SHALL be
+made and the chore SHALL be held with a harness question (L4-IMP-063, check `tests`) whose reason says that the
+discrimination runs use the unit gate, which does not run browser tests, that these browser tests passed in the e2e gate,
+and that the harness cannot check that they fail when the code is wrong; the question names the tests and no run. An
+accepted answer SHALL let the replayed step through and record the held tests as `discriminating`, as for any held test
+chore. When there are added unit-gate tests, they SHALL be judged as today and the browser tests SHALL go along with
+that outcome. [V, the same chore's fifth attempt was held on an inconclusive check whose question did not say why the
+runs could not decide]
+
+**L4-IMP-111 A test chore's prompt and questions say what it may change.** When `gates.e2e` is configured, the prompt of
+a test chore SHALL say, under `# Browser tests`, that a browser test it adds as a Python test under the e2e test
+directory counts as an added test, that the harness builds and serves the app and runs the e2e gate after the step, that
+a browser test of the step must pass there and that the step cannot run it; and, when `tdd.test_globs` does not cover
+that directory, that a file there is not a test file for the task and that changing one fails the attempt. The prompt of
+a test chore that retakes a feedback item (`retakes` in `.l4/fix.json`) SHALL say, under `# This item was taken before`,
+that a verifier judged the earlier take short of the item, that the test files that take added are existing test files
+whose edit is put back, and that what the item still asks for goes into new tests, with new names, in a new test file. A
+technical question of a test chore SHALL get a harness note that keeps the fix chore's first sentence (`Harness note: this
+is a fix task.`, which the delegate's fallback reads, L4-DLG-025) and then says that a new test file and new tests
+appended to a test file a red step of the unit wrote are kept, that an edit of any other existing test file or of a
+test-support file is put back whatever the answer says, that a missing check can go into a new test file, and that
+otherwise a person commits the change and then answers. The fix chore's note SHALL NOT change. The blocks SHALL be built
+by the prompt code, so no template version changes. A `tests` feedback item, and a finding that one was not addressed,
+was already a test chore before this requirement (L4-VER-006): only what the chore is told changes. [V, the same unit:
+the verifier judged the item not addressed because the new browser test did not call a helper the item asked for; the
+fix unit's test chore edited that browser test, which the earlier take had added, the guard put the edit back, and its
+question's note said it was a fix task that cannot change a test, so a person committed the check by hand]
+
 ### 7.5 Post-step guards, commits and trailers
 
 **L4-IMP-006** After each agent step the harness MUST: (1) revert protected-path changes (P4, `odd.forbidden_paths`
@@ -5786,7 +5853,10 @@ diff holds changed files they cannot read (test-support and runner-config files 
 suppressions) and found nothing in the files they read, the row is `skipped` with `not checked: python only; changed
 files outside it: <files>`; a `skipped` row blocks nothing. (3) *Step 4a, audit sampling* writes pytest tests: when the
 unit changed files outside the exempt paths and none is a `.py` file the step is `not_run` with `audit sampling writes
-pytest tests only; changed code is not python`: no writer call, no finding, no file.
+pytest tests only; changed code is not python`: no writer call, no finding, no file. From 0.4.60 only Python code counts
+(L4-VER-089): a unit whose source files are all of another language is `not_run` even when it changed Python test or
+test-support files, and the note then names them; a unit that changed only tests audits when step 3's report shows its
+Python tests.
 
 ### 10.3 Judge verdict schema
 
@@ -6092,6 +6162,49 @@ grows by at most 24,000 characters of excerpt (2 x 20 x 600; the keys, ids and J
 verdict kept the first line of each failing test's message, but the fix task and the question made from it carried
 only the test's id, and the implementer of the fix chore reported that it could not reproduce the failure.]
 
+**L4-VER-089 Audit sampling audits Python code, not the Python tests of another language's unit.** Step 4a SHALL decide
+from the unit's changed files outside the exempt paths (`changed_unit_files`). Its *source files* are those that
+`tdd.test_globs` does not match (kind `code` or `root`), whose suffix is a source suffix (`CODE_SUFFIXES`) and that match
+no `tdd.test_support_globs` glob; its *Python test files* are the changed `.py` files that `tdd.test_globs` or
+`tdd.test_support_globs` matches. The step SHALL run when the unit changed no file outside the exempt paths, or when a
+source file is a `.py` file. When the unit's source files are all of another language, the step SHALL be `not_run` with
+the note `audit sampling writes pytest tests only; changed code is not python`, followed, when it has Python test files,
+by ` (the changed Python files are tests or test support: <files>)`. When the unit changed no source file and has Python
+test files, the step SHALL run when step 3's unit-gate report holds a test of one of those files
+(`evidence.testsran.file_of_test`), or when step 3 left no report; else it SHALL be `not_run` with that note and its
+parenthesis. A unit with no `.py` file at all keeps the note of 0.4.59 word for word. A `not_run` step SHALL ask no
+writer, write no file and raise no finding. [V, twice in a TypeScript consumer whose browser tests are Python: a changed
+Python browser test made step 4a run on a TypeScript unit, the writer was asked for a pytest test of a TypeScript
+criterion, and the test was rejected because the unit gate does not collect it]
+
+**L4-VER-090 The audit test goes next to the unit's tests only when the report shows them.** The folder of the unit's own
+Python tests (`red_test_directory`) SHALL count a changed `.py` test file only when step 3's unit-gate report holds a test
+of it. When no file qualifies, or step 3 left no report, the audit SHALL confirm that the test command collects the
+audit file (`confirm_collected`) before it keeps the folder of `audit_directory`, and SHALL write the file under `tests/`
+when it does not, as it does today when no folder is found. [V, the code: `red_test_directory` picked `e2e/`, which the
+unit gate does not run, and its docstring's promise that the head report proves the folder is collected was not checked,
+so the collect-only check was skipped]
+
+**L4-VER-091 A verifier-agent call that a profile cannot answer goes to the next profile of the chain.** A call of the
+`verifier_agent` role (the audit writer of step 4a, its collection retry and its lint retry, and the UI test writer of
+step 5) whose reply is `error` (a reply stopped at the output limit, a tool call that the permission rules refused, or
+any other adapter error that the run's own retries did not cure) SHALL be discarded and the same call SHALL be asked of
+the next usable profile of `roles.verifier_agent` that is independent of the unit's implementers
+(`select_judge(role="verifier_agent", skip=...)`, its probes and `probe_vetoes`), in the same run, as the step-9 judges
+do (L4-VER-015, L4-VER-075). A usage limit or a lost login SHALL cool the profile down (`Factory.on_limit`, L4-AVL-003)
+and move on the same way. A discarded profile SHALL be skipped for the rest of the round, by both steps. Each discard
+SHALL be recorded as `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` (`kind`: `length`,
+`permission` or `error`; `detail` redacted, at most 300 characters; `step`: `4a` or `5`), and the cost of a discarded
+call as `budget.cost` with that profile. A reply that is `invalid` or a `timeout` SHALL keep its handling of 0.4.59 and
+SHALL NOT move to another profile. When no profile is left, the call's result SHALL carry the detail `no profile of
+roles.verifier_agent could answer: <profile>: <kind>: <detail>; ...`, step 4a SHALL wait for capacity with it (exit 12)
+and step 5 SHALL record `writer_failed` with it, as each does today. What an audit or a generated test needs in order to
+count SHALL NOT change. Every writer call is tool-less (`PermissionPolicy("judge")`), so a tool-less judge profile is the
+kind the role needs and gets no warning. [V, a consumer's step 4a parked a unit twice for capacity: once on a tool call
+that opencode's permission rules refused in the tool-less writer call, once on a reply stopped at a 32,000-token output
+limit; the other profiles of `roles.verifier_agent` were not tried, and a retry chose the same profile again; about an
+hour and a half of waiting]
+
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
 |---|---|
@@ -6100,6 +6213,7 @@ only the test's id, and the implementer of the fix chore reported that it could 
 | a judge answered but the answer is refused, truncated, schema-invalid after repair, or from a mismatched model | that judge's verdicts are discarded; the next independent judge is tried; if none remains, affected criteria are `needs_human` |
 | a judge call fails mid-request with a limit signal | treated as "no usable profile" for that judge (first row) |
 | a judge call times out (no answer within the backend timeout) | retried once, or split (L4-VER-071); a timeout left after that holds the round, and the next judge is not asked (L4-VER-075) |
+| a verifier-agent call (the audit writer, the UI test writer) ends `error` or with a limit signal | that profile is skipped for the round (a limit also cools it down) and the next independent profile of `roles.verifier_agent` gets the same call; when none remains, step 4a waits for capacity (first row) and step 5 records `writer_failed`; an `invalid` reply or a timeout does not move (L4-VER-091) |
 
 **L4-VER-016 A feedback-only fix unit consumes the rejects its round could not convert.** A `reject` ends when the fix
 unit that took it is spawned (`fix.spawned.consumed`). A round whose only fix tasks are feedback tasks (`feedback_only`)
@@ -6743,7 +6857,7 @@ own test files (kept only when every earlier top-level statement of the file is 
 name the file binds or a fixture its tests request, and what is added only defines tests, test classes, imports and
 constants: no fixture, module mark, xunit setup, pytest hook or call made at import, which would reach the file's existing
 tests), any other change to a test file and any new or changed test-support file is put back, a change to a
-non-test file fails the attempt, at least one new test must pass, and `task.tests_added{task, files, tests}` records it. A finding about the tests of a criterion the round found satisfied (M1.13, W-C1) is a test chore as well, and the task keeps the criterion: it is a judge's or a human's finding (a gate's is not), its title speaks of tests, it cites a criterion whose round result is `pass` (judged, or accepted by a human), and no regression scenario is to be pinned; when any of these fails, or when one finding of the criterion's task is of another kind, the task stays red/green (the code is not assumed right). The code of such a task is right, so no honest red test can fail and the red step, which needs a new failing test, would halt the unit; instead the step must add at least one test that fails by assertion when the project's functions answer their zero value or on the unit base's code (the verifier's `discriminate_extra`, run in the step for a chore that cites a criterion, recorded as `task.tests_added.discriminating`). A fix unit with no ADDED requirement sets `skip_specs: true` (a spec gap that L4-VER-059 gives no scenario adds none). The fix unit is validated strict before
+non-test file fails the attempt, at least one new test must pass (from 0.4.60 a browser test of the step that the e2e gate ran and passed counts, L4-IMP-108), and `task.tests_added{task, files, tests}` records it. A finding about the tests of a criterion the round found satisfied (M1.13, W-C1) is a test chore as well, and the task keeps the criterion: it is a judge's or a human's finding (a gate's is not), its title speaks of tests, it cites a criterion whose round result is `pass` (judged, or accepted by a human), and no regression scenario is to be pinned; when any of these fails, or when one finding of the criterion's task is of another kind, the task stays red/green (the code is not assumed right). The code of such a task is right, so no honest red test can fail and the red step, which needs a new failing test, would halt the unit; instead the step must add at least one test that fails by assertion when the project's functions answer their zero value or on the unit base's code (the verifier's `discriminate_extra`, run in the step for a chore that cites a criterion, recorded as `task.tests_added.discriminating`). A fix unit with no ADDED requirement sets `skip_specs: true` (a spec gap that L4-VER-059 gives no scenario adds none). The fix unit is validated strict before
 commit. Parent → `fixing`; when the fix unit's tasks are done, the **parent** is re-verified as a whole (round + 1),
 covering parent and fix criteria.
 
@@ -9698,6 +9812,8 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 132 | `readiness-judge-chain` | the plan readiness review walks its judge chain per subject and keeps what was answered: `roles.plan_judges` (empty: `roles.judges`; a judge role for L4-CFG-006, CFG-002, CFG-011, ENV-004, LIVE-001 and the skill's preflight script) is the review's chain; a call is asked of the first judge in chain order that is usable (`Factory.for_profile`, one profile's selection, and its sandbox) and not discarded for it; an `error` discards the judge for the review, a length stop or a schema break for that call, a limit cools it (`Factory.cool_limited`); a schema break with no judge left is BLOCKED as before; a judge that failed a material in an incomplete review since the latest `plan.reviewed` is asked it last; `yolo.review.timeout` (15m) bounds each call, a timeout that cannot be split ends the review for the run, and a CI job starts a call only with that much time left; a batch longer than `yolo.review.max_batch_chars` (default `0`: no size split), one with a part an incomplete review kept, or one whose whole call stops at the limit or times out is reviewed in parts (one per unit in full with the others read within 6,000 characters, and one summary part), merged into one verdict under the batch's material key with `parts`; an unsplit prompt and its key are unchanged (prompt version 4); a review that does not finish records `plan.review_incomplete` (answered entries reused by material key, failures, cost charged, a repeat not written), shown in `l4 yolo status` and the run log; `plan.reviewed` gains `judges`, `failures` and per-entry `judge` (L4-YOLO-095..100, L4-YOLO-004, L4-YOLO-022, L4-CFG-006, L4-AVL-010, SCN-YOLO-261..282) | the unit tests (`test_yolo_readiness_chain`, `test_yolo_readiness_parts`, `test_yolo_readiness_review`, `test_yolo_review_incomplete_cli`, `test_yolo_cycle_review_incomplete`, `test_plan_judges_config`, `test_readiness_judge_chain_docs`) |
 | 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed; the check is fail-safe. `l4.implementer.browser_tests` (new): `collectable_tests` (what pytest would collect: `python_files`, no fixture, `Test*` classes without `__init__`), `match_task_tests` (a report id by module suffix, the module read as `evidence.testsran.file_of_test` does with a file inside the e2e directory before an exact match outside it, and by exact class, two fitting files left `ambiguous`), `selecting_option` (`-m`/`-k`), `shared_with_unit_gate`. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the collectable tests of the Python files under `e2e_test_dir(gates.e2e)` that the red commit added or whose own definition it changed (read from git, so a resumed red counts; a git error is `e2e.task_tests_unread`); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`; only a failing or erroring task test, a timed-out gate, no report, a collection error of a mapped task module, a failed build or a server that is not ready refuse, and a test the report does not show is `e2e.task_tests_unseen`; `_e2e_skip_reason` (`e2e.task_run_skipped`: a selecting command or a directory the unit gate also runs); `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt says the step that completes the task runs them, and that they are frozen only when `PromptContext.e2e_frozen` (the green prompt says so in both forms). `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for a green step, passed by `loop._check_step` only when `task_runs_e2e` (in `l4.implementer.tdd`) is true. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556, 562..564; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; a task test the report does not show is run first at step 3; browser tests in another language, a support-only change and a pytest configuration that overrides `python_files` are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_browser_tests`, `test_deadline`) |
 | 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
+| 138 | `test-chore-browser-tests` | a test chore counts the browser tests it writes, says what each gate found when it added none, checks each new test against the report that holds it, and tells its agent and its questions what it may change. `l4.implementer.tdd.run_single` (kind `tests`): the step's browser tests are `task_browser_tests(wb, base, None)` limited to the files `review_test_chore` kept; after the test gate and `green_failures`, when `gates.e2e` is configured and `_runnable_browser_tests(..., "single", ...)` leaves some, `_chore_browser_tests` (new, the shape of `_task_e2e_reason`, with `freeze_phase=None`) runs `gates.build` and `run_e2e(name="e2e-test-chore")`; `_task_e2e_run` returns `TaskE2e` (reason, excerpt, passed, unseen, report) and `_task_e2e_reason` keeps its pair; the refusals are those of L4-IMP-101; a browser test counts when one of its ids passed and none failed, an unseen one is `e2e.task_tests_unseen{phase: "single"}` and does not count; `added_unit` and `added_e2e` together feed `no tests added`, `_already_done` and `decision_calling_code_wrong`; `over_cap_text` reads each id from its own report; `_discriminating_tests` gets `added_unit` only, and a browser-only chore of a cited criterion is held with no run (`BROWSER_ONLY`); `task.tests_added.e2e_tests`; `_no_tests_text` (new) names each gate. `PromptContext.retake_tests` and two blocks for the `single_tests` role in `prompt.py` (no template change); `loop.chore_question_note(unit, kind)`, whose test-chore note keeps the fix chore's first sentence. A TypeScript consumer's test chore for one requested Python browser test failed `no tests added` three times because the Node unit gate does not run `e2e/`, passed only with a Node meta-test, and its fix unit's test chore could not edit the earlier take's browser test (L4-IMP-108..111, L4-VER-006, SCN-IMP-586..599; `openspec/changes/test-chore-browser-tests/`). Limits: the e2e suite runs whole; the phase-`single` deadline cap does not grow; a test chore still cannot edit the test files an earlier take added (a new test file can hold the missing check); a browser-only chore of a cited criterion still needs an answer | the unit tests (`test_test_chore_browser`, `test_single_phase`, `test_prompt`, `test_loop`) |
+| 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): a changed `.py` source file (not `tdd.test_globs`, not `tdd.test_support_globs`, a `CODE_SUFFIXES` suffix) audits; source files of another language only is `not_run`, the note naming the Python test files; a tests-only unit audits when step 3's report holds a test of a changed Python test file (`evidence.testsran.file_of_test`), or when there is no report. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain` (new, an `LLMBackend`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit uses `Factory.on_limit` and `probe_vetoes`; none left returns the last result with `no profile of roles.verifier_agent could answer: ...`, which step 4a raises (exit 12) and step 5 records as `writer_failed`. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..369; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -13858,6 +13974,102 @@ scenario is a spec defect (§26).
   note does not exist; the note is in the question's own `### Harness notes` subsection, which a line of the note cannot
   forge (a `###` line in it is escaped)
 
+#### SCN-IMP-586 (+) A new browser test of a test chore counts · L4-IMP-108
+- **Given** a test chore whose step adds `e2e/test_layout.py` with `test_regions`, a unit gate that does not collect
+  `e2e/`, and an e2e gate whose report shows `test_layout::test_regions[chromium]` passed
+- **When** the chore's attempt runs
+- **Then** the e2e gate ran once as `e2e-test-chore` after the test gate, the task is done, its commit holds
+  `e2e/test_layout.py`, and `task.tests_added` lists that file, the id under `tests` and under `e2e_tests`
+
+#### SCN-IMP-587 (−) A failing browser test of a test chore fails the attempt with its text · L4-IMP-108, L4-IMP-101
+- **Given** the chore of SCN-IMP-586, and an e2e report that shows `test_layout::test_regions[chromium]` failed with
+  `assert 88 < 40`
+- **When** the attempt runs
+- **Then** it fails with a reason that starts `the task's browser tests do not pass:` and names the id, its excerpt
+  holds `assert 88 < 40`, nothing is committed, and the next attempt's prompt holds the excerpt
+
+#### SCN-IMP-588 (−) A browser test the report does not show is not counted · L4-IMP-108, L4-IMP-109
+- **Given** the chore of SCN-IMP-586, and an e2e report that holds no id of `test_regions`, or holds it only skipped
+- **When** the attempt runs
+- **Then** the ledger has `e2e.task_tests_unseen` with `phase: "single"` naming `e2e/test_layout.py::test_regions`, and
+  the attempt fails with a reason that starts `no tests added:` and names that test
+
+#### SCN-IMP-589 (+) A test chore with no browser test runs no e2e gate · L4-IMP-108
+- **Given** a test chore whose step adds only `tests/test_discount.py` with a passing test, once with `gates.e2e`
+  configured and once without
+- **When** the attempt runs
+- **Then** neither `gates.build` nor the e2e gate runs, and the task is done as before
+
+#### SCN-IMP-590 (−) A server that never gets ready fails the test chore's attempt · L4-IMP-108
+- **Given** the chore of SCN-IMP-586, and an e2e server whose log ends with `Error: listen EADDRINUSE`
+- **When** the attempt runs
+- **Then** it fails with a reason that starts `the e2e server was not ready (see`, its excerpt holds `EADDRINUSE`, and it
+  counts as a failed attempt
+
+#### SCN-IMP-591 (+) What the e2e run writes is not committed, and the chore's test files stay · L4-IMP-108, L4-SEC-020
+- **Given** the chore of SCN-IMP-586, a build that writes `.l4-out/built`, and an e2e run that writes
+  `test-results/trace.zip` and rewrites a production file the step did not change
+- **When** the attempt passes
+- **Then** the commit holds `e2e/test_layout.py` and neither the build output, nor `test-results/trace.zip`, nor the
+  rewritten production file
+
+#### SCN-IMP-592 (+) A retake that adds no test in either gate is already done · L4-IMP-108, L4-VER-006
+- **Given** a test chore that retakes a `tests` feedback item, whose step adds no new passing unit test and no browser
+  test that the e2e report shows passed
+- **When** the attempt runs
+- **Then** the task is ticked as already done (`L4-TDD: already-done`), as a retake with no new unit test is today
+
+#### SCN-IMP-593 (−) The reason names each gate and what it found · L4-IMP-109
+- **Given** a test chore whose step adds only `e2e/test_layout.py::test_regions`, in four projects: one without
+  `gates.e2e`; one with `gates.e2e` whose step kept `tests/test_a.py` with no new test instead; one whose e2e command is
+  `pytest e2e -m browser`; and one whose e2e report does not show the test
+- **When** the attempt runs and adds no test
+- **Then** each reason starts `no tests added: the test gate (` and goes on, in order, with `the e2e gate is not
+  configured, so a browser test does not count`; `this step kept no browser test under e2e/, so the e2e gate did not
+  run`; `the e2e gate did not run: the e2e command selects tests with`; and `the e2e gate (` followed by `reports none
+  of this step's browser tests as passed: e2e/test_layout.py::test_regions`
+
+#### SCN-IMP-594 (+) The discrimination runs get the unit tests only · L4-IMP-110, L4-VER-009
+- **Given** a test chore whose task cites `C-1a2b3c4d`, whose step adds `tests/test_discount.py::test_code` (it fails by
+  assertion in the zero-value run) and the browser test of SCN-IMP-586
+- **When** the attempt runs
+- **Then** `discriminate_extra` is asked about `tests/test_discount.py::test_code` only, the task is done, and
+  `task.tests_added.discriminating` holds that id
+
+#### SCN-IMP-595 (−) A test chore of a cited criterion with only browser tests is held, and says why · L4-IMP-110, L4-IMP-063
+- **Given** a test chore whose task cites `C-1a2b3c4d` and whose only added test is the passing browser test of
+  SCN-IMP-586
+- **When** the attempt runs
+- **Then** no zero-value or base run is made, the task is held with a harness question of check `tests` that names
+  `test_layout::test_regions[chromium]`, says `the discrimination runs use the unit gate, which does not run browser
+  tests` and names no run, and after an accept the replayed step is done with that id under `discriminating`
+
+#### SCN-IMP-596 (−) The cap counts a browser test's criteria · L4-IMP-110, L4-VER-052
+- **Given** `verifier.max_criteria_per_test: 2` and a test chore whose only added test is a browser test whose id names
+  three criterion ids of the unit
+- **When** the attempt runs
+- **Then** it fails with the cap's text (L4-VER-052) naming that browser test
+
+#### SCN-IMP-597 (+) The test chore's question says what a test chore may keep · L4-IMP-111, L4-DLG-025
+- **Given** a test chore that reports status blocked with one technical question
+- **When** the harness writes the question
+- **Then** its Context ends with a note that starts `Harness note: this is a fix task. It adds tests:` and says `a
+  missing check can go into a new test file`, its `question.raised` has `chore: true`, and a fix chore's question keeps
+  the note `It cannot unfreeze a test or test-support file`
+
+#### SCN-IMP-598 (+) A retake's prompt says the earlier tests stay and new tests go in a new file · L4-IMP-111
+- **Given** a test chore whose finding is listed under `retakes`, and another that is not
+- **When** their prompts are rendered
+- **Then** only the first holds `# This item was taken before` and `in a new test file`, and the template version of
+  both is the one of 0.4.59
+
+#### SCN-IMP-599 (+) A test chore's prompt names the e2e gate when the project has one · L4-IMP-111
+- **Given** a test chore in a project with `gates.e2e` whose e2e directory is `e2e`, once with `tdd.test_globs`
+  covering `e2e/` and once without
+- **When** the prompt is rendered
+- **Then** both hold `# Browser tests` and `counts as an added test`, only the second holds `a file there is not a test
+  file for this task`, and a project without `gates.e2e` gets no such block
+
 ### 23.8 Questions and clarifier (QMD, CLR)
 
 #### SCN-QMD-01 (+) Harness writes a well-formed question · L4-QMD-001…004
@@ -15971,6 +16183,92 @@ scenario is a spec defect (§26).
 - **When** step 3 writes the verdict
 - **Then** no line of either key block is in the `excerpt` or in `verdict.json`, and the collection record's excerpt
   holds its first 8 lines
+
+#### SCN-VER-356 (−) A TypeScript unit with a changed Python browser test does not audit · L4-VER-089, L4-VER-002
+- **Given** a unit that changes `web/src/layout.ts` and `e2e/test_layout.py`, and a unit-gate report of Node test ids
+- **When** the verifier reaches step 4a
+- **Then** the step is `not_run` with `audit sampling writes pytest tests only; changed code is not python (the changed
+  Python files are tests or test support: e2e/test_layout.py)`, no writer is asked and no file is written
+
+#### SCN-VER-357 (+) A Python unit that changes only tests still audits · L4-VER-089
+- **Given** a unit that changes only `tests/test_pricing.py`, whose test `tests.test_pricing::test_total` is in step 3's
+  report, and a covered new criterion
+- **When** the verifier reaches step 4a
+- **Then** the writer is asked for an audit test, as in 0.4.59
+
+#### SCN-VER-358 (+) Python code next to another language audits, and a support file is not code · L4-VER-089
+- **Given** one unit that changes `src/a.py` and `web/app.ts`, and another that changes `web/app.ts` and
+  `tests/conftest.py`
+- **When** the verifier reaches step 4a for each
+- **Then** the first audits, and the second is `not_run` with the parenthesis naming `tests/conftest.py`
+
+#### SCN-VER-359 (+) Without a report a tests-only unit audits as before · L4-VER-089
+- **Given** a unit that changes only `tests/test_pricing.py`, and a step 3 that left no unit-gate report
+- **When** the verifier reaches step 4a
+- **Then** the step is not `not_run` for its language
+
+#### SCN-VER-360 (+) The audit file goes where the unit gate's report shows the unit's tests · L4-VER-090
+- **Given** a Python unit that changes `src/a.py`, `tests/test_a.py` and two browser test files under `e2e/`, and a
+  unit-gate report that holds tests of `tests/test_a.py` only
+- **When** step 4a writes an audit test
+- **Then** the file is `tests/test_l4_audit_c_<hex>_r<n>.py` and no collect-only run is made for it
+
+#### SCN-VER-361 (−) A folder the report does not show is confirmed first · L4-VER-090
+- **Given** a Python unit whose only changed test files are under `e2e/`, which the unit gate's report does not show
+- **When** step 4a writes an audit test
+- **Then** an `audit-collect-check` gate runs before the audit file is kept, and a file the command does not collect is
+  written under `tests/` instead
+
+#### SCN-VER-362 (+) A length stop moves the audit writer's call to the next profile · L4-VER-091
+- **Given** `roles.verifier_agent: [first, second]`, both independent of the implementer, and a `first` whose reply to
+  the audit call stops at its output limit
+- **When** step 4a asks for an audit test
+- **Then** the ledger has `availability.judge_error` with `role: "verifier_agent"`, `profile: "first"`, `kind:
+  "length"` and `step: "4a"`, `second` is asked the same call and its test is judged, and the unit does not wait
+
+#### SCN-VER-363 (+) A refused tool call moves the call, and the profile is skipped for the round · L4-VER-091
+- **Given** the chain of SCN-VER-362 and a `first` whose run ends `permission_blocked`, and a round that reaches step 5
+  with a UI gap
+- **When** steps 4a and 5 ask their writers
+- **Then** `availability.judge_error` has `kind: "permission"`, step 4a's call is answered by `second`, and step 5
+  asks `second` without asking `first`
+
+#### SCN-VER-364 (−) The next profile must be independent of the implementers · L4-VER-091, L4-VER-001
+- **Given** `roles.verifier_agent: [first, same, third]`, where `same` has the vendor of the unit's implementer, and a
+  `first` whose reply is `error`
+- **When** step 4a asks for an audit test
+- **Then** `same` is not asked and `third` is
+
+#### SCN-VER-365 (+) A usage limit cools the profile and moves on · L4-VER-091, L4-AVL-003
+- **Given** the chain of SCN-VER-362 and a `first` whose run reports a usage limit
+- **When** step 4a asks for an audit test
+- **Then** a cool-down of `first` is recorded, `availability.fallback` names `first` and `second`, and `second`
+  answers the call
+
+#### SCN-VER-366 (−) With no profile left the unit waits, and the reason names each failure · L4-VER-091, L4-VER-015
+- **Given** the chain of SCN-VER-362, a `first` whose reply stops at its output limit and a `second` whose run ends
+  `permission_blocked`
+- **When** step 4a asks for an audit test
+- **Then** the unit goes to phase `waiting_capacity` with exit 12, and the reason holds `no profile of
+  roles.verifier_agent could answer: first: length:` and `second: permission:`
+
+#### SCN-VER-367 (+) Step 5's writer walks the chain too · L4-VER-091, L4-VER-014
+- **Given** the chain of SCN-VER-362, a UI gap, and a `first` whose reply to the UI test call is `error`
+- **When** step 5 asks for a UI test
+- **Then** `second` is asked the same call, and the criterion's outcome is judged from its test, not `writer_failed`
+
+#### SCN-VER-368 (−) A timeout and an invalid reply do not move to the next profile · L4-VER-091
+- **Given** the chain of SCN-VER-362, and a `first` whose audit reply times out, and in another round breaks the
+  schema twice
+- **When** step 4a asks for an audit test
+- **Then** `second` is not asked, and the criterion's audit record is `timeout`, then `invalid`, each with its minor
+  finding, as in 0.4.59
+
+#### SCN-VER-369 (+) A discarded call's cost is recorded · L4-VER-091
+- **Given** the chain of SCN-VER-362 and a `first` whose discarded call cost 0.40 USD
+- **When** step 4a asks for an audit test
+- **Then** the ledger has a `budget.cost` of 0.40 with `profile: "first"`, and the step's own `budget.cost` holds only
+  the calls whose replies it used
 
 ## MODIFIED Requirements
 

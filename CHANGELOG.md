@@ -6,6 +6,21 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Changed
+- A test chore whose step wrote a browser test (a Python test under the e2e directory) now runs one build and one e2e run after its test gate passed, when `gates.e2e` is configured; a test chore without one costs nothing more. `task.tests_added` gains `e2e_tests`, the added ids of the e2e report (L4-IMP-108).
+- `no tests added` of a test chore now goes on with what each gate found: the test gate, then the e2e gate (not configured, no browser test written, the run skipped and why, or the browser tests its report did not show passing). The red step's `no tests added` is unchanged (L4-IMP-109).
+- A test chore's technical question gets a harness note of its own: a new test file and new tests appended to a test file of the unit's red steps are kept, any other existing test is put back, and a missing check can go into a new test file. Before, it got the fix chore's note, which says that a test cannot be changed at all. A test chore that retakes a feedback item is told that the test files of the earlier take stay as they are (L4-IMP-111).
+- Step 4a (audit sampling) runs only for a unit that changed Python code. A unit whose source files are all of another language is `not_run` even when it changed Python test or test-support files, and the note names them; a Python unit that changed only tests audits when step 3's report shows its Python tests, as before (L4-VER-089).
+- A call of `roles.verifier_agent` (the audit writer of step 4a, the UI test writer of step 5) that ends `error` or with a usage limit is now asked of the next independent profile of the chain in the same run; the failed profile is skipped for the rest of the round (a limit also cools it down). The ledger records each discard as `availability.judge_error` with `role: verifier_agent`, `kind` (`length`, `permission` or `error`) and `step`. Step 5 now tries the next profile before it records `writer_failed` (L4-VER-091).
+
+### Fixed
+- A test chore now counts the browser tests it writes. In a TypeScript consumer whose browser tests are Python under `e2e/`, a person's feedback item asked for one browser test; the test chore failed `no tests added` three times, because only the Node unit gate's new tests were counted, and passed on its fifth attempt only with a Node meta-test that reads the browser test's file. A browser test of the step now counts when the e2e report shows it passed; one that fails refuses the attempt with its failure text, as in green; one the report does not show does not count and is noted (L4-IMP-108).
+- The discrimination runs of a test chore that cites a criterion get the unit gate's tests only, the only tests they can run, and a chore whose only new tests are browser tests is held with a question that says why the runs cannot decide; the per-test cap reads each test from the report that holds it (L4-IMP-110).
+- A unit no longer waits for capacity because one verifier-agent profile refused a tool call in its tool-less call or stopped at its output limit while another profile of the chain could answer. A consumer parked two units for about an hour and a half that way, and the retry chose the same profile again. Only when no profile is left does step 4a wait, with a reason that names each profile and why (L4-VER-091).
+- Step 4a no longer asks the writer for a pytest audit test of a TypeScript unit because a changed file was a Python browser test (the test was then rejected: the unit gate does not collect it), and the audit file goes next to the unit's own Python tests only when step 3's report shows them there; otherwise the audit first checks that the test command collects it (L4-VER-089, L4-VER-090).
+
 ## 0.4.59 (2026-11-19)
 
 ### Added
