@@ -63,8 +63,15 @@ Rules for every task:
     next step judges every subject.
   - SCN-YOLO-288: a version-4 `plan.review_incomplete` that answered A; and a dry-run cache file with version-4 lines
     (see `review_worktree.cache_path` and `tests/unit/yolo/test_yolo_review_worktree.py`).
+  - SCN-YOLO-307: seed `plan.admitted`, a version-4 `plan.reviewed`, `plan.activated` with the current digests and
+    `plan.stopped{reason: unit_rejected, unit: A, digest: <A's digest>}`. The activation's refusal ends with
+    `Fix: l4 yolo review p1 --local`; `l4 yolo review p1` and the status's `Next:` line name it; after
+    `l4 yolo review p1 --local` (a fake judge, as `test_yolo_commands_activate.py::fake_judge`) the activation exits 0.
 
-  These need no code beyond 1.2. Run the file. A failure here is a finding: report it, do not change the rule.
+  SCN-YOLO-285..288 need no code beyond 1.2: a failure there is a finding; report it, do not change the rule.
+  SCN-YOLO-307 needs the fix text, when the review of a plan stopped with `unit_rejected` is stale: in `run_activate`
+  (the stale branch), in `run_review`'s message for that stop (`commands.py` ~1072-1080, `nothing to review`) and in
+  the status's next step for it (`commands.py` ~1626-1632). Run the file.
 
 ## 2. The actor of plan events (D3; L4-YOLO-102)
 
@@ -126,7 +133,10 @@ Rules for every task:
   add `--allow-older-cli` to `cli._common` and `_COMMON_KEYS`, and call `cli_pin.check(name, kwargs, app)` in `call()`
   before `dispatch`. Run the new file, `tests/unit/ci/test_relay.py`, `uv run --frozen pytest tests/unit/cli -q -x` and
   `uv run --frozen pytest tests/unit/mcp -q -x` (the MCP tools build their argv from the command's options; the new
-  common option must not appear in a tool).
+  common option must not appear in a tool). The check runs in every `main([...])` call of the test suite, so also run
+  each of `tests/unit/yolo`, `tests/unit/state`, `tests/unit/specs`, `tests/unit/init` and `tests/unit/ci` with
+  `-q -x`, one at a time: a test whose repository pins a version above `l4.__version__` now exits 2. Fix such a test's
+  fixture (a pin at or below the running version), never the rule.
 
 ## 6. Documentation (L4-YOLO-104)
 
@@ -134,7 +144,7 @@ Rules for every task:
   the style of `tests/unit/docs/test_readiness_judge_chain_docs.py`. The runbook, the skill and the CHANGELOG already
   hold the text (the spec commit wrote it): check the test passes, and correct the text where it differs from what you
   built.
-- [ ] 6.2 Run `uv run --frozen pytest tests/unit/docs -q`.
+- [ ] 6.2 Run `uv run --frozen pytest tests/unit/docs tests/unit/skills -q`.
 
 ## 7. Checks
 

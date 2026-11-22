@@ -16,7 +16,9 @@ version 4 SHALL then be stale wherever L4-YOLO-004 decides currency: before the 
 `reviewed`, `refused`) and for a plan stopped with `inputs_changed` or `unit_rejected`, `l4 yolo status` SHALL show
 `review: stale (the review prompt changed)` with the line `review prompt 4 at the review, 5 in this harness: every
 subject is judged again`, `l4 yolo activate` SHALL be refused with that line and `Fix: l4 yolo review <plan>`, and the
-next review SHALL judge every subject again. An acceptance bound to a version-4 entry SHALL no longer hold (L4-YOLO-027),
+next review SHALL judge every subject again. CI does not review a plan stopped with `unit_rejected` (L4-YOLO-004), so
+for such a plan whose review is stale the activation's fix, the message of `l4 yolo review <plan>` and the `Next:` line
+of `l4 yolo status` SHALL name `l4 yolo review <plan> --local` (or `--worktree --record`). An acceptance bound to a version-4 entry SHALL no longer hold (L4-YOLO-027),
 the rounds counted for `yolo.review.accept_after_rounds` SHALL stay as they were, and a force acceptance that holds
 SHALL still hold (L4-YOLO-060). An active or waiting plan MUST NOT be stopped, reviewed again or shown as stale because
 of the version: its checks read the plan and unit digests frozen at the activation, and its status shows the review as
@@ -63,6 +65,13 @@ it was made.
 - **When** the CI plan step reviews it, `l4 yolo status p1` runs, and `l4 yolo review p1 --worktree` runs
 - **Then** A is judged again, no judge is ordered by the old failures, the status shows no `incomplete` line, and the
   dry run reuses no cached line
+
+#### Scenario: SCN-YOLO-307 (−) A plan stopped with unit_rejected names the review it can get
+- **Given** plan `p1` activated on a review of prompt version 4 and stopped with `unit_rejected` for unit A, whose
+  spec has not changed (the cause was the configuration, now fixed)
+- **When** `l4 yolo activate p1 --reason go`, `l4 yolo review p1` and `l4 yolo status p1` run
+- **Then** the activation exits 2 with the version line and `Fix: l4 yolo review p1 --local`, and the review's message
+  and the status's `Next:` line name the same command; after that local review the activation goes on
 
 ### Requirement: L4-YOLO-102 Plan events say who acted and with which harness
 `l4 yolo activate`, `l4 yolo resume` (with or without an `--extend-…`) and `l4 yolo cancel` SHALL record, in

@@ -37,7 +37,8 @@ What the 0.4.59 source does (read for this change; design.md has the lines):
 - **The plan entry is shown `id` first** (L4-YOLO-101). Every object of a plan entry shows `id`, then `depends_on`, then
   the other keys in sorted order. This holds for a unit subject, a batch and each part of a batch. The readiness prompt
   version becomes 5, so a review made under 0.4.59 is stale before the activation and is made again. An active plan is
-  not stopped, not reviewed again and shows no prompt change.
+  not stopped, not reviewed again and shows no prompt change. A plan stopped with `unit_rejected`, which CI never
+  reviews, is told to review with `--local`.
 - **Plan events say who acted and with what harness** (L4-YOLO-102). `plan.activated`, `plan.resumed` and
   `plan.cancelled` record `actor` and `marker` as `l4 yolo waive` does, and `harness_version`. `l4 yolo status` shows
   `activated by <by> (person)`, `(agent: <marker>)` or `(agent: no terminal)`, and the latest person's resume. The plan
@@ -97,7 +98,7 @@ These are amended in `docs/SPEC.md`:
   - `src/l4/cli_pin.py` (new): the pin read and the guard. `src/l4/cli.py`: the common option and the call.
     `src/l4/ci/relay.py`: `harness.version` in `LENIENT_KEYS`, and a text form of the lenient read.
 - Tests: the files that pin prompt version 4 or the 0.4.58 material keys (tasks.md lists them).
-- Docs: `docs/SPEC.md` (L4-YOLO-101..104, L4-OPS-025, L4-OPS-026, SCN-YOLO-283..295, SCN-OPS-54..62, row 135, CFG-013,
+- Docs: `docs/SPEC.md` (L4-YOLO-101..104, L4-OPS-025, L4-OPS-026, SCN-YOLO-283..295 and 307, SCN-OPS-54..62, row 135, CFG-013,
   the amendments), `docs/runbook.md`, `plugins/l4/skills/l4/references/plan.md`, `references/adopt.md`, `CHANGELOG.md`.
 - Ledger: optional fields on five events. An older harness ignores them; an older ledger folds as before.
 - Configuration: no new key.

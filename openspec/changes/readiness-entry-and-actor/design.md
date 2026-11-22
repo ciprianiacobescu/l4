@@ -56,8 +56,8 @@ plan before activation; an active plan is untouched; the ledger and the status s
 person-level plan action; doctor says what a single judge costs; an older CLI does not write for a newer pin by
 accident.
 
-**Non-Goals:** an actor policy for `l4 yolo activate` (D6); a CI-side notice about older writers (D5); a guard in CLIs
-older than this one; ordering of the plan file itself.
+**Non-Goals:** an actor policy for `l4 yolo activate` (D6); a CI-side notice about older writers (D5); a check of a
+newer CLI (D5); a guard in CLIs older than this one; ordering of the plan file itself.
 
 ## Decisions
 
@@ -120,13 +120,26 @@ prompt version, as SCN-YOLO-181 does, and by reading the lines above):
   - A `plan.review_incomplete` of version 4 is ignored (no kept answers, no `failed_before`, no `incomplete` line), and
     so are the dry-run cache lines of version 4.
   - `l4 yolo findings` shows the history of version 5 only, as for every earlier bump.
-- **A plan stopped with `inputs_changed` or `unit_rejected`**: as above. CI reviews an `inputs_changed` plan; for
-  `unit_rejected` the person's spec fix leads there as today.
+- **A plan stopped with `inputs_changed`**: as above; CI reviews it.
+- **A plan stopped with `unit_rejected`**: status and activation treat the review as stale (`commands.py:1784-1786`,
+  and `_review_view`'s default in `run_activate`), but CI never reviews such a plan (`_reviewable`). A spec fix leads to
+  `inputs_changed` and a CI review, as today. A configuration fix with an unchanged spec is re-activated with
+  `l4 yolo activate` alone (`cycle.py:1325-1331`); after the upgrade that refusal said `Fix: l4 yolo review <plan>`,
+  and CI never makes that review (probed: the activation exits 2 with the version line; `l4 yolo review p1` exits 0
+  with `The configuration: nothing to review` and asks CI for nothing (`commands.py:1072-1080`); the status's `Next:`
+  says to fix the cause and activate (`commands.py:1626-1632`)). So for a plan stopped with `unit_rejected` whose review
+  is stale, the activation's fix, that `l4 yolo review` message and the status's `Next:` line name
+  `l4 yolo review <plan> --local` (or `--worktree --record`), which judge here and record (SCN-YOLO-307). The same
+  dead end exists today for a plan file changed during such a stop, and the new fix text covers it too.
 - **An active or waiting plan**: no stop, no review, no new event. `_reviewable` is false, and the checks of the active
   plan read digests only. `l4 yolo status` shows the review as it was made (`prompt_matters=False`), with no prompt
   change. The frozen acceptances and the running units are unchanged. If the plan is later stopped with
   `inputs_changed`, its new review judges every subject at version 5.
 - **A completed or cancelled plan**: nothing.
+- **A person whose `l4` is 0.4.60 while the repository still pins 0.4.59**: that CLI calls every 0.4.59 review stale,
+  while the pinned CI calls it current and judges nothing; a `--local` review by the newer CLI records version 5, which
+  the pinned CI then calls stale and judges again. The way out is the pinned `l4` (`.l4/bin/l4`, or the pinned
+  install). L4-OPS-026 checks only an older CLI; whether a newer one should warn is an open question (D5).
 
 How it fails safe: a stale review can only stop an activation or cost a review; it can never let a plan activate
 on material no judge saw.
@@ -224,6 +237,16 @@ caught; the guard protects from the next pin move on, once a person's CLI is 0.4
 the action, a fetched pin by commit) is not checked. The pinned harness could tell from `run.started{harness_version}`
 of a local command that an older CLI wrote to a unit; that notice is an open question.
 
+Open questions:
+
+- **Refuse or warn.** Recommended: refuse, as above.
+- **A newer CLI.** A CLI newer than the pin applies newer rules too (D2's last case). Recommended: the same check
+  prints a warning, never a refusal, when the CLI is newer than the pin, because a newer CLI is how a person moves the
+  pin (`l4 upgrade`) and a refusal would block that path.
+- **A notice in CI.** Recommended: in a later release, the plan step logs one line when a unit's latest person command
+  (`run.started{command: retry|restart|resume}`) recorded a `harness_version` older than the running harness, and
+  `l4 status --unit` shows it; this is the only check that can see a CLI older than 0.4.60.
+
 How it fails safe: an unknown pin or an unreadable file is "no pin", so the check never blocks a command it cannot
 judge; a known older CLI cannot write without an explicit flag; CI is untouched.
 
@@ -262,6 +285,12 @@ A fresh `l4 init` writes one judge, so it warns: that is intended, and it does n
 - A judge may still misread a list; the order removes the misreading the evidence shows, not every misreading.
 - The guard adds one `git show` of two small files to the guarded commands.
 - Refusing an older CLI can stop a person in a hurry; the refusal names the flag and the install line.
+- A CLI newer than the pin and a pin older than 0.4.60 disagree about the currency of a 0.4.59 review (D2); the
+  CHANGELOG tells the person to use the pinned `l4`.
+- The guard runs in the CLI entry every `main([...])` test of the harness goes through; a test whose repository pins
+  a version above `l4.__version__` would now exit 2. None was found (`harness.version` in the test configurations is
+  `0.1.0` or written by `l4 init`; the workflow pins in tests carry `v0.3.0` to `v0.4.19`), and task 5.2 runs the
+  command tests to catch one.
 
 ## Migration
 
