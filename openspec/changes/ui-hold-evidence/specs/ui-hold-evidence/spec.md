@@ -22,8 +22,12 @@ when it is not empty; a reused round SHALL keep both, and a record without `exce
 The hold's verdict question (L4-VER-067) SHALL carry them in its `### Harness notes` subsection (L4-IMP-102): the
 excerpt under `Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the
 repository):`, each line after four spaces; then the code under `Harness note: the last test step 5 wrote, <path> (step
-5 ended <status>; not committed, the file is removed after the run; at most 4,000 characters):`, each line as four
-spaces, its number right-aligned in four columns, two spaces and the line. They SHALL NOT be in the hold's text, its
+5 ended <status>; not committed, the file is removed after the run; at most 200 lines and 6,000 characters):`, each
+line as four spaces, its number right-aligned in four columns, two spaces and the line. The numbered code SHALL be
+bounded by its lines and by its own length, not only by the 4,000 characters of the raw copy (4,000 empty lines are
+4,000 numbered lines): at most 200 lines and 6,000 characters with their line ends, the numbers included and before the
+indent of the container; a longer copy SHALL keep its first lines (their numbers are those of the excerpt's locations)
+and end with one line `… (cut: N more lines)`, which the 6,000 counts. They SHALL NOT be in the hold's text, its
 title or its Context, so the hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL say in
 one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt).
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
@@ -74,6 +78,14 @@ SHALL pass the redactor again where it is written.
 - **When** step 5 ends the criterion and the round raises its UI hold question
 - **Then** the outcome is `writer_failed` and keeps the first test's code and its excerpt; the `### Harness notes` hold
   the failure and the first test's code, and the code's heading says that step 5 ended `writer_failed`
+
+#### Scenario: SCN-VER-352 (−) The numbered code of a hold is bounded by its lines and its own length
+- **Given** a generated test that is not accepted whose code is 4,000 empty lines, and another of 2,000 lines of one
+  character
+- **When** the round raises the criterion's UI hold question and writes `verification.md`
+- **Then** each shows its first 200 lines numbered `1` to `200` and, after them, `… (cut: 3800 more lines)` and `…
+  (cut: 1800 more lines)`; the numbered lines and the cut line are at most 6,000 characters before the container's
+  indent, and the code's heading says `at most 200 lines and 6,000 characters`
 
 ### Requirement: L4-VER-084 The writer's retry after a failure at the head carries the failure
 When step 5 asks the writer again after an attempt that ended `fails_at_head`, the retry reason SHALL be that

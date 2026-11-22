@@ -20,7 +20,7 @@ from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
-from l4.verifier.hold_evidence import has_evidence, numbered_code
+from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
 from l4.verifier.judge import parts_text
 from l4.verifier.traceability import OVER_CAP_LABEL
 from l4.verifier.types import (
@@ -146,7 +146,7 @@ def _unaccepted_blocks(result: VerifyResult) -> list[str]:
         if g.excerpt:
             lines += ["      Failure at the head:", *(f"        {line}".rstrip() for line in g.excerpt.splitlines())]
         if g.code and g.path:
-            lines += [f"      The test (at most {MAX_CODE_CHARS:,} characters):"]
+            lines += [f"      The test (at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):"]
             lines += [f"      {line}".rstrip() for line in numbered_code(g.code)]
         lines.append("")
     return lines[:-1]

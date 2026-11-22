@@ -43,7 +43,7 @@ What exists at 0.4.59 (read in the code):
   `generated[].code` is now redacted before its cut).
 - The hold's question carries the excerpt and the code, with the test's path, in its `### Harness notes` subsection
   (L4-IMP-102), never in the hold's text, title or Context. `verification.md` gets a section that shows them for each
-  generated test that was not accepted.
+  generated test that was not accepted, with the code bounded to 200 lines and 6,000 characters once numbered.
 - The writer's retry after `fails_at_head` gets the excerpt with the reason.
 - A rejected UI hold cites its criterion. When the criterion's own reject is in force in the same round, the hold's
   finding joins the criterion's task: one task, both decisions, both questions consumed, one scenario when the two
@@ -76,8 +76,9 @@ ledger's `verify.generated` event, the writer's template, the traces and screens
   section in `render_verification_md`), `src/l4/verifier/verdicts.py` (`_ui_hold_notes`, `_hold_question`,
   `_hold_finding`, `is_ui_hold_finding`), `src/l4/verifier/fixunit.py` (`_candidates`), `src/l4/implementer/excerpt.py`
   (a public name for the redact-then-cut helper, if the implementer adds one).
-- `docs/SPEC.md` (L4-VER-083..085, SCN-VER-331..342 and 350, change-table row 137, amendments to L4-VER-006, L4-VER-067 and the
+- `docs/SPEC.md` (L4-VER-083..085, SCN-VER-331..342, 350 and 352, change-table row 137, amendments to L4-VER-006, L4-VER-067 and the
   step-5 row of 10.2), `CHANGELOG.md`, `docs/runbook.md`, `plugins/l4/skills/l4/references/operate.md`.
-- Sizes: a hold's question grows by at most about 7,800 characters (3,000 of excerpt, 4,000 of code, line numbers); a
+- Sizes: a hold's question grows by at most about 10,500 characters (3,000 of excerpt, 6,000 of numbered code: at most
+  200 lines, the indent and the headings); a
   `verdict.json` by at most 3,000 characters per generated test that fails at the head. No new ledger event, no
   configuration key, no template change.

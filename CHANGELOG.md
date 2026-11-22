@@ -14,8 +14,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   people could not tell a wrong test from wrong code: in a consumer's units the generated browser test failed on its own
   wrong premise (a session put where the app does not read it, a route without the app's prefix, a session mock without
   a user) at least four times, and each cost a round. Now the question's `### Harness notes` hold the head run's failure
-  (the retry prompt's excerpt: at most 40 lines and 3,000 characters) and the test's code (at most 4,000 characters, each
-  line numbered), both redacted before they are cut and again after. `verification.md` has a new section, `## Generated
+  (the retry prompt's excerpt: at most 40 lines and 3,000 characters) and the test's code (each line numbered: at most 200
+  lines and 6,000 characters, and a longer copy ends with a line that says how many lines were cut), both redacted before
+  they are cut and again after. `verification.md` has a new section, `## Generated
   UI tests that were not accepted`, with the same, and `verdict.json` keeps the excerpt as `generated[].excerpt`. The
   hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again (L4-VER-083).
 

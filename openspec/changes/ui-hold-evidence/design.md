@@ -90,9 +90,16 @@ has neither an excerpt nor (code and a path). Else the lines, joined by `\n`:
 - when `excerpt`: `Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the
   repository):`, an empty line, and each line of the excerpt after four spaces;
 - when `code` and `path`: an empty line when an excerpt came before, `Harness note: the last test step 5 wrote, <path>
-  (step 5 ended <status>; not committed, the file is removed after the run; at most 4,000 characters):`, an empty line,
-  and each line of the code as four spaces, its number right-aligned in four columns, two spaces and the line (an empty
-  line of code is its number alone).
+  (step 5 ended <status>; not committed, the file is removed after the run; at most 200 lines and 6,000 characters):`, an
+  empty line, and each line of the code as four spaces, its number right-aligned in four columns, two spaces and the
+  line (an empty line of code is its number alone). `numbered_code` bounds the copy by lines and by its own length: the
+  4,000 characters of the raw copy are not a bound of the numbered one (4,000 empty lines are 4,000 numbered lines of
+  nine characters with the indent: 36,000). At most 200 lines (`MAX_CODE_LINES`) and 6,000 characters
+  (`MAX_NUMBERED_CHARS`), each line counted with its line end, the numbers included, the cut line included and the
+  indent of the container (four spaces in a question, six in a report) not; a longer copy keeps its first lines, so
+  their numbers stay those of the excerpt's locations, and ends with `… (cut: N more lines)`. Each of the two bounds
+  can be the one that cuts: 200 lines hold at most 4,000 characters of code and 1,400 of numbers, so the 6,000 is a
+  second guard for a caller that hands in more.
 
 `_ui_hold_lines` adds one sentence to the Context when the notes are not empty: with an excerpt, `The harness notes
 below show the test step 5 wrote and why it failed at the head: read them to tell a wrong test from wrong code.`;
@@ -134,7 +141,7 @@ accepted` when an outcome that is neither accepted nor waived has an excerpt, or
 outcome: a list item `- <criterion> (<status> after <n> attempt(s)): `<path>``, an empty line, then every line of the
 block indented by six spaces (an indented code block inside the list item, as L4-IMP-102 writes its block into an
 OpenSpec proposal): `Failure at the head:` and the excerpt's lines after two more spaces, when there is an excerpt;
-then `The test (at most 4,000 characters):` and the numbered code lines of D3. The file is redacted and scrubbed whole
+then `The test (at most 200 lines and 6,000 characters):` and the numbered code lines of D3. The file is redacted and scrubbed whole
 as before (`report.py:426`). The delegate's `verification_section` (`delegate/prompt.py:413-417`) picks the lines that
 name a target: the item's line names the criterion, and a code line that holds the criterion's id (its `l4` mark) is
 picked too, within the 50-line bound.
@@ -243,7 +250,8 @@ A consumer moving from 0.4.59 with units in flight:
 - A model-written test and a failure's text now reach `questions.md` and `verification.md`, which are committed and,
   on a public forge, public. Both are redacted before the cut, after it, and again by the file's writer; the code was
   already in `verdict.json`. A secret shape the redactor does not know is copied into two more files.
-- A hold's question grows by up to about 7,800 characters, so a unit with many failing generated tests has a long
+- A hold's question grows by up to about 10,500 characters (3,000 of excerpt, 6,000 of numbered code, the indent of
+  four spaces on up to 241 lines and the headings), so a unit with many failing generated tests has a long
   `questions.md` and a longer delegate prompt.
 - A writer that reads why its test failed may write a weaker one (D5).
 - Two different scenarios for one behaviour stay two criteria, in one task: near-identical sentences from a reviewer

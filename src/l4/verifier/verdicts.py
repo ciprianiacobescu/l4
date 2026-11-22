@@ -47,9 +47,8 @@ from l4.specs.questions import (
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.aggregate import CAP_ONLY
-from l4.verifier.hold_evidence import has_evidence, numbered_code
+from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
 from l4.verifier.types import (
-    MAX_CODE_CHARS,
     CriterionEvidence,
     CriterionOutcome,
     Finding,
@@ -705,7 +704,7 @@ def _ui_hold_notes(criterion: str, generated: Sequence[GeneratedOutcome]) -> str
         lines += [""] if lines else []
         lines += [
             f"Harness note: the last test step 5 wrote, {done.path} (step 5 ended {done.status}; not committed, the "
-            f"file is removed after the run; at most {MAX_CODE_CHARS:,} characters):",
+            f"file is removed after the run; at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):",
             "",
             *(f"    {line}" for line in numbered_code(done.code)),
         ]

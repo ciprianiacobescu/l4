@@ -1,5 +1,5 @@
 Read `design.md` first (D1-D9). Requirements: L4-VER-083, L4-VER-084 and L4-VER-085 (`docs/SPEC.md`), scenarios
-SCN-VER-331..342 and 350. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
+SCN-VER-331..342, 350 and 352. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
 runs at once, and never a wait loop on `pgrep`. Secrets in tests: use a token shape the redactor knows (`"glpat-" +
 "A1b2C3d4E5f6G7h8I9j0"`, as `tests/unit/implementer/test_excerpt_redaction.py` does); build a private-key block from
 parts so that no test file holds a key marker as one string.
@@ -88,7 +88,7 @@ parts so that no test file holds a key marker as one string.
 
 ## 5. Checks
 
-- [x] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342 and 350, change-table row 137 and the amendments to L4-VER-006,
+- [x] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342, 350 and 352, change-table row 137 and the amendments to L4-VER-006,
   L4-VER-067 and the step-5 row of 10.2. Check them against the code and tell the orchestrator where they differ; do
   not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the skill. Run `uv run --frozen python
   scripts/check_spec.py docs/SPEC.md`.

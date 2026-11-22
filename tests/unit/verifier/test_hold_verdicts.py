@@ -702,7 +702,8 @@ def test_scn_ver_331_the_hold_s_question_shows_the_failure_and_the_numbered_code
     assert f"    >       {LOCATOR}" in notes and "    E       AssertionError: Locator expected to be visible" in notes
     assert f"    {UI_PATH}:19: AssertionError" in notes
     assert f"Harness note: the last test step 5 wrote, {UI_PATH} (step 5 ended fails_at_head; not committed" in notes
-    assert "at most 4,000 characters):" in notes and f"      19      {LOCATOR}" in notes  # four spaces, `  19`, two
+    assert "at most 200 lines and 6,000 characters):" in notes
+    assert f"      19      {LOCATOR}" in notes  # four spaces, `  19`, two spaces and the line's own four
     assert notes.index("why the test step 5 wrote failed") < notes.index("the last test step 5 wrote")
     # the hold's text, the title, the id and the binding are those of the same call without evidence
     assert question.title == plain.get("Q-001").title
@@ -795,3 +796,42 @@ def test_a_test_without_an_excerpt_shows_the_code_alone_and_the_shorter_sentence
     assert notes.startswith("Harness note: the last test step 5 wrote,") and "why the test step 5 wrote" not in notes
     context = file.get("Q-001").context_text
     assert "The harness notes below show the test step 5 wrote." in context and "why it failed" not in context
+
+
+def _code_block(notes: str) -> list[str]:
+    """The lines of the code the notes show, after the code's own heading and the blank line below it."""
+    lines = notes.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Harness note: the last test")) + 2
+    return lines[start:]
+
+
+@pytest.mark.parametrize(
+    ("code", "kept", "cut"),
+    [("\n" * 4000, 200, 3800), ("x\n" * 2000, 200, 1800)],
+    ids=["4000-empty-lines", "2000-one-character-lines"],
+)
+def test_scn_ver_331_the_code_in_the_notes_is_bounded_by_lines_and_by_its_numbered_length(tmp_path, code, kept, cut):
+    from l4.specs.questions import unescape_text
+
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(code=code, excerpt=""))
+    shown = _code_block(unescape_text(file.get("Q-001").notes_text))
+    assert len(shown) == kept + 1  # the lines kept and the line that says how many were cut
+    assert shown[-1] == f"    … (cut: {cut} more lines)"
+    assert shown[0] == ("       1" if code.startswith("\n") else "       1  x")  # the numbers are the file's own
+    assert sum(len(line) + 1 for line in shown) <= 6000 + 4 * len(shown)  # the numbered copy, before the indent
+
+
+def test_scn_ver_331_the_numbered_copy_stops_at_6000_characters_and_says_how_many_lines_it_cut():
+    from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, numbered_code
+
+    assert (MAX_CODE_LINES, MAX_NUMBERED_CHARS) == (200, 6000)
+    wide = "\n".join("w" * 99 for _ in range(60)) + "\n"  # 60 lines of 99 characters: 6,360 numbered
+    shown = numbered_code(wide)
+    assert sum(len(line) + 1 for line in shown) <= MAX_NUMBERED_CHARS  # the cut line included
+    kept = len(shown) - 1
+    assert 0 < kept < 60 and shown[-1] == f"… (cut: {60 - kept} more lines)"
+    assert shown[0] == "   1  " + "w" * 99 and shown[kept - 1].startswith(f"{kept:>4}  ")  # whole lines, from the top
+    exact = numbered_code("y\n" * 200)
+    assert len(exact) == 200 and exact[-1] == " 200  y"  # 200 lines fit: nothing is cut, no cut line
+    assert numbered_code("y\n" * 201)[-1] == "… (cut: 1 more line)"
+    assert numbered_code("") == [] and numbered_code("a\r\nb\n") == ["   1  a", "   2  b"]

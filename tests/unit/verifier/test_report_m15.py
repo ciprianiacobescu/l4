@@ -164,11 +164,21 @@ def test_the_unaccepted_section_has_the_item_and_a_six_space_block_with_the_numb
     block = lines[head + 3 : head + 3 + 4 + 1 + 20 + 1]
     assert block[0] == "" and block[1] == "      Failure at the head:"
     assert "          E       AssertionError: Locator expected to be visible" in block
-    assert "      The test (at most 4,000 characters):" in block
+    assert "      The test (at most 200 lines and 6,000 characters):" in block
     assert "        19  # the heading check" in block and "         1  line 1" in block
     assert all(line.startswith("      ") for line in block[1:])
     section = lines[head : head + 3 + 4 + 1 + 20 + 3]
     assert not any(line.startswith("- C-de7f2d3f") for line in section)  # the accepted outcome has no item
+
+
+def test_the_unaccepted_section_bounds_the_numbered_code_and_says_how_many_lines_it_cut():  # SCN-VER-331
+    huge = GeneratedOutcome("C-a", "fails_at_head", "e2e/test_l4_c_a.py", 2, "r", "\n" * 4000, excerpt="E  boom")
+    lines = render_verification_md(result(generated=[huge])).splitlines()
+    head = lines.index("      The test (at most 200 lines and 6,000 characters):")
+    shown = lines[head + 1 :]
+    shown = shown[: shown.index("      … (cut: 3800 more lines)") + 1]
+    assert len(shown) == 201 and shown[0] == "         1"  # the numbered lines are kept from the top
+    assert sum(len(line) + 1 for line in shown) <= 6000 + 6 * len(shown)  # the indent of six is the block's
 
 
 def test_no_unaccepted_section_without_a_written_test():  # SCN-VER-335
