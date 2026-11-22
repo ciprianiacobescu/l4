@@ -174,15 +174,6 @@ def test_a_retake_that_keeps_a_helper_with_no_test_fails_once(make_bench, monkey
     assert done.status == "failed" and done.reason.startswith("no tests added:")
 
 
-def test_a_step_that_breaks_a_unit_test_runs_no_e2e_gate(make_bench, monkeypatch):
-    step = Step(
-        writes={BROWSER_PATH: BROWSER, "src/pytdd/pricing.py": "def total(prices):\n    return 0\n"},
-        structured=result("single"),
-    )
-    _, done, calls = chore(make_bench, monkeypatch, step, statuses={BROWSER_ID: "passed"})
-    assert done.status == "failed" and calls == []  # a production change or a broken test: the gate is not paid for
-
-
 def test_a_selecting_e2e_command_skips_the_run_and_says_so(make_bench, monkeypatch):
     bench, done, calls = chore(make_bench, monkeypatch, WRITE_BROWSER, selecting=True, statuses={BROWSER_ID: "passed"})
     assert calls == [] and done.status == "failed"

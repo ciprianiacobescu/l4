@@ -13,7 +13,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
 
 ## 1. Step 4a's scope (L4-VER-089; D1)
 
-- [ ] 1.1 Write the tests first in `tests/unit/verifier/test_audit_nonpython.py`:
+- [x] 1.1 Write the tests first in `tests/unit/verifier/test_audit_nonpython.py`:
   - SCN-VER-356: `web/src/layout.ts` and `e2e/test_layout.py` changed, a report with one id `web.src.layout.test.ts::a`:
     `not_run` with the note of the scenario, word for word;
   - SCN-VER-357: only `tests/test_pricing.py` (a test function) changed, a report with `tests.test_pricing::test_total`:
@@ -26,7 +26,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
   - SCN-VER-371: only `e2e/test_layout.py`, a report of Node ids: `not_run` naming `e2e/test_layout.py`;
   - the two existing tests keep passing unchanged (SCN-VER-58 keeps its note word for word).
   Run the file and see the new tests fail.
-- [ ] 1.2 Then replace `_no_python` with `_audit_scope_note(vc, base_sha, head, report)` in `src/l4/verifier/ladder.py`
+- [x] 1.2 Then replace `_no_python` with `_audit_scope_note(vc, base_sha, head, report)` in `src/l4/verifier/ladder.py`
   (D1), reading the test and support globs from `wb.cfg.tdd` (`l4.security.protected.glob_match`, as
   `audit._matches` does) and the tree's `.py` files for `file_of_test` (the
   `_py_files` of `l4.implementer.tdd`, or a `git ls-files` of `*.py` at head); `_audit_step` passes `run.report`. Run the
@@ -34,11 +34,11 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
 
 ## 2. Where the audit test goes (L4-VER-090; D2)
 
-- [ ] 2.1 Write the tests first in `tests/unit/verifier/test_audit.py` (or a new `test_audit_folder.py`), with the
+- [x] 2.1 Write the tests first in `tests/unit/verifier/test_audit.py` (or a new `test_audit_folder.py`), with the
   helpers that test `red_test_directory` today: SCN-VER-360 (two `e2e/` files, one `tests/` file, a report of
   `tests.test_a::...` only: `tests`, and no `audit-collect-check` gate run) and SCN-VER-361 (only `e2e/` files, a report
   without them: `None`, and `run_audit` runs `audit-collect-check`). See them fail.
-- [ ] 2.2 Then give `red_test_directory` and `run_audit` the `report` argument (D2) and pass `run.report` from
+- [x] 2.2 Then give `red_test_directory` and `run_audit` the `report` argument (D2) and pass `run.report` from
   `_audit_step`. Update the callers in the tests that call `run_audit` directly (a test that relied on the folder
   without a report now sees one collect-only run: give it a report that holds its test). Run `test_audit.py`,
   `test_audit_collect_retry.py`, `test_audit_support.py`, `test_audit_lint.py` and `test_audit_inconclusive.py`, one at
@@ -46,7 +46,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
 
 ## 3. The writer chain (L4-VER-091; D3-D5)
 
-- [ ] 3.1 Write the tests first in a new `tests/unit/verifier/test_writer_chain.py`:
+- [x] 3.1 Write the tests first in a new `tests/unit/verifier/test_writer_chain.py`:
   - unit tests of `WriterChain` with fake backends (no round): `ok` is returned at once; `error` with `length_stop`
     moves to the next selection and emits `availability.judge_error{role: "verifier_agent", kind: "length", step}`; a
     run of status `permission_blocked` gives `kind: "permission"`; `timeout` and `schema_invalid` are returned with no
@@ -60,7 +60,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
   - SCN-VER-368: a timeout and a twice-invalid reply of the first writer: the second is never asked;
   - SCN-VER-369: the discarded call's `budget.cost`.
   Run the file and see the tests fail.
-- [ ] 3.2 Then add `src/l4/verifier/writer_chain.py` (`WriterChain`, D3) and build it in `writer_for`
+- [x] 3.2 Then add `src/l4/verifier/writer_chain.py` (`WriterChain`, D3) and build it in `writer_for`
   (`src/l4/verifier/ladder.py`), with one `skip: set[str]` and one `failures: list[str]` per round in the hook, beside
   the judges' `skip`. After a limit use `services.factory.on_limit(current, run)` and `probe_vetoes`, as `next_judge`
   does. Leave the three raise sites of `src/l4/verifier/audit.py` and the reply handling of
@@ -70,7 +70,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
 
 ## 4. Checks
 
-- [ ] 4.1 `docs/SPEC.md` holds L4-VER-089..091, SCN-VER-356..371, change-table row 142 and the L4-VER-002 and
+- [x] 4.1 `docs/SPEC.md` holds L4-VER-089..091, SCN-VER-356..371, change-table row 142 and the L4-VER-002 and
   L4-VER-015 amendments. Check them against the code and tell the orchestrator where they differ; do not edit
   `docs/SPEC.md`, `CHANGELOG.md` or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

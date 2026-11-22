@@ -13,7 +13,7 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 ## 1. The e2e run of a test chore (L4-IMP-108; D1-D4, D6)
 
-- [ ] 1.1 Write the tests first in `tests/unit/implementer/test_test_chore_browser.py`:
+- [x] 1.1 Write the tests first in `tests/unit/implementer/test_test_chore_browser.py`:
   - SCN-IMP-586: the stub reports `test_layout::test_regions[chromium]` passed; done; the stub was called once with
     `name="e2e-test-chore"` and `must_contain == []`; `task.tests_added` has `files == ["e2e/test_layout.py"]`,
     `tests == []` and the id in `e2e_tests`;
@@ -37,7 +37,7 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
   - a selecting e2e command (`pytest e2e -m browser`): the stub is not called, `e2e.task_run_skipped` has
     `phase == "single"`.
   Run the file and see the tests fail.
-- [ ] 1.2 Then implement in `src/l4/implementer/tdd.py`:
+- [x] 1.2 Then implement in `src/l4/implementer/tdd.py`:
   - `_task_e2e_run(wb, task, tests, phase, name="e2e-task")` returns a `TaskE2e(reason, excerpt, passed, unseen,
     report)` dataclass: `passed` maps each id of a task test that `passed` (for a test with no failed or errored id)
     to its `TestCase`, `unseen` is the list it builds today; `_task_e2e_reason` returns `(run.reason, run.excerpt)` as
@@ -57,16 +57,16 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 ## 2. The text of `no tests added` (L4-IMP-109; D5)
 
-- [ ] 2.1 Write the tests first (SCN-IMP-593), one per form of the e2e clause, and one for a step that kept nothing
+- [x] 2.1 Write the tests first (SCN-IMP-593), one per form of the e2e clause, and one for a step that kept nothing
   (`this step kept no new test file and appended no test` first). Update the three equality checks of
   `test_single_phase.py` (`done.reason == "no tests added"`) to the new text, and see the tests fail.
-- [ ] 2.2 Then add `_no_tests_text(wb, kept, e2e)` (D5) and use it at the `reason = "no tests added"` of `run_single`.
+- [x] 2.2 Then add `_no_tests_text(wb, kept, e2e)` (D5) and use it at the `reason = "no tests added"` of `run_single`.
   The command is `" ".join(command.split())` cut at 120 characters, lists use `_list`. Leave the red step's
   `RedVerdict(False, "no tests added")` alone. Run the tests and `tests/unit/archive/test_hooks.py`.
 
 ## 3. The cap and the discrimination runs (L4-IMP-110; D6, D7)
 
-- [ ] 3.1 Write the tests first:
+- [x] 3.1 Write the tests first:
   - SCN-IMP-594: the task title cites a criterion; the step writes `tests/test_more.py` with a test that fails in the
     zero-value run, and the browser test; stub `l4.implementer.tdd.discriminate_extra` (or let it run, as the tests of
     `test_single_phase.py` for a criterion-citing chore do) and assert it was asked about the unit id only;
@@ -78,14 +78,14 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
   - SCN-IMP-596: `verifier.max_criteria_per_test: 2` and a browser id that names three of the unit's criterion ids:
     failed with `too many criteria on one test:` naming it.
   Run them and see them fail.
-- [ ] 3.2 Then implement (D6, D7): `over_cap_text` gets the merged mapping; `_discriminating_tests` gets `added_unit`;
+- [x] 3.2 Then implement (D6, D7): `over_cap_text` gets the merged mapping; `_discriminating_tests` gets `added_unit`;
   a browser-only chore of a cited criterion builds the `HeldCheck` of D7 with the constant `BROWSER_ONLY` and no run,
   and goes through the same `accepted_overrides` / `capture` path as the existing hold. Run the tests and
   `tests/unit/implementer/test_single_phase.py`.
 
 ## 4. The prompts and the question note (L4-IMP-111; D8)
 
-- [ ] 4.1 Write the tests first (in `tests/unit/implementer/test_prompt.py` with `render_prompt` and a `PromptContext`,
+- [x] 4.1 Write the tests first (in `tests/unit/implementer/test_prompt.py` with `render_prompt` and a `PromptContext`,
   and in `tests/unit/implementer/test_loop.py` or the new file for the note):
   - SCN-IMP-599: role `single`, `adds_tests=True`, `e2e_dir="e2e"`, `e2e_frozen=True` and `False`: `# Browser tests`
     and `counts as an added test` in both, `a file there is not a test file for this task` only when not frozen; with
@@ -96,7 +96,7 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
     tests:` and holds `a missing check can go into a new test file`; `kind="fix"` (the default) is the text of 0.4.59;
     a blocked test chore's question in `questions.md` holds the tests note and its `question.raised` has `chore: true`.
   Run and see them fail.
-- [ ] 4.2 Then add `PromptContext.retake_tests: bool = False`, the two blocks for role `single` with `adds_tests` in
+- [x] 4.2 Then add `PromptContext.retake_tests: bool = False`, the two blocks for role `single` with `adds_tests` in
   `src/l4/implementer/prompt.py`, pass `retake_tests` from `run_single` (`retake`) through `step_or_replay`,
   `agent_step` and `_prompt` in `src/l4/implementer/tdd.py`; give `chore_question_note` the `kind` keyword and
   `_with_note` a `chore_kind` keyword in `src/l4/implementer/loop.py`, and pass `chore_kind(wb.ref.path, task.title) or
@@ -106,7 +106,7 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..600, change-table row 138 and the L4-VER-006 amendment.
+- [x] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..600, change-table row 138 and the L4-VER-006 amendment.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
