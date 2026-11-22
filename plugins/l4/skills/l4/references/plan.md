@@ -124,9 +124,6 @@ A person may need an `l4 yolo accept` when the judge keeps finding more after re
 - Never run it unless `yolo.review.accept_by_agents` is true in `.l4/config.yaml` on the base branch **and** the
   subject was judged not READY on two versions of its text. Then give a `--reason` that tells the implementer what to do.
 - Never for a BLOCKED subject, a blocking finding, or a `material_cut` of the unit's own folder: those are fixed.
-  When you have read the spec and a judge's blocking finding is false, do not edit the spec to answer it: stop and
-  give the person `l4 yolo overrule <id> <F-id> --reason "<why it is false>"`. Overruling is a person's decision,
-  for one blocking finding of a judge; it ends when the subject's material changes. Never run it yourself.
 - Otherwise stop and ask the person. Print the exact command for them:
   `l4 yolo accept <id> <subject> --reason "<what the implementer should do>"`.
 
