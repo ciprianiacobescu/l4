@@ -151,6 +151,9 @@ on material no judge saw.
 `marker=who[1]` and `harness_version=l4.__version__`. On `plan.resumed` with an extension `agent_key` stays as it is.
 The harness's own `plan.resumed{by: harness}` (`cycle.py`) is unchanged.
 
+The person or agent determination is the existing heuristic of `accept` and `waive` (a tty and none of the known agent
+markers), so the actor kind records who acted; it does not authenticate them.
+
 The fold: `PlanState.activated_actor: str | None` and `activated_marker: str | None`, set by `plan.activated` from
 `data.get("actor")` and `data.get("marker")` (None when absent), beside `activated_by`.
 
