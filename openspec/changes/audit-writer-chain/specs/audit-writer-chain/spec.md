@@ -7,17 +7,16 @@ is asked of the next profile of the chain in the same run.
 ## ADDED Requirements
 
 ### Requirement: L4-VER-089 Audit sampling audits Python code, not the Python tests of another language's unit
-Step 4a SHALL decide from the unit's changed files outside the exempt paths (`changed_unit_files`). Its *source files*
-are those that `tdd.test_globs` does not match (kind `code` or `root`), whose suffix is a source suffix
-(`CODE_SUFFIXES`) and that match no `tdd.test_support_globs` glob; its *Python test files* are the changed `.py` files
-that `tdd.test_globs` or `tdd.test_support_globs` matches. The step SHALL run when the unit changed no file outside the
-exempt paths, or when a source file is a `.py` file. When the unit's source files are all of another language, the step
-SHALL be `not_run` with the note `audit sampling writes pytest tests only; changed code is not python`, followed, when
-it has Python test files, by ` (the changed Python files are tests or test support: <files>)`. When the unit changed no
-source file and has Python test files, the step SHALL run when step 3's unit-gate report holds a test of one of those
-files (`evidence.testsran.file_of_test`), or when step 3 left no report; else it SHALL be `not_run` with that note and
-its parenthesis. A unit with no `.py` file at all keeps the note of 0.4.59 word for word. A `not_run` step SHALL ask no
-writer, write no file and raise no finding.
+Step 4a SHALL decide from the unit's changed files outside the exempt paths (`changed_unit_files`). Its
+*Python code* is a changed `.py` file that matches neither `tdd.test_globs` nor `tdd.test_support_globs` (the files the
+writer is shown); its *Python test files* are the other changed `.py` files. A unit with no changed `.py` file SHALL be
+`not_run` with the note `audit sampling writes pytest tests only; changed code is not python`, word for word as in
+0.4.59. The step SHALL run when the unit changed no file outside the exempt paths, or changed Python code. A unit whose
+changed `.py` files are all Python test files SHALL run the step when step 3's unit-gate report holds a test of a Python
+file of the tree (`evidence.testsran.file_of_test` over the tree's `.py` files: the unit gate runs Python tests, so a
+pytest audit file can be collected), or when step 3 left no report (the rule of 0.4.59); else the step SHALL be
+`not_run` with that note followed by ` (the changed Python files are tests or test support: <files>)`. A `not_run` step
+SHALL ask no writer, write no file and raise no finding.
 
 #### Scenario: SCN-VER-356 (−) A TypeScript unit with a changed Python browser test does not audit
 - **Given** a unit that changes `web/src/layout.ts` and `e2e/test_layout.py`, and a unit-gate report of Node test ids
@@ -33,7 +32,7 @@ writer, write no file and raise no finding.
 
 #### Scenario: SCN-VER-358 (+) Python code next to another language audits, and a support file is not code
 - **Given** one unit that changes `src/a.py` and `web/app.ts`, and another that changes `web/app.ts` and
-  `tests/conftest.py`
+  `tests/conftest.py`, both with a unit-gate report of Node test ids
 - **When** the verifier reaches step 4a for each
 - **Then** the first audits, and the second is `not_run` with the parenthesis naming `tests/conftest.py`
 
@@ -41,6 +40,17 @@ writer, write no file and raise no finding.
 - **Given** a unit that changes only `tests/test_pricing.py`, and a step 3 that left no unit-gate report
 - **When** the verifier reaches step 4a
 - **Then** the step is not `not_run` for its language
+
+#### Scenario: SCN-VER-370 (+) A Python unit that changes only a test-support file still audits
+- **Given** a unit that changes only `tests/conftest.py`, and a step 3 report that holds `tests.test_pricing::test_total`
+  of an unchanged `tests/test_pricing.py`
+- **When** the verifier reaches step 4a
+- **Then** the step is not `not_run` for its language, as in 0.4.59
+
+#### Scenario: SCN-VER-371 (−) A unit that changes only a Python browser test under a Node unit gate does not audit
+- **Given** a unit that changes only `e2e/test_layout.py`, and a step 3 report of Node test ids only
+- **When** the verifier reaches step 4a
+- **Then** the step is `not_run` with the note that names `e2e/test_layout.py`, and no writer is asked
 
 ### Requirement: L4-VER-090 The audit test goes next to the unit's tests only when the report shows them
 The folder of the unit's own Python tests (`red_test_directory`) SHALL count a changed `.py` test file only when step

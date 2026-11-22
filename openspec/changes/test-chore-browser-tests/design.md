@@ -134,19 +134,28 @@ tree the unit gate tested, so `keep_tested(mark, gate.report, sha)` stays right.
 
 The reason starts with `no tests added` as before. No code compares the whole text (the halt line of `max_task_attempts`
 embeds it); the readers that do are tests (`tests/unit/implementer/test_single_phase.py`), which the implementer
-updates. The red step's own `no tests added`
-(`tdd.py:560`) is not changed. The reason is the next attempt's previous failure, so the clauses are what the next prompt
+updates. The red step's own `no tests added` (`tdd.py:560`) is not changed. The reason is the next attempt's previous failure, so the clauses are what the next prompt
 shows; no excerpt is added, since no test failed.
 
-### D6. Two lists, one record
+### D6. Two lists, one record, and the retake rule
 
 `added_unit` (the unit-gate ids, as today) and `added_e2e` (the passed browser ids, sorted) are kept apart, and `added =
-added_unit + added_e2e` is what the `no tests added`, `_already_done` (a retake) and `decision_calling_code_wrong`
-checks read. The cap (L4-VER-052) reads each id from its own report:
-`over_cap_text({**{i: gate.report.tests[i] for i in added_unit}, **chore_e2e.passed}, ...)`. `task.tests_added` keeps
-`tests: added` and gains `e2e_tests: added_e2e` when not empty, so a reader can tell which ids are of the e2e report;
-`files` is `review.kept` as before, so `check_test_paths` (`verifier/integrity.py:607`) allows the browser test file of
-the commit as it allows any kept file.
+added_unit + added_e2e` is what the `no tests added` and `decision_calling_code_wrong` checks read. The cap
+(L4-VER-052) reads each id from its own report:
+`over_cap_text({**{i: gate.report.tests[i] for i in added_unit}, **chore_e2e.passed}, ...)`.
+
+`task.tests_added` keeps `tests` for the unit-gate ids only (as at 0.4.59) and gains `e2e_tests: added_e2e` when it is
+not empty, so each key holds ids of one report. No code reads `task.tests_added.tests` today (the readers,
+`verifier/integrity.py:607-614` and `ladder.py:587`, read `files`), but a later reader that resolves `tests` against
+the unit gate's report never meets an id it cannot find. `files` is `review.kept` as before, so `check_test_paths`
+allows the browser test file of the commit as it allows any kept file.
+
+The retake rule (`_already_done`, `:3649-3652`) discards the step's changes and ticks the task with "nothing left to
+change". With D8 the retake prompt sends the agent to a new test file; a browser test there that no gate counted (unseen,
+or the run skipped) would then be thrown away with the task ticked. So `_already_done` applies only when `review.kept` is
+empty (the step kept no test file at all). A retake that kept a test file of which no gate counted a test fails with the
+reason of D5, as a first take does; its next attempt may still keep nothing and be done. A retake that kept a file under
+the test globs that holds no test (a helper) now fails once instead of being done at once.
 
 ### D7. The discrimination runs (L4-IMP-110)
 
@@ -227,3 +236,6 @@ be low for such a step; a step that runs over is stopped at the soft deadline as
   attempt then fails with `no tests added` naming it, which is the right direction (no unrun test is counted).
 - A browser-only test chore of a cited criterion still costs a person (or an allowed delegate) one answer.
 - The phase-`single` deadline cap does not grow for the e2e run (D11).
+- Where the e2e run is skipped (the e2e command selects with `-m` or `-k`, or the e2e directory is the unit gate's too,
+  L4-IMP-101 D10), a browser test that the unit gate does not run cannot count, so a test chore still cannot meet a
+  request for a browser test there; the reason says the run was skipped and why.

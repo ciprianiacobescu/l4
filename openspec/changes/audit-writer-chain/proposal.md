@@ -39,11 +39,12 @@ Verified at 0.4.59 (62188257):
 
 ## What Changes
 
-- Step 4a audits a unit only when it changed Python code: a changed `.py` file that is not a test file
-  (`tdd.test_globs`), not a test-support file (`tdd.test_support_globs`) and not an exempt path. A unit that changed no
-  source file outside the tests still audits when a Python test file it changed is in step 3's unit-gate report (a
-  Python project's unit that only adds tests); without a report it keeps the rule of 0.4.59. Any other unit's step 4a
-  is `not_run`, and its note names the Python files that are only tests or test support.
+- Step 4a no longer runs because of a changed Python test file alone. A unit that changed Python code (a `.py` file
+  that is neither a test file of `tdd.test_globs` nor a test-support file of `tdd.test_support_globs`) audits as before.
+  A unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds Python
+  tests (a Python project's unit that changes only tests or a `conftest.py`), and when there is no report (the rule of
+  0.4.59); otherwise its step 4a is `not_run`, and the note names those files. A unit with no `.py` file keeps its note
+  word for word.
 - The audit test goes into the folder of the unit's own Python tests only when step 3's unit-gate report holds a test
   of a changed Python test file there; otherwise the audit confirms that the test command collects the file
   (`confirm_collected`), as it does when no folder is found.
@@ -82,7 +83,7 @@ park today and keep their handling; the judges of step 9; audit tests in another
   the chain's summary.
 - `src/l4/verifier/generate.py`: no change in behaviour beyond the chain it is given (its `writer_failed` text is the
   chain's summary when no profile is left).
-- `docs/SPEC.md` (L4-VER-089..091, SCN-VER-356..369, change-table row 142, the L4-VER-002 and L4-VER-015 amendments),
+- `docs/SPEC.md` (L4-VER-089..091, SCN-VER-356..371, change-table row 142, the L4-VER-002 and L4-VER-015 amendments),
   `CHANGELOG.md`, `docs/runbook.md` (7.4).
 - Ledger: `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` (the existing event type, a
   new role value and two new keys), `availability.fallback` from `Factory.on_limit`, `budget.cost` for a discarded call.

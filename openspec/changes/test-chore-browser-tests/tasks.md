@@ -1,5 +1,5 @@
 Read `design.md` first; it names the code each decision touches (D1-D8). Requirements: L4-IMP-108..111 (`docs/SPEC.md`),
-scenarios SCN-IMP-586..599. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory,
+scenarios SCN-IMP-586..600. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory,
 never two runs at once, and never a wait loop on `pgrep`.
 
 Test setup for every task below: `run_tests_chore(make_bench, step)` of `tests/unit/implementer/test_single_phase.py`
@@ -15,8 +15,8 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 - [ ] 1.1 Write the tests first in `tests/unit/implementer/test_test_chore_browser.py`:
   - SCN-IMP-586: the stub reports `test_layout::test_regions[chromium]` passed; done; the stub was called once with
-    `name="e2e-test-chore"` and `must_contain == []`; `task.tests_added` has `files == ["e2e/test_layout.py"]` and the id
-    in `tests` and in `e2e_tests`;
+    `name="e2e-test-chore"` and `must_contain == []`; `task.tests_added` has `files == ["e2e/test_layout.py"]`,
+    `tests == []` and the id in `e2e_tests`;
   - SCN-IMP-587: the stub reports it failed with the message `assert 88 < 40`: `done.status == "failed"`, the reason
     starts with `the task's browser tests do not pass:`, `done.excerpt` holds `assert 88 < 40`, HEAD did not move;
   - SCN-IMP-588: the stub reports no id of `test_regions`, then (a second test) only `skipped`: failed, the reason
@@ -31,6 +31,8 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
     holds `e2e/test_layout.py` only (with the tasks file), and `src/pytdd/pricing.py` is its base content;
   - SCN-IMP-592: a retake whose step writes nothing new: done as already done (`task.done{tdd: "already-done"}`), the
     stub never called (no browser test kept);
+  - SCN-IMP-600: a retake whose step writes the browser test and a stub report that does not show it: failed, the
+    reason starts with `no tests added:` and names `e2e/test_layout.py::test_regions`, no `task.done`;
   - a step that writes a unit test that breaks an existing one and the browser test: the stub is not called;
   - a selecting e2e command (`pytest e2e -m browser`): the stub is not called, `e2e.task_run_skipped` has
     `phase == "single"`.
@@ -47,8 +49,9 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
     `review.kept`, only when `e2e_configured(wb.cfg)`; after `green_failures`, when no reason and `gate.report` is not
     None, `_runnable_browser_tests(wb, task, "single", browser, gate.report.tests)` and, when that leaves tests,
     `_chore_browser_tests`, `restore_replay(wb, "e2e run")`; `added_unit`, `added_e2e`, `added = added_unit +
-    added_e2e` (D6) for the `no tests added`, `_already_done` and `decision_calling_code_wrong` checks;
-    `task.tests_added` gets `e2e_tests=added_e2e` when not empty.
+    added_e2e` (D6) for the `no tests added` and `decision_calling_code_wrong` checks; `_already_done` of a retake only
+    when `review.kept` is empty (D6); `task.tests_added` keeps `tests=added_unit` and gets `e2e_tests=added_e2e` when
+    not empty.
   Run the new tests, then `tests/unit/implementer/test_single_phase.py`, `tests/unit/implementer/test_e2e_task_steps.py`,
   `tests/unit/implementer/test_fix_chore_e2e.py` and `tests/unit/implementer/test_already_satisfied.py`, one at a time.
 
@@ -103,7 +106,7 @@ e2e run is stubbed). A retake is a fix marker with the finding under `test_chore
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..599, change-table row 138 and the L4-VER-006 amendment.
+- [ ] 5.1 `docs/SPEC.md` holds L4-IMP-108..111, SCN-IMP-586..600, change-table row 138 and the L4-VER-006 amendment.
   Check them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`
   or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [ ] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

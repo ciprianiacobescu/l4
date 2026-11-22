@@ -40,7 +40,8 @@ Verified at 0.4.59 (62188257):
   and the e2e gate after its test gate, when `gates.e2e` is configured. A browser test of the step counts as an added
   test when the e2e report shows one of its ids passed. A browser test of the step that failed or errored fails the
   attempt with its failure text, as in green. One the report does not show is not counted and is a ledger note. What the
-  runs write is not committed, and the step's own test files stay.
+  runs write is not committed, and the step's own test files stay. A retake is ticked as already done only when its step
+  kept no test file, so a browser test that no gate counted is never thrown away with the task ticked.
 - A test chore that adds no test says, after `no tests added:`, what each gate found: the test gate, and the e2e gate
   (not configured, no browser test written, the run skipped and why, or the browser tests the report did not show
   passing).
@@ -74,12 +75,12 @@ fix chore (L4-IMP-090), to the repair chore or to green (L4-IMP-101).
 
 - `src/l4/implementer/tdd.py`: `run_single`, a new `_chore_browser_tests`, `_task_e2e_run` returns the passed ids too
   (`_task_e2e_reason` keeps its return value), a new `_no_tests_text`, `_discriminating_tests` callers.
-- `src/l4/implementer/prompt.py`: two new `PromptContext` fields and two blocks for the `single_tests` role (no
-  template file changes, so no template version moves).
+- `src/l4/implementer/prompt.py`: one new `PromptContext` field (`retake_tests`) and two blocks for the `single_tests`
+  role (no template file changes, so no template version moves).
 - `src/l4/implementer/loop.py`: `chore_question_note` takes the chore kind; `_with_note` and `_raise_blocked` pass it.
-- `docs/SPEC.md` (L4-IMP-108..111, SCN-IMP-586..599, change-table row 138, the L4-VER-006 amendment), `CHANGELOG.md`,
+- `docs/SPEC.md` (L4-IMP-108..111, SCN-IMP-586..600, change-table row 138, the L4-VER-006 amendment), `CHANGELOG.md`,
   `docs/runbook.md`.
 - Ledger: `gate.finished` for `build` and `e2e-test-chore`; the notes `e2e.task_tests_unseen` and
-  `e2e.task_run_skipped` with `phase: "single"`; `task.tests_added` gains `e2e_tests` (an older reader ignores it). No
+  `e2e.task_run_skipped` with `phase: "single"`; `task.tests_added` gains `e2e_tests` and keeps `tests` for unit-gate ids (an older reader ignores the new key). No
   new event type, no configuration key.
 - Cost: per test-chore attempt that kept a browser test and passed its test gate, one build and one e2e suite run.

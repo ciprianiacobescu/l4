@@ -20,19 +20,22 @@ id that failed or errored (`the task's browser tests do not pass: <ids>`, with t
 browser test of the step SHALL count as an added test when the e2e report shows one of its ids `passed` and none failed
 or errored; one the report does not show, or shows only skipped, SHALL NOT count and SHALL be recorded as
 `e2e.task_tests_unseen{task, phase: "single", tests, ambiguous}`. The tests the chore adds SHALL be the unit gate's new
-passing tests and these browser tests together, and the retake rule (`_already_done`) and the "at least one new test
-must pass" rule of L4-VER-006 SHALL read them together. What the build and the e2e run write SHALL NOT be committed, a
-link a gate planted is removed and recorded (L4-SEC-020), and the step's own new and appended test files SHALL stay (the
-run's clean-up makes no test-path freeze). `task.tests_added` SHALL keep `files` and `tests` and SHALL hold the ids of
-the e2e report in `e2e_tests` when there are any. A test chore with no browser test, and a project without `gates.e2e`,
-SHALL run as before.
+passing tests and these browser tests together, and the "at least one new test must pass" rule of L4-VER-006 SHALL read
+them together. The retake rule (`_already_done`: a chore whose feedback items are all retakes is ticked with nothing
+committed) SHALL apply only when the step kept no test file; a retake that kept a test file of which no gate counted a
+test SHALL fail with the reason of L4-IMP-109, so a test file no gate counted is never discarded with the task ticked.
+What the build and the e2e run write SHALL NOT be committed, a link a gate planted is removed and recorded (L4-SEC-020),
+and the step's own new and appended test files SHALL stay (the run's clean-up makes no test-path freeze).
+`task.tests_added` SHALL keep `files`, SHALL keep `tests` for the ids of the unit gate's report, and SHALL hold the ids
+of the e2e report in `e2e_tests` when there are any. A test chore with no browser test, and a project without
+`gates.e2e`, SHALL run as before.
 
 #### Scenario: SCN-IMP-586 (+) A new browser test of a test chore counts
 - **Given** a test chore whose step adds `e2e/test_layout.py` with `test_regions`, a unit gate that does not collect
   `e2e/`, and an e2e gate whose report shows `test_layout::test_regions[chromium]` passed
 - **When** the chore's attempt runs
 - **Then** the e2e gate ran once as `e2e-test-chore` after the test gate, the task is done, its commit holds
-  `e2e/test_layout.py`, and `task.tests_added` lists that file, the id under `tests` and under `e2e_tests`
+  `e2e/test_layout.py`, and `task.tests_added` lists that file, the id under `e2e_tests` and an empty `tests`
 
 #### Scenario: SCN-IMP-587 (−) A failing browser test of a test chore fails the attempt with its text
 - **Given** the chore of SCN-IMP-586, and an e2e report that shows `test_layout::test_regions[chromium]` failed with
@@ -66,11 +69,17 @@ SHALL run as before.
 - **Then** the commit holds `e2e/test_layout.py` and neither the build output, nor `test-results/trace.zip`, nor the
   rewritten production file
 
-#### Scenario: SCN-IMP-592 (+) A retake that adds no test in either gate is already done
-- **Given** a test chore that retakes a `tests` feedback item, whose step adds no new passing unit test and no browser
-  test that the e2e report shows passed
+#### Scenario: SCN-IMP-592 (+) A retake that keeps no test file is already done
+- **Given** a test chore that retakes a `tests` feedback item, whose step changes no file
 - **When** the attempt runs
-- **Then** the task is ticked as already done (`L4-TDD: already-done`), as a retake with no new unit test is today
+- **Then** the task is ticked as already done (`L4-TDD: already-done`), as today
+
+#### Scenario: SCN-IMP-600 (−) A retake whose new browser test no gate counted fails, and is not ticked
+- **Given** a test chore that retakes a `tests` feedback item, whose step adds `e2e/test_layout.py` with
+  `test_regions`, and an e2e report that does not show that test
+- **When** the attempt runs
+- **Then** it fails with a reason that starts `no tests added:` and names `e2e/test_layout.py::test_regions`, the task
+  is not ticked and no `task.done{tdd: "already-done"}` is recorded
 
 ### Requirement: L4-IMP-109 A test chore that adds no test says what each gate found
 A test chore's attempt that adds no test SHALL fail with a reason that starts `no tests added: ` and names each gate and

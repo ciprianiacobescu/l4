@@ -19,7 +19,6 @@ Read at 0.4.59 (62188257). Each fact below was read in the code for this design.
   then runs `confirm_collected` (`:248-269`), a `--collect-only` run of the audit file.
 - `evidence.testsran.file_of_test(test_id, candidates, tree)` (`src/l4/evidence/testsran.py:46`) maps a JUnit id to a
   file among `candidates`, the exact path first, else the one tree file that ends with the module path.
-- `CODE_SUFFIXES` (`src/l4/evidence/diffcov.py:25`) is what counts as source code by extension.
 
 **The writer**
 
@@ -61,28 +60,30 @@ another language; the judges.
 ### D1. What counts as Python code to audit (L4-VER-089)
 
 `_audit_scope_note(vc, base_sha, head, report) -> str` replaces `_no_python`; an empty string means "audit". With
-`files = changed_unit_files(...)` as today:
+`files = changed_unit_files(...)` as today, its `.py` paths are split in two:
 
-- `code` = the paths of kind `code` or `root` whose suffix is in `CODE_SUFFIXES` and that match no
-  `tdd.test_support_globs` glob: the unit's source files outside tests and test support;
-- `python_tests` = the `.py` paths of kind `test`, and the `.py` paths of `tdd.test_support_globs`.
+- `python_code` = the `.py` paths that match neither `tdd.test_globs` nor `tdd.test_support_globs` (the predicate of
+  `head_sources`, so these are the files the writer is shown);
+- `python_tests` = the other `.py` paths (tests and test support).
 
 Then, in order:
 
 1. no file at all: audit (today: a unit that changed nothing outside the exempt paths is not judged non-Python);
-2. a `.py` path in `code`: audit (Python code changed; the same files `head_sources` shows the writer);
-3. `code` not empty (source of another language only): `not_run` with `audit sampling writes pytest tests only; changed
-   code is not python`, followed by ` (the changed Python files are tests or test support: <python_tests, _list>)`
-   when `python_tests` is not empty;
-4. `code` empty and `python_tests` not empty (a unit that changed only tests): audit when `report` is None (the rule of
-   0.4.59: nothing that audited before stops for want of a report), or when an id of `report.tests` maps to a file of
-   `python_tests` (`file_of_test(id, python_tests, <the tree's .py files>)`): the unit gate runs Python tests where the
-   unit wrote them; else `not_run` with the note of 3 and its parenthesis;
-5. otherwise (no `.py` file at all): `not_run` with the note of today.
+2. no `.py` path: `not_run` with `audit sampling writes pytest tests only; changed code is not python` (today's rule
+   and note, word for word);
+3. `python_code` not empty: audit (Python code changed);
+4. only `python_tests`: audit when `report` is None (the rule of 0.4.59: nothing that audited before stops for want of
+   a report), or when an id of `report.tests` maps to a Python file of the tree (`file_of_test(id, <the tree's .py
+   files>)`: the unit gate runs Python tests, so a pytest audit file can be collected); else `not_run` with the note of
+   2 followed by ` (the changed Python files are tests or test support: <python_tests, _list>)`.
 
-So SCN-VER-58 (`engine.ts`, `engine.test.ts`) keeps its note word for word, a Python project's unit that changes only
-tests audits as before, and the consumer's TypeScript unit with a changed Python browser test is `not_run`. The note
-starts with the text of 0.4.59, so a reader of the step's note that looks for it keeps finding it.
+So SCN-VER-58 (`engine.ts`, `engine.test.ts`) keeps its note word for word; a Python project's unit that changes only
+tests or test support audits as before, since its unit gate's report holds Python tests; and the consumer's TypeScript
+unit with a changed Python browser test is `not_run`, since its Node unit gate's report holds none. The rule of 4 asks
+whether the unit gate runs any Python test, not whether it runs the unit's own changed ones: a unit that changed only a
+`conftest.py` has no test of its own in the report and must still audit as in 0.4.59. The note starts with the text of
+0.4.59, so a reader that looks for it keeps finding it. `CODE_SUFFIXES` and the files of another language are not
+needed: a unit with Python code audits whatever else it changed, as before.
 
 Considered: `is_python_gate(gates.test.command)` (`src/l4/gates/coverage.py:37`), which COV-001 uses. Rejected as the
 deciding rule: `make test` and `npm run test` can run pytest, and COV-001 falls back to a project interpreter for that
@@ -144,14 +145,25 @@ it `writer_failed`, with the summary as its reason. This changes step 5 for the 
 the next profile could have closed is no longer raised), and the alternative, a chain for 4a only, would need a second
 selection path for the same role.
 
-### D5. Independence and safety
+### D5. How each requirement fails safe
 
-Every profile the chain selects passes the independence rule of the round (`select_judge`'s constraint, the
-implementer profiles of the unit) and `probe_vetoes`, as the first one does. A profile that failed is skipped for the
-rest of the round and never asked again in it. The chain never accepts an answer that the callers would not accept from
-the first profile: what an audit or a UI test needs to count (it passes at head, fails against the zero values or at the
-base, the lint) is judged as before. When no profile is left, 4a parks as today, so a round never goes on without its
-audit because of the writer. No person-only action is touched.
+- L4-VER-089 stops step 4a only for a unit whose changed Python files are all tests or test support and whose unit
+  gate's report holds no Python test. There a pytest audit file is never collected by the unit gate: each audit test
+  ends rejected (`the test command ... does not collect the audit test file`, a minor finding,
+  `audit._judge_without_result`, `audit.py:402-421`), so it can neither become evidence nor fail at head and hold its
+  criterion; the only other outcome, a hold for "no result" when the audit run leaves no report, says nothing about the
+  code. No check that could hold a criterion on its merits is lost (inferred from those code paths; no run measured
+  it). Every unit that audits at 0.4.59 and whose unit gate runs Python tests, or that has no report, still audits.
+- L4-VER-090 removes no check: it adds a collect-only run where a folder was trusted without proof. An audit file that
+  would have gone to a folder the command does not run (and been rejected) now goes where it is collected and judged,
+  which can only add evidence or a hold.
+- L4-VER-091: every profile the chain selects passes the independence rule of the round (`select_judge`'s constraint,
+  the implementer profiles of the unit) and `probe_vetoes`, as the first one does. A profile that failed is skipped for
+  the rest of the round and never asked again in it. The chain never accepts an answer that the callers would not accept
+  from the first profile: what an audit or a UI test needs to count (it passes at head, fails against the zero values or
+  at the base, the lint) is judged as before. When no profile is left, 4a parks as today, so a round never goes on
+  without its audit because of the writer.
+- No requirement touches a person-only action or what an answer can unfreeze.
 
 ### D6. No warning for a tool-less judge profile
 
@@ -178,9 +190,9 @@ read by people. A round reused by a resumed run keeps its stored step 4a record;
 
 ## Risks / Trade-offs
 
-- A Python-only unit that changes only a test-support file (a `conftest.py`) no longer audits when step 3's report holds
-  no test of a changed Python file (D1 4). Such a unit adds no test of its own, so it rarely has a covered new
-  criterion to draw (inferred, not measured); with no report it audits as before.
+- A unit whose only changed Python files are tests, in a repository whose unit gate also runs Python tests (a Node
+  project with a Python suite in its unit gate), still audits as in 0.4.59, even when its own code is not Python. D1
+  keeps that on purpose: the report shows that a pytest audit file can run there, so the audit can still decide.
 - A unit of another language that also changed Python code (a script) still audits, as before; its audit file is now
-  confirmed collected first (D2).
+  confirmed collected first when the report does not show its Python tests (D2).
 - A chain of several failing profiles costs one call each per round before the unit parks.

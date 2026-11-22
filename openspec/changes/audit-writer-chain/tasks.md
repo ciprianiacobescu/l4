@@ -1,5 +1,5 @@
 Read `design.md` first; it names the code each decision touches (D1-D4). Requirements: L4-VER-089..091 (`docs/SPEC.md`),
-scenarios SCN-VER-356..369. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory,
+scenarios SCN-VER-356..371. Run single test files only (`uv run --frozen pytest <file> -q`), never a whole directory,
 never two runs at once, and never a wait loop on `pgrep`.
 
 Test setup: the scope tests extend `tests/unit/verifier/test_audit_nonpython.py` (its `_repo` and `_step` build a
@@ -18,14 +18,17 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
     `not_run` with the note of the scenario, word for word;
   - SCN-VER-357: only `tests/test_pricing.py` (a test function) changed, a report with `tests.test_pricing::test_total`:
     not `not_run` (the existing `no covered new criterion to audit` record is enough);
-  - SCN-VER-358: `src/a.py` + `web/app.ts` audits; `web/app.ts` + `tests/conftest.py` is `not_run` naming
-    `tests/conftest.py`;
+  - SCN-VER-358: `src/a.py` + `web/app.ts` audits; `web/app.ts` + `tests/conftest.py` with a report of Node ids is
+    `not_run` naming `tests/conftest.py`;
   - SCN-VER-359: only `tests/test_pricing.py`, `run.report = None`: not `not_run`;
+  - SCN-VER-370: only `tests/conftest.py`, a report that holds `tests.test_pricing::test_total` of an unchanged
+    `tests/test_pricing.py` that exists in the tree: not `not_run`;
+  - SCN-VER-371: only `e2e/test_layout.py`, a report of Node ids: `not_run` naming `e2e/test_layout.py`;
   - the two existing tests keep passing unchanged (SCN-VER-58 keeps its note word for word).
   Run the file and see the new tests fail.
 - [ ] 1.2 Then replace `_no_python` with `_audit_scope_note(vc, base_sha, head, report)` in `src/l4/verifier/ladder.py`
-  (D1), reading `CODE_SUFFIXES` from `l4.evidence.diffcov`, the support globs from `wb.cfg.tdd.test_support_globs`
-  (`l4.security.protected.glob_match`, as `audit._matches` does) and the tree's `.py` files for `file_of_test` (the
+  (D1), reading the test and support globs from `wb.cfg.tdd` (`l4.security.protected.glob_match`, as
+  `audit._matches` does) and the tree's `.py` files for `file_of_test` (the
   `_py_files` of `l4.implementer.tdd`, or a `git ls-files` of `*.py` at head); `_audit_step` passes `run.report`. Run the
   file and `tests/unit/verifier/test_audit.py`.
 
@@ -67,7 +70,7 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
 
 ## 4. Checks
 
-- [ ] 4.1 `docs/SPEC.md` holds L4-VER-089..091, SCN-VER-356..369, change-table row 142 and the L4-VER-002 and
+- [ ] 4.1 `docs/SPEC.md` holds L4-VER-089..091, SCN-VER-356..371, change-table row 142 and the L4-VER-002 and
   L4-VER-015 amendments. Check them against the code and tell the orchestrator where they differ; do not edit
   `docs/SPEC.md`, `CHANGELOG.md` or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [ ] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
