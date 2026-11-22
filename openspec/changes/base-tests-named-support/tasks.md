@@ -87,3 +87,6 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   the reason (SCN-VER-326); `_allowance` is unchanged.
 - [x] 5.4 Tests that kill the surviving mutants of the named rule: exact path, a link or a deletion, another reason
   (SCN-VER-328, `test_base_tests_named_support.py`). Nothing in the code changed.
+- [x] 5.5 Docs: the skill's test-support bullet states the 3-file and 40-line bounds within the word cap; L4-VER-080 says
+  `<k>` counts every reverted file; design.md notes that a `paths` entry keeps the 0.4.59 `_allowance` behaviour and that
+  the no-report blocker has no lead.

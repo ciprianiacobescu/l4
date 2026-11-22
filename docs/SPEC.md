@@ -6700,7 +6700,7 @@ commit did, sorted by path, at most 20. When it is not empty, the detail of `a p
 code` and of `a pre-existing test no longer runs on the unit's code` SHALL start with `with the unit's test and support
 files at their base version (support files reverted: <path> (task <t>[, <t2>]), ... (+<n> more); <k> files in all),
 these base tests fail: ` (`no longer run: ` for the second; a file a person's commit changed and no task's did is
-`(a person)`, one only a harness commit with no task changed is `(a harness commit)`), at most 5 files, and go on with the list of today. The lead comes first because a fix chore's detail is cut at 600 characters.
+`(a person)`, one only a harness commit with no task changed is `(a harness commit)`), at most 5 files, where `<k>` counts every file the run reverted, support or not, and go on with the list of today. The lead comes first because a fix chore's detail is cut at 600 characters.
 The detail SHALL NOT say that a test passes at head: step 1 never runs it there. Each blocked failing base test SHALL
 have a record in the round's `failures` (L4-VER-069) with `gate: base-tests`, its kind, its first line and the excerpt
 of L4-VER-078, built and redacted the same way. Step 3 never runs after such a blocker, so no record is replaced. The

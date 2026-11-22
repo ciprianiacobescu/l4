@@ -59,7 +59,7 @@ nothing SHALL stay by this rule. A file that fails any condition SHALL be revert
 When step 1's run reverted a support file, the detail of `a pre-existing test fails on the unit's code` and of `a
 pre-existing test no longer runs on the unit's code` SHALL start with `with the unit's test and support files at their
 base version (support files reverted: <path> (task <t>), ...; <k> files in all), these base tests fail:` (`no longer
-run:` for the second), at most 5 support files, each with the tasks of the harness commits that changed it, `(a
+run:` for the second), at most 5 support files (`<k>` counts every file the run reverted, support or not), each with the tasks of the harness commits that changed it, `(a
 person)` when a person's commit changed it and no task's did, or `(a harness commit)` when only a harness commit with no
 task changed it. The detail SHALL NOT say that a test passes at head. `verify.base_tests` SHALL carry `support_reverted:
 [{path, tasks, people}]`, at most 20 entries. Each failing base test of the blocker SHALL have a record in the round's

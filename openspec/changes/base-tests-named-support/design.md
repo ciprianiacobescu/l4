@@ -86,6 +86,10 @@ as already satisfied, and the general rule for a fix chore that changes nothing.
    `unfreeze.MAX_PATHS_PER_QUESTION`). A later one is reverted as before, and the row's note says `<n> more support
    file(s) named by task <t> reverted (at most 3 kept)`.
 
+A path in the `paths` of a `task.unfrozen` is kept by `_allowance`, which `_kept` tries first, exactly as in 0.4.59
+(`unfrozen by <source>`). It is outside the bounds of this rule: no 40-line bound, no cap of three files, no check of
+the base's report. Only a path that `_allowance` does not free, one in a `kept` entry, goes through `_named_red_change`.
+
 The rule is in `kept_files` only. `_allowance` and `_unfrozen_source` are not changed. They are shared with
 `check_tests`, and a file that matches both a test glob and a support glob could otherwise widen L4-VER-030.
 `split_allowed` is not changed either: the file is kept, so the tests that read it run against the head version.
@@ -139,10 +143,13 @@ When it is not empty, the detail of `a pre-existing test fails on the unit's cod
 runs on the unit's code` starts with `with the unit's test and support files at their base version (support files
 reverted: <p> (task <t>[, <t2>]), ... (+<n> more); <k> files in all), these base tests fail: ` (`no longer run:` for
 the second). The current list follows (`_listed` of the ids with their first lines, then the gone ids and collection
-lines). At most 5 support files are named, each `(a person)` when a person's commit changed it and no task's did, and `(a harness commit)` when only a harness
-commit with no `L4-Task` trailer did (a lessons commit; `people` is false for it). The lead comes
-first because a chore's detail is cut at 600 characters (`fixunit.py:448`). The detail says what the run did. It does
-not say that the test passes at head: step 1 never runs it there.
+lines). At most 5 support files are named, each `(a person)` when a person's commit changed it and no task's did, and
+`(a harness commit)` when only a harness commit with no `L4-Task` trailer did (a lessons commit; `people` is false for
+it). `<k> files in all` counts every file the run reverted (`len(reverted)`), support or not, as SCN-VER-317 shows: the
+named support files are a part of it. The lead comes first because a chore's detail is cut at 600 characters
+(`fixunit.py:448`). The detail says what the run did. It does not say that the test passes at head: step 1 never runs
+it there. A run that gave no report at all raises its blocker (`the test gate gave no report ...`) with no lead, by
+design: the run has no failing or missing test to introduce, and `support_reverted` is still recorded in the event.
 
 Fail-safe: D2 changes text and records only. The blocker, its title, its severity and the verdict are unchanged, and
 so is the finding's id, which `failure_set` reads. A failing id with no case in R1 gets no record. The only reader
@@ -195,7 +202,9 @@ it. For any other base-tests failure, D2 tells the chore what the run reverted, 
 `plugins/l4/skills/l4/references/spec.md`, bullet **test-support files** (the file is held to 530 words by
 `tests/unit/docs/test_adoption_docs.py`, so the bullet is rewritten, not grown): `Name a test-support file a task must
 change exactly, in code font (...), in its task line or heading, on an active plan or the base branch. Its red step
-may then change it (the base-tests run keeps that); its green step only a Python file red left alone.` If D1 is cut at
+may then change it (the base-tests run keeps at most 3 per task, 40 changed lines each, none holding base tests); its
+green step only a Python file red left alone.` The bounds are in the bullet because a red step that edits a fourth file
+or rewrites one is reverted, and the author cannot know why otherwise. If D1 is cut at
 integration, the second sentence is instead `Its green step may then change a Python one red left alone; a red step
 that changes an existing support file needs a person's [test-infra] tag, or the base-tests run reverts it.` (check
 the word count again). The `testpaths.py` remedy (L4-YOLO-094) is about documentation under a test
