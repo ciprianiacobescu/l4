@@ -58,8 +58,11 @@ criterion (D7); a criterion with any proof but `pass_to_pass`.
    walk and `file_of_id` over the tree give the same one and no other file of the tree could be what the id names (two
    modules of one name under two roots: `tests.test_a` may be `tests/test_a.py` or `pkg/tests/test_a.py`). A test that
    either reading cannot place is not carried, so a test that is not a Python module (the walk finds no module for it)
-   is never carried: a project whose browser-adjacent tests are all TypeScript keeps its UI holds (a narrowing taken
-   on purpose, SCN-VER-351; relaxing it means letting a `None` walk stand when `file_of_id` finds one non-Python file).
+   is never carried: a project whose tests are all TypeScript keeps its UI holds. That is a consequence of the owner's
+   delegate's ruling as worded (refuse when either reading cannot place a test), not a choice of the owner's; SCN-VER-351
+   pins it. D4's replay of the evidence assumed the carry for such a project: it holds only where the tracing tests are
+   Python modules. To relax it, let a walk that finds nothing stand when `file_of_id` finds exactly one non-Python file
+   (`carry_file`: `walked != found` becomes `walked not in (None, found)`, with `found` not a `.py` file).
    A test whose file is not found is not carried.
 4. `C` is not in `rejected`: `rejected_ui_criteria(events, criteria)` in `l4.verifier.ui_step` gives every criterion among `criteria` with a
    `human.verdict{decision: reject}` whose target is the criterion, or one of its UI holds (the targets of
