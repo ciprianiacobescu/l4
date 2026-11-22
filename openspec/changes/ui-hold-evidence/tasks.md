@@ -38,9 +38,11 @@ parts so that no test file holds a key marker as one string.
     lines and the code numbered, line 19 as `  19  ...`; the title and the `question.raised` event's `target` and
     `text_sha256` are those of the same call without excerpt and code; the Context ends with the sentence of D3);
     SCN-VER-334 (a code with the lines of the scenario: `QuestionsFile.load` finds one question with its usual
-    subsections, no line of the file starts with a backslash, `unescape_text(notes_text)` equals the notes);
-    SCN-VER-335 (`not_testable`, a `writer_failed` with no code, a restored outcome with neither: no notes, the Context
-    is byte for byte that of 0.4.59); a token in the code or the excerpt does not reach `questions.md` (SCN-VER-332);
+    subsections, no line of the file starts with a backslash, `unescape_text(notes_text)` equals the notes); SCN-VER-335
+    (`not_testable` on the first reply, a `writer_failed` with no code, a restored outcome with neither: no notes, the
+    Context is byte for byte that of 0.4.59); a token in the code or the excerpt does not reach `questions.md`
+    (SCN-VER-332); SCN-VER-350 (a `writer_failed` outcome that keeps the code and the excerpt of an earlier attempt:
+    both in the notes, and the code's heading names `writer_failed`);
   - in `tests/unit/verifier/test_report_m15.py`: the section `## Generated UI tests that were not accepted` with the
     item line and the six-space block (SCN-VER-333); no section when every outcome is accepted, waived or has no code
     (SCN-VER-335); a token is not in `verification.md` (SCN-VER-332);

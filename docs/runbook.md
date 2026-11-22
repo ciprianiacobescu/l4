@@ -1136,7 +1136,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   shown the suite's `e2e/conftest.py` and the other helper modules under `e2e/` as they are at the merge base (at most six files and 20,000 characters, the first 20 of the rest named; step 5's note says how many; when `e2e/` is a package the writer is told to import helpers as `from e2e.conftest import ...`), so a generated test can use the
   suite's own sign-in helper and fixtures.
   From 0.4.60 the question of a UI hold whose generated test was not accepted has a `### Harness notes` subsection:
-  why the test failed at the head (for `fails_at_head`) and the test's code, numbered, at most 4,000 characters;
+  why the test failed at the head (when it did) and the test's code, numbered, at most 4,000 characters;
   `verification.md` shows the same under `## Generated UI tests that were not accepted`. Read them before you answer:
   when the test starts from something the product does not have (a session set up another way, a route the app does
   not serve, a mock that lacks what the app reads), its failure says nothing about the product: judge the criterion on

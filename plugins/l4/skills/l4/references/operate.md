@@ -172,7 +172,7 @@ push. The harness reads only answers whose Status says they are submitted.
   `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
   accept, then `l4 retry`).
 - A hold `UI criterion C-… has no end-to-end test` whose step 5 wrote a test (harness 0.4.60 and later): its
-  `### Harness notes` show the test's code, numbered, and, for `fails_at_head`, why it failed at the head. Read them to
+  `### Harness notes` show the test's code, numbered, and, when it failed at the head, why. Read them to
   tell a wrong test from wrong code: a test that starts from something the product does not have (a session set up
   another way, a route the app does not serve, a mock that lacks what the app reads) says nothing about the product.
   The test is not in the tree: check and cite the product's code. To reject the behaviour, reject the criterion and its

@@ -28,8 +28,8 @@ title or its Context, so the hold's id, its accept binding and `question.raised`
 one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt).
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
 table, with one list item per such outcome (criterion, status, attempts, path) and its failure and code as one block
-indented by six spaces. With no written test (a first reply that is `not_testable` or gives no code, `waived`) nothing
-SHALL be added. Every piece SHALL pass the redactor again where it is written.
+indented by six spaces. With no written test (no attempt gave code, or `waived`) nothing SHALL be added. Every piece
+SHALL pass the redactor again where it is written.
 
 #### Scenario: SCN-VER-331 (+) The hold's question shows the generated test and its failure at the head
 - **Given** a UI criterion whose generated test `e2e/test_l4_c_<hex>.py` fails at the head with the body lines
@@ -67,6 +67,13 @@ SHALL be added. Every piece SHALL pass the redactor again where it is written.
 - **When** their questions are raised and the report is written
 - **Then** no question has a `### Harness notes` subsection, their Context is that of 0.4.59, and the report has no
   `## Generated UI tests that were not accepted` section
+
+#### Scenario: SCN-VER-350 (+) A later attempt that gives no code keeps the first test and its failure together
+- **Given** a first attempt whose test fails at the head with `E       AssertionError: Locator expected to be visible`,
+  and a second attempt whose reply is a writer error
+- **When** step 5 ends the criterion and the round raises its UI hold question
+- **Then** the outcome is `writer_failed` and keeps the first test's code and its excerpt; the `### Harness notes` hold
+  the failure and the first test's code, and the code's heading says that step 5 ended `writer_failed`
 
 ### Requirement: L4-VER-084 The writer's retry after a failure at the head carries the failure
 When step 5 asks the writer again after an attempt that ended `fails_at_head`, the retry reason SHALL be that
@@ -138,10 +145,3 @@ exist and what each answer settles SHALL be unchanged.
 - **When** both rounds are aggregated and planned
 - **Then** both verdicts are FAIL, the hold's finding keeps its id, title, severity and source and cites C, and each
   fix unit has the one task of SCN-VER-338
-
-#### Scenario: SCN-VER-350 (+) A later attempt that gives no code keeps the first test and its failure together
-- **Given** a first attempt whose test fails at the head with `E       AssertionError: Locator expected to be visible`,
-  and a second attempt whose reply is a writer error
-- **When** step 5 ends the criterion and the round raises its UI hold question
-- **Then** the outcome is `writer_failed` and keeps the first test's code and its excerpt; the `### Harness notes` hold
-  the failure and the first test's code, and the code's heading says that step 5 ended `writer_failed`

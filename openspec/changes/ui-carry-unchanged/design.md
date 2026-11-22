@@ -12,8 +12,8 @@ Read at 0.4.59 (62188257):
   `MODIFIED` requirement already keeps its tests as evidence (L4-VER-009 names that case).
 - `verifier/ladder.py` `traceability` (816-836) computes `archived = spec_baseline(...)` (821) and does not keep the
   unchanged ids. `_generate_step` (1248-1345): the gaps of `plan_generation` (1272-1275; only end-to-end tests close a
-  gap, `ui_step.py:43-68`), `_test_blobs` (1230-1245, the test-to-file mapping), the waiver (1283-1294), the early
-  return when every gap is waived (1295-1297), `hold_all` (1299-1301), the branch with no writer (1303-1306), the writer
+  gap, `ui_step.py:43-68`), `_test_blobs` (1230-1245, the test-to-file mapping), the waiver (1283-1293), the early
+  return when every gap is waived (1294-1297), `hold_all` (1299-1301), the branch with no writer (1303-1306), the writer
   (1314-1340).
 - `verifier/generate.py` `_discriminates` (182-222): a test that passes at the merge base is `non_discriminating`
   (200-203) and the head is not run; `ui_gap_finding` (70-84).
@@ -62,7 +62,7 @@ criterion (D7); a criterion with any proof but `pass_to_pass`.
 
 In `_generate_step`, right after `ui_waivers` (1283) and before `gap_findings` (1284): `carried =
 carried_from_base(...)` over the gaps that are not waived. A waived criterion stays waived (its accept is in force);
-a carried one is neither asked nor written for. `gaps` (1294) leaves out both. The early return (1295-1297) takes
+a carried one is neither asked nor written for. `gaps` (1293) leaves out both. The early return (1294-1297) takes
 "every gap waived or carried" and checks nothing out; its note counts both. The carry is decided before the branch with
 no writer (1303-1306), since it needs none.
 

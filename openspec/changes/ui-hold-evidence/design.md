@@ -51,9 +51,10 @@ template; the traces and screenshots; the context the writer gets on its first a
 `_Verdict` gains `excerpt: str = ""`. In the `fails_at_head` branch of `_discriminates` (213-221) it is
 `failure_excerpt(at_head.report, failing, worktree=wb.worktree, tmp_root=wb.unit_cache / "gate-tmp",
 redact=wb.redactor.redact_text)`: the retry prompt's excerpt (`tdd.excerpter`), per failing test of the generated file
-its `E` lines, the deepest repository frame's `>` line and its location and the last location, at most 8 lines per
-test, 8 tests, 40 lines and 3,000 characters. The head run collects the generated file only, so the excerpt is about
-the generated tests and nothing else. No other status gets one.
+its `E` lines, the deepest repository frame's `>` line and its location and the last location, at most 8 lines per test,
+8 tests, 40 lines and 3,000 characters. The head run collects the generated file only, so the excerpt is about the
+generated tests and nothing else. No other `_Verdict` status gets one (the outcome's excerpt is the kept attempt's, see
+below).
 
 `GeneratedOutcome` gains `excerpt: str = ""` as its last field (the positional call at 252-255 stays valid). The
 `outcome` closure of `generate_ui_test` passes `kept_excerpt` and, as `code`, the evidence copy of the code:
@@ -64,10 +65,10 @@ redacted (and a private-key block with one marker removed to the edge, L4-VER-07
 never uncover it. Give the helper a public name in `l4.implementer.excerpt` (not starting with `test`), for example
 `redacted_cut(text, redact, limit)`. The raw code is still what is written to the trees (278, 292) and hashed (293):
 only the outcome's copy is bounded. The code and the excerpt of an outcome are those of one attempt: `generate_ui_test`
-sets `kept_excerpt = ""` where it sets `code` (274) and `kept_excerpt = last.excerpt` right after it sets `last` (`""`
-unless that attempt ended `fails_at_head`), and an attempt that gives no code (a writer error, an invalid reply,
-`not_testable`) leaves both of the attempt before it. So a first attempt that failed at the head followed by a writer
-error shows the first test and its failure, with the status `writer_failed`.
+sets `kept_excerpt = ""` where it sets `code` (274) and `kept_excerpt = last.excerpt` right after it sets `last` for a
+written test (281; `""` unless that attempt ended `fails_at_head`), and an attempt that gives no code (a writer error,
+an invalid reply, `not_testable`) leaves both of the attempt before it. So a first attempt that failed at the head
+followed by a writer error shows the first test and its failure, with the status `writer_failed`.
 
 ### D2. `verdict.json` and a reused round
 
