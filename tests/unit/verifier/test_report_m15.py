@@ -200,3 +200,26 @@ def test_a_secret_in_the_code_or_the_failure_is_in_no_file_of_the_round(tmp_path
     for name in ("verification.md", ".l4/evidence/round-1/verification.md", ".l4/evidence/round-1/verdict.json"):
         text = (tmp_path / name).read_text()
         assert all(TOKEN[i : i + 8] not in text for i in range(len(TOKEN) - 7)), name
+
+
+def test_the_row_of_a_carried_outcome_says_it_is_carried_from_the_base_and_not_step_4_cover():  # SCN-VER-343
+    many = ("tests.a::t1", "tests.a::t2", "tests.a::t3", "tests.a::t4")
+    carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=many)
+    text = render_verification_md(result(generated=[carried]))
+    row = next(line for line in text.splitlines() if line.startswith(f"| {CID} | carried"))
+    assert (
+        "carried from the base: tests.a::t1, tests.a::t2, tests.a::t3 (+1 more) (the scenario and these tests are "
+        "the base's, and they pass); a note, not a hold (L4-VER-086)" in row
+    )
+    assert "covered by step 4" not in row and "were not accepted" not in text
+    one = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",))
+    row = next(line for line in render_verification_md(result(generated=[one])).splitlines() if "| carried" in line)
+    assert "carried from the base: tests.a::t1 (the scenario" in row and "more" not in row
+
+
+def test_verdict_json_stores_a_carried_outcome_and_a_reused_round_restores_it():  # SCN-VER-349
+    carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",))
+    body = json.loads(json.dumps(verdict_json(result(generated=[carried]))))
+    assert body["generated"][0]["status"] == "carried" and body["generated"][0]["covered_by"] == ["tests.a::t1"]
+    assert "code" not in body["generated"][0] and "excerpt" not in body["generated"][0]
+    assert restore_round(body, UNIT, 2).generated == [carried]

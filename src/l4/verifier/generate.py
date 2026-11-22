@@ -68,12 +68,19 @@ class UiGeneration:
         return sum(o.cost_usd for o in self.outcomes)
 
 
-def ui_gap_finding(criterion: Criterion, unproved: Sequence[str] = (), waived_by: str = "") -> Finding:
+def ui_gap_finding(
+    criterion: Criterion, unproved: Sequence[str] = (), waived_by: str = "", carried: bool = False
+) -> Finding:
     """The deterministic finding for a UI criterion that no PROVED e2e test traces. When an accepted generated test
     closes it in a PASS round it becomes the lesson of `memory.curate.LESSON_RULES` (same title). `unproved`: e2e tests
     that trace it but have no red, audit or generated record (one the implementer wrote): the finding says so.
-    `waived_by`: the answered question that waived step 5 for it (L4-VER-067): the finding stays, with no generation."""
-    then = f"waived by {waived_by}, step 5 generates none." if waived_by else "step 5 generates one."
+    `waived_by`: the answered question that waived step 5 for it (L4-VER-067): the finding stays, with no generation.
+    `carried`: step 5 carried it from the base (L4-VER-086): the finding stays and says so."""
+    then = "step 5 generates one."
+    if waived_by:
+        then = f"waived by {waived_by}, step 5 generates none."
+    elif carried:
+        then = "it is unchanged on the base and its base tests pass, so step 5 generates none (L4-VER-086)."
     if unproved:
         shown = ", ".join(unproved[:3]) + (f" (+{len(unproved) - 3} more)" if len(unproved) > 3 else "")
         detail = (

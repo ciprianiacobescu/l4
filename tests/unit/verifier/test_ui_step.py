@@ -13,11 +13,13 @@ from l4.specs.base import Criterion, Framework
 from l4.state.ledger import LedgerEvent
 from l4.verifier.types import CriterionEvidence, GeneratedOutcome, TracingTest
 from l4.verifier.ui_step import (
+    carried_from_base,
     covered_by_step4,
     gap_findings,
     lost_notes,
     plan_generation,
     previously_generated,
+    rejected_ui_criteria,
     ui_hold_binding,
     ui_hold_text,
     ui_waivers,
@@ -519,3 +521,119 @@ def test_a_changed_typescript_tracing_test_ends_the_waiver_in_a_real_repository(
     repo.write({"src/badge.test.ts": "test('badge', () => { expect(1).toBe(2) })\n"})
     changed = repo.commit("edit the test")
     assert ui_waivers(events, [crit(CID)], trace, _test_blobs(wb, changed, trace, ["app.ts"])) == {}
+
+
+# -- ui-carry-unchanged: an unchanged UI criterion whose tests are the base's and pass is carried (L4-VER-086)
+
+BASE_TEST = "tests.test_rules::test_c"
+BASE_FILE = "tests/test_rules.py"
+FILES = {BASE_TEST: BASE_FILE, "tests.test_rules::test_d": BASE_FILE, "tests.test_wide::test_all": "tests/test_wide.py"}
+UNCHANGED = frozenset({CID})
+
+
+def base_tests(*tests: TracingTest, ignored=(), capped=(), state="covered", held="") -> list[CriterionEvidence]:
+    return [CriterionEvidence(CID, "a", state, tuple(tests), tuple(ignored), held, tuple(capped))]  # type: ignore[arg-type]
+
+
+def p2p(test: str = BASE_TEST, **over) -> TracingTest:
+    return TracingTest(test, **{"status": "passed", "proof": "pass_to_pass", **over})  # type: ignore[arg-type]
+
+
+def carry(trace=None, *, unchanged=UNCHANGED, changed=(), rejected=frozenset(), files=None, gaps=None):
+    table = FILES if files is None else files
+    return carried_from_base(
+        gaps if gaps is not None else [crit(CID)], base_tests(p2p()) if trace is None else trace, unchanged,
+        table.get, changed, rejected,
+    )  # fmt: skip
+
+
+def test_scn_ver_343_an_unchanged_criterion_with_the_base_s_passing_tests_is_carried():
+    assert carry() == {CID: (BASE_TEST,)}
+    two = base_tests(p2p(), p2p("tests.test_rules::test_d"))
+    assert carry(two) == {CID: (BASE_TEST, "tests.test_rules::test_d")}  # sorted
+    wide = TracingTest("tests.test_wide::test_all", "passed", "pass_to_pass", over_cap=9)
+    capped = base_tests(p2p(), ignored=[("tests.test_wide::test_all", "it traces 9 criteria")], capped=[wide])
+    assert carry(capped) == {CID: (BASE_TEST,)}  # a passing candidate over the cap is allowed, and its file checked
+    assert carry(capped, changed=["tests/test_wide.py"]) == {}
+
+
+def test_scn_ver_344_a_criterion_that_is_not_unchanged_on_the_base_is_not_carried():
+    assert carry(unchanged=frozenset()) == {}
+    assert carry(unchanged=frozenset({OTHER})) == {}
+
+
+@pytest.mark.parametrize(
+    "tests",
+    [
+        [p2p(proof="red_assertion")], [p2p(proof="audit")], [p2p(proof="human")], [p2p(proof="chore")],
+        [p2p(proof="repair")], [p2p(proof="generated")], [p2p(), p2p("tests.test_rules::test_d", proof="zero_value")],
+        [p2p(status="failed")], [p2p(status="error")], [p2p(note="not applicable: no project code")],
+        [p2p(over_cap=7)], [p2p(adequate=False)], [],
+    ],
+    ids=["red", "audit", "human", "chore", "repair", "generated", "one-red-of-two", "failed", "error", "note",
+         "over-cap", "inadequate", "no-test"],
+)  # fmt: skip
+def test_scn_ver_346_any_other_proof_or_a_test_that_does_not_pass_keeps_the_gap(tests):
+    assert carry(base_tests(*tests, state="covered" if tests else "uncovered")) == {}
+
+
+def test_scn_ver_346_a_state_a_held_reason_or_a_test_that_is_not_evidence_keeps_the_gap():
+    assert carry(base_tests(p2p(), state="fail")) == {}
+    assert carry(base_tests(p2p(), held="an audit test fails at the head")) == {}
+    skipped = base_tests(p2p(), ignored=[("tests.test_rules::test_d", "it was skipped")])
+    assert carry(skipped) == {}  # an ignored test that is not a passing over-cap candidate
+    unproved = base_tests(p2p(), ignored=[("tests.test_rules::test_d", "no proof that it discriminates")])
+    assert carry(unproved) == {}
+    assert carry([]) == {}  # no evidence for the criterion at all
+
+
+def test_scn_ver_345_a_file_the_unit_changed_or_that_is_not_found_keeps_the_gap():
+    assert carry(changed=[BASE_FILE]) == {}
+    assert carry(changed=["src/other.py", "tests/new_test.py"]) == {CID: (BASE_TEST,)}
+    assert carry(files={}) == {}  # the file of the test is not found
+    two = base_tests(p2p(), p2p("tests.test_rules::test_d"))
+    assert carry(two, files={BASE_TEST: BASE_FILE}) == {}  # one test's file not found is enough
+
+
+def test_scn_ver_347_a_rejected_criterion_is_never_carried():
+    assert carry(rejected=frozenset({CID})) == {}
+    assert carry(rejected=frozenset({OTHER})) == {CID: (BASE_TEST,)}
+    assert carry(gaps=[crit(CID), crit(OTHER)]) == {CID: (BASE_TEST,)}  # a gap with no evidence of its own
+
+
+def test_rejected_ui_criteria_finds_a_reject_of_the_criterion_its_hold_and_the_stable_id():
+    criteria = [CID, OTHER]
+    assert rejected_ui_criteria([], criteria) == frozenset()
+    own = [led(1, "human.verdict", question="Q-001", target=CID, decision="reject", by="ana", reason="r")]
+    assert rejected_ui_criteria(own, criteria) == {CID}
+    named = [
+        raised(1, "Q-002", "H-aaaaaaaa", criterion=OTHER),  # a UI hold whose id is not today's: named by the event
+        decided(2, "Q-002", "H-aaaaaaaa", "reject", "x" * 64),
+    ]
+    assert rejected_ui_criteria(named, criteria) == {OTHER}
+    stable = [decided(1, "Q-003", hold_id(HOLD), "reject", "x" * 64)]  # no `question.raised` event for it
+    assert rejected_ui_criteria(stable, criteria) == {CID}
+    consumed = [*stable, led(2, "fix.spawned", consumed=["Q-003"], findings=[])]
+    assert rejected_ui_criteria(consumed, criteria) == {CID}  # consumed by a fix unit: still a reject
+    accepted = [
+        decided(1, "Q-004", CID, "accept", text_sha256(crit(CID))),
+        decided(2, "Q-005", hold_id(HOLD), "accept", "x"),
+    ]
+    assert rejected_ui_criteria(accepted, criteria) == frozenset()  # an accept is not a reject
+    other = "diff coverage: not measured: the coverage plugin wrote no status"
+    assert rejected_ui_criteria([decided(1, "Q-006", hold_id(other), "reject", "x")], criteria) == frozenset()
+
+
+def test_a_carried_outcome_closes_the_gap_and_is_no_hold():
+    carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=(BASE_TEST,))
+    assert unclosed_holds([crit(CID)], [carried]) == []
+    assert unclosed_holds([crit(CID), crit(OTHER)], [carried]) == [ui_hold_text(OTHER)]
+
+
+def test_the_gap_finding_of_a_carried_criterion_says_it_is_unchanged_on_the_base():
+    [finding] = gap_findings([crit(CID)], carried={CID})
+    assert finding.title == UI_GAP_TITLE and finding.criterion == CID and not finding.blocking
+    assert "unchanged on the base" in finding.detail and "its base tests pass" in finding.detail
+    assert "(L4-VER-086)" in finding.detail and "step 5 generates one" not in finding.detail
+    [plain] = gap_findings([crit(CID)])
+    assert "step 5 generates one." in plain.detail and "unchanged on the base" not in plain.detail

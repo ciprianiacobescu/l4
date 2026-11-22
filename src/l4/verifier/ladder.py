@@ -90,7 +90,7 @@ from l4.sandbox.select import sandbox_refusal
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
-from l4.specs.criteria import spec_baseline
+from l4.specs.criteria import spec_baseline, unchanged_ids
 from l4.specs.feedback import FeedbackFile
 from l4.specs.followup import feedback_home
 from l4.specs.markers import MAX_TASKS_BYTES
@@ -232,12 +232,14 @@ from l4.verifier.types import (
     VerifyResult,
 )
 from l4.verifier.ui_step import (
+    carried_from_base,
     covered_by_step4,
     edited_findings,
     gap_findings,
     lost_notes,
     plan_generation,
     previously_generated,
+    rejected_ui_criteria,
     ui_hold_text,
     ui_hold_views,
     ui_waivers,
@@ -542,6 +544,7 @@ class _Run:
     recheck_notes: Callable[[], None] | None = (
         None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
     )
+    unchanged: frozenset[str] = frozenset()  # step 4: the criteria the base's archived specs hold word for word
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -819,6 +822,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
         # (a Kiro follow-up's merged parent: its folder is protected); the red step reads it through the same helper
         archived = spec_baseline(wb.git, wb.ref.framework, wb.provider, base_sha)
+        run.unchanged = unchanged_ids(criteria, archived)  # step 5 reads the one baseline step 4 traced with
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)
@@ -1227,18 +1231,27 @@ def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
     return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
 
 
-def _test_blobs(
-    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
-) -> Callable[[str], str]:
-    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
-    hold's accept is bound to (`ui_step.ui_hold_binding`). A Python module is found in the work tree; any other id
-    (`src/a.test.ts::name`, `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's
-    changed files first when several match. A test whose file is not found keeps its id."""
+def _test_files(
+    wb: Workbench, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> dict[str, str | None]:
+    """Test id -> the file that holds it, for the tests step 4 traced to the criteria (and the ones it listed as not
+    evidence). A Python module is found in the work tree; any other id (`src/a.test.ts::name`,
+    `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's changed files first when
+    several match. None: the file is not found."""
     ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
     files = {i: file_of_test(wb, i) for i in ids}
     if any(f is None for f in files.values()):
         tree = worktree_files(wb)  # once
         files = {i: f or file_of_id(i, tree, changed) for i, f in files.items()}
+    return files
+
+
+def _test_blobs(
+    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> Callable[[str], str]:
+    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
+    hold's accept is bound to (`ui_step.ui_hold_binding`). A test whose file is not found keeps its id."""
+    files = _test_files(wb, trace, changed)
     blobs = blob_ids(wb.git, head, sorted({f for f in files.values() if f}))
     return lambda test: (
         f"{files[test]}\t{blobs.get(files[test] or '', 'missing')}" if files.get(test) else f"{test}\tunmapped"
@@ -1281,7 +1294,15 @@ def _generate_step(
         return
     blob_of = _test_blobs(wb, result.head_sha, result.trace, changed)
     waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
-    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived))
+    # a criterion the unit did not change, whose tests are the base's and pass, is carried (L4-VER-086): no writer, no
+    # hold. A waived one stays waived. Every condition that cannot be checked leaves the gap as it was.
+    files = _test_files(wb, result.trace, changed)
+    open_gaps = [c for c in plan.gaps if c.id not in waived]
+    carried = carried_from_base(
+        open_gaps, result.trace, run.unchanged, files.get, changed,
+        rejected_ui_criteria(events, [c.id for c in open_gaps]),
+    )  # fmt: skip
+    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived, carried))
     for criterion in plan.gaps:
         if criterion.id in waived:
             wb.emit("verify.generated", criterion=criterion.id, status="waived", by=waived[criterion.id], attempts=0)
@@ -1290,9 +1311,25 @@ def _generate_step(
                     criterion.id, "waived", reason=f"waived by {waived[criterion.id]}", by=waived[criterion.id]
                 )
             )
-    gaps = [c for c in plan.gaps if c.id not in waived]
+        elif criterion.id in carried:
+            tests = list(carried[criterion.id])
+            wb.emit("verify.generated", criterion=criterion.id, status="carried", covered_by=tests, attempts=0)
+            result.generated.append(
+                GeneratedOutcome(
+                    criterion.id,
+                    "carried",
+                    reason="carried from the base (L4-VER-086)",
+                    covered_by=carried[criterion.id],
+                )
+            )
+    gaps = [c for c in open_gaps if c.id not in carried]
     if not gaps:
-        note = f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"
+        note = ", ".join(
+            [
+                *([f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"] if waived else []),
+                *([f"{len(carried)} carried from the base (L4-VER-086)"] if carried else []),
+            ]
+        )
         _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note=note))
         return
 
@@ -1302,7 +1339,9 @@ def _generate_step(
 
     if vc.ui_writer is None:
         hold_all(unclosed_holds(gaps, []))
-        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
+        why = "roles.verifier_agent is empty"
+        why += f"; {len(carried)} carried from the base (L4-VER-086)" if carried else ""
+        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note=why)
         return
 
     def recheck() -> None:
@@ -1333,6 +1372,8 @@ def _generate_step(
         note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
         if noted := sum(bool(o.covered_by) for o in out.outcomes):
             note += f"; {noted} not_testable covered by step 4: notes, no hold (L4-VER-067)"
+        if carried:
+            note += f"; {len(carried)} carried from the base (L4-VER-086)"
         if out.suite_files or out.suite_skipped:
             note += f"; e2e support files shown to the writer: {len(out.suite_files)}"
             note += f" (+{len(out.suite_skipped)} not shown)" if out.suite_skipped else ""

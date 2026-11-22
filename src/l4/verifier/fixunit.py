@@ -240,11 +240,12 @@ def _candidates(
         picked += [(f, False) for f in synthetic]
     elif result.verdict is Verdict.PASS and fix_minor:
         # a UI gap that an accepted generated test closed (or a person's accept waived, L4-VER-067) is done: a fix unit
-        # would leave no PASS to curate its lesson; so is a gap noted as covered by step 4 (L4-VER-067)
+        # would leave no PASS to curate its lesson; so is a gap noted as covered by step 4 (L4-VER-067) and one carried
+        # from the base (L4-VER-086)
         closed = {
             o.criterion
             for o in result.generated
-            if o.accepted or o.status == "waived" or (o.status == "not_testable" and o.covered_by)
+            if o.accepted or o.status in ("waived", "carried") or (o.status == "not_testable" and o.covered_by)
         }  # the rule of `ui_step.unclosed_holds`
         picked += [
             (f, True) for f in result.findings

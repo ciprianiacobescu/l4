@@ -189,7 +189,7 @@ class AuditRecord:
 
 GenStatus = Literal[
     "accepted", "not_testable", "non_discriminating", "fails_at_head", "uncollectable", "base_error", "base_unservable",
-    "lint_failed", "writer_failed", "waived",
+    "lint_failed", "writer_failed", "waived", "carried",
 ]  # fmt: skip
 RunOutcome = Literal["pass", "fail", "error"]  # the new test at the merge base / at the head
 MAX_CODE_CHARS = 4_000  # the copy of a generated test that is kept as evidence (L4-VER-083)

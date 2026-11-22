@@ -18,7 +18,7 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import hold_id, raise_verdict_questions, supersede_stale_verdicts, verdict_status
 
 from ._integrity_helpers import STAMP, UNIT
-from .test_hold_verdicts import COVERAGE, SCOPE, _Sink
+from .test_hold_verdicts import COVERAGE, SCOPE, UI_CRITERION, UI_HOLD, _Sink
 
 
 def round_one(tmp_path, sink):
@@ -129,3 +129,18 @@ def test_the_ledger_event_is_ordered_after_the_questions_it_names():
         LedgerEvent(STAMP, "r-1", UNIT, 2, "question.superseded", {"ids": ["Q-001", "Q-009"], "round": 2}),
     ]
     assert fold(events, UNIT).questions.open == []  # an id the fold never saw is ignored
+
+
+def test_a_ui_hold_asked_before_a_carry_is_superseded_by_the_round_that_carries_the_criterion(tmp_path):
+    """SCN-VER-349 (L4-VER-086): a round of 0.4.59 asked the criterion's UI hold and nobody answered; the next fresh
+    round carries the criterion, raises no hold for it, and so supersedes the open question by its round."""
+    sink = _Sink()
+    raise_verdict_questions(
+        tmp_path, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
+        consumed=(), raised=(), ledger=sink, round_no=1, redactor=Redactor({}), holds=[UI_HOLD],
+    )  # fmt: skip
+    assert fold(sink.events, UNIT).questions.open == ["Q-001"]
+    assert supersede(tmp_path, sink) == ["Q-001"]  # round 2 holds nothing for the carried criterion
+    question = load(tmp_path).get("Q-001")
+    assert question is not None and question.status is QuestionStatus.SUPERSEDED and question.superseded_round == 2
+    assert fold(sink.events, UNIT).questions.open == []

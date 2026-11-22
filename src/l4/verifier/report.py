@@ -119,7 +119,13 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         reason = reason or g.reason
         if g.covered_by:  # L4-VER-067: the writer's answer and step 4's, both visible
             shown = ", ".join(g.covered_by[:3]) + (f" (+{len(g.covered_by) - 3} more)" if len(g.covered_by) > 3 else "")
-            reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
+            if g.status == "carried":  # L4-VER-086: no writer ran; the base's own tests are the evidence
+                reason = (
+                    f"carried from the base: {shown} (the scenario and these tests are the base's, and they pass); "
+                    "a note, not a hold (L4-VER-086)"
+                )
+            else:
+                reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
         cells = [
             g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or "-",
             ", ".join(g.artifacts) or "-",

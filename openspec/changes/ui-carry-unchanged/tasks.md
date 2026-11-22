@@ -7,19 +7,19 @@ SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `typ
 
 ## 1. The rule (D1)
 
-- [ ] 1.1 Write the tests first in `tests/unit/verifier/test_ui_step.py`: `carried_from_base` carries the criterion of
+- [x] 1.1 Write the tests first in `tests/unit/verifier/test_ui_step.py`: `carried_from_base` carries the criterion of
   SCN-VER-343 and none of the variants of SCN-VER-344..347 (a criterion not in `unchanged`; a tracing test with a red,
   audit, human, chore, repair or generated proof; a `pass_to_pass` test that failed, is skipped, has a `note` or is
   over the cap; an ignored test that is not a passing over-cap candidate; a test whose file `file_of` does not find; a
   file in `changed`; a criterion in `rejected`); `rejected_ui_criteria` finds a reject of the criterion, of a UI hold
   named by `question.raised{criterion}`, of the stable hold id with no such event, and a consumed one; an accept is not
   a reject. Run and see them fail.
-- [ ] 1.2 Then add `carried_from_base` and `rejected_ui_criteria` to `src/l4/verifier/ui_step.py` (pure, no git). Run
+- [x] 1.2 Then add `carried_from_base` and `rejected_ui_criteria` to `src/l4/verifier/ui_step.py` (pure, no git). Run
   `tests/unit/verifier/test_ui_step.py`.
 
 ## 2. Step 5 and what it records (D2, D3)
 
-- [ ] 2.1 Write the tests first:
+- [x] 2.1 Write the tests first:
   - in `tests/unit/verifier/test_ui_flow.py` (follow its stubs of the e2e gate and the writer): SCN-VER-343 (no writer
     request for C, the `verify.generated` event, no hold, the finding's detail, no base checkout when C is the only
     gap, and with another gap the writer is asked for that one only and no UI hold comes back for C after the judge
@@ -31,7 +31,7 @@ SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `typ
     hold);
   - in `tests/unit/verifier/test_fixunit.py`: a PASS round with `fix_minor_findings` makes no task for a carried gap.
   Run each file and see the new tests fail.
-- [ ] 2.2 Then add `carried` to `GenStatus` (`src/l4/verifier/types.py`); keep `_Run.unchanged` in `traceability`,
+- [x] 2.2 Then add `carried` to `GenStatus` (`src/l4/verifier/types.py`); keep `_Run.unchanged` in `traceability`,
   split the test-to-file mapping out of `_test_blobs`, and carry in `_generate_step` before `gap_findings`
   (`src/l4/verifier/ladder.py`); `carried=` in `ui_gap_finding` (`src/l4/verifier/generate.py`) and `gap_findings`;
   the closed set of `unclosed_holds` (`src/l4/verifier/ui_step.py`; leave `lost_notes` as it is, design D3) and of
@@ -41,7 +41,7 @@ SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `typ
 
 ## 3. Checks
 
-- [ ] 3.1 `docs/SPEC.md` holds L4-VER-086, SCN-VER-343..349, change-table row 141 and the amendments named above. Check
+- [x] 3.1 `docs/SPEC.md` holds L4-VER-086, SCN-VER-343..349, change-table row 141 and the amendments named above. Check
   them against the code and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md` or
   `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 3.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 3.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
