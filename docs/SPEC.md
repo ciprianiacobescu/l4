@@ -2857,7 +2857,8 @@ time-out marker; and each one's file, found as L4-VER-076 finds it among the fil
 a file that the unit's branch or the step changed. Before run 1 the step SHALL record the worktree's untracked paths,
 and before the re-run it SHALL remove every entry that is new since (L4-VER-076's `tree_reset`). It SHALL make no
 re-run when the tree cannot be listed or cleaned (`stopped: tree`), or when the armed soft deadline leaves less than
-run 1's duration plus the larger of 60 seconds and a tenth of it (`stopped: budget`). The step's own guard after a gate
+twice run 1's duration plus the larger of 60 seconds and a tenth of run 1's duration (`stopped: budget`: the step goes
+on after the re-run). The step's own guard after a gate
 run (red's tamper check, the replay restore of green and of a chore) SHALL run after the re-run. A re-run is usable when
 a report was read, it has no collection error, it executed a test and it holds every regressed test; else `stopped:
 unusable`. When every regressed test passed in it and no test that passed in run 1 failed, errored or is missing in it
@@ -14040,8 +14041,8 @@ scenario is a spec defect (§26).
   0.4.59
 
 #### SCN-IMP-574 (−) No re-run without time or a clean tree · L4-IMP-105
-- **Given** a step with candidates whose armed soft deadline leaves less than run 1's duration plus 60 seconds, and
-  another whose tree cannot be put back
+- **Given** a step with candidates whose armed soft deadline leaves less than twice run 1's duration plus 60 seconds
+  (run 1 took 100 s and 200 s are left), and another whose tree cannot be put back
 - **When** each step judges its gate
 - **Then** no `test-recheck` runs, `task.tests_rechecked` has `stopped: budget` and `stopped: tree`, and each attempt
   fails with run 1's reason

@@ -62,8 +62,8 @@ whole command, as `test-recheck`, with the same environment, when all of these h
 failed or errored in run 1 and holds no time-out marker; and each one's file is found and is not a file the unit's
 branch or this step changed. Before run 1 the step SHALL record the worktree's untracked paths, and before the re-run
 it SHALL remove what is new since, as L4-VER-076 does. There SHALL be no re-run when that cannot be done, or when the
-armed soft deadline leaves less than run 1's duration plus the larger of 60 seconds and a tenth of it. The step's
-guards after a gate run SHALL run after the re-run. When the re-run is usable and every regressed test passes in it,
+armed soft deadline leaves less than twice run 1's duration plus the larger of 60 seconds and a tenth of run 1's
+duration. The step's guards after a gate run SHALL run after the re-run. When the re-run is usable and every regressed test passes in it,
 and no test that passed in run 1 fails or is missing in it, the regressed tests SHALL be flaky. The step SHALL then go
 on with run 1's report, each flaky test's case taken from the re-run, and judge it again with the same checks. That
 report is also the one any later reader of the step's report, and the next task's baseline, reads (L4-IMP-088). In
@@ -94,7 +94,8 @@ test, a test the unit's branch or the step changed, a hung test and a test missi
   0.4.59
 
 #### Scenario: SCN-IMP-574 (−) No re-run without time or a clean tree
-- **Given** a step with candidates whose armed soft deadline leaves less than run 1's duration plus 60 seconds, and
+- **Given** a step with candidates whose armed soft deadline leaves less than twice run 1's duration plus 60 seconds
+  (run 1 took 100 s and 200 s are left), and
   another whose tree cannot be put back
 - **When** each step judges its gate
 - **Then** no `test-recheck` runs, `task.tests_rechecked` has `stopped: budget` and `stopped: tree`, and each attempt

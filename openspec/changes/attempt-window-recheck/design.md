@@ -121,7 +121,7 @@ Before run 1 the step takes `reset = tree_reset(wb.git, wb.worktree, keep=wb.cfg
 `git ls-files --others --directory`. When the candidates of D2 exist:
 
 1. When `reset` is None or `reset()` is False: no re-run, `stopped: tree`.
-2. When `gate_repeat.short_of_time(run1_seconds)` (the private `_short_of_time` made public; run 1's
+2. When `gate_repeat.short_of_time(run1_seconds, runs=2)` (the private `_short_of_time` made public; run 1's
    `GateResult.seconds`): no re-run, `stopped: budget`.
 3. Otherwise `again = wb.run_gate("test-recheck", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports,
    extra_env=<run 1's>)`, then the step's guard after a gate run: `tampered("test re-run")` in red, `stuck = stuck or
@@ -148,7 +148,9 @@ In any other case the attempt fails with run 1's reason, followed by `; failed a
 `budget`. The excerpt is run 1's.
 
 Bound: at most one re-run per attempt, each bounded by `gates.timeout` as every gate run is. It starts only when the
-armed soft deadline leaves run 1's duration plus the larger of 60 seconds and a tenth of it. `deadline.cap_s` does not
+armed soft deadline leaves twice run 1's duration plus the larger of 60 seconds and a tenth of run 1's duration (the
+owner's delegate settled this: the step goes on after the re-run; `gate_repeat.short_of_time(first, runs=2)`, while step
+3's repeat keeps `runs=1`). `deadline.cap_s` does not
 change: a step that has no room for the re-run fails the attempt as it does today, and the step's `step.timed`
 records the longer step, so later estimates grow within the cap.
 

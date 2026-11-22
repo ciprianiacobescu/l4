@@ -363,3 +363,18 @@ def test_the_repair_chore_makes_no_re_run():
 
     source = inspect.getsource(tdd._run_repair)
     assert "recheck_step" not in source and "test-recheck" not in source
+
+
+def test_a_guard_that_cannot_put_the_tree_back_after_the_re_run_fails_the_attempt(make_bench, monkeypatch):
+    """The replay guard (`restore_replay`) that runs after the re-run fails green when it says the tree is not back."""
+    from l4.implementer import tdd
+
+    bench, red = green_bench(make_bench)
+    FakeFlaky(bench, PRE)
+    real = tdd.restore_replay
+    monkeypatch.setattr(
+        tdd, "restore_replay", lambda wb, where: "replay broke the tree" if where == "test re-run" else real(wb, where)
+    )
+    out = run_green(bench.wb, TASK, red, attempt=1)
+    assert out.status == "failed" and "replay broke the tree" in out.reason
+    assert bench.events("task.done") == []
