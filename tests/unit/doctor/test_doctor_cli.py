@@ -65,8 +65,20 @@ def test_doctor_end_to_end_exit_codes(world, capsys):
     # healthy: exit 0, no outcome.json (doctor is not an outcome command)
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 0
     out = capsys.readouterr().out
-    # " fail " is the status column: CFG-009 says "fails" in prose
-    assert "ENV-001" in out and "ENV-002" in out and "ENV-003" in out and " fail " not in out
+    # " fail " is the status column: CFG-009 says "fails" in prose. The one judge of this configuration warns since
+    # 0.4.60 (CFG-013, L4-YOLO-103: a judge chain of one has no fallback): the only row that fails, and a warning
+    assert "ENV-001" in out and "ENV-002" in out and "ENV-003" in out
+    failing = [line for line in out.splitlines() if " fail " in line]
+    assert len(failing) == 1 and failing[0].startswith("CFG-013") and "warn" in failing[0]
+    write_config(
+        repo,
+        VALID_CONFIG.replace("judges: [judge]", "judges: [judge, judge2]").replace(
+            "roles:", "  judge2: {adapter: fake, vendor: c}\nroles:"
+        ),
+    )
+    assert main(["doctor", "--repo", str(repo)], environ=environ) == 0
+    assert " fail " not in capsys.readouterr().out
+    write_config(repo, VALID_CONFIG)
     assert not (repo / ".l4-out").exists()
     # a mistyped key: exit 2 with the did-you-mean message, no checks run
     write_config(repo, "verifer: {independence: none}\n")
@@ -114,6 +126,7 @@ def test_json_output_and_resolved_paths(world, capsys):
         "CFG-010",
         "CFG-011",
         "CFG-012",
+        "CFG-013",  # 0.4.60 (L4-YOLO-103)
         "YOLO-001",
         "CI-003",
         "S1-003",
@@ -151,7 +164,10 @@ def test_json_output_and_resolved_paths(world, capsys):
         "SANDBOX-002",
         "SANDBOX-003",
     }  # bubblewrap on the machine running the tests: not this test's business
-    assert {c["status"] for c in doc["checks"] if c["id"] not in skipped | host} == {"pass"}
+    # the one judge of this configuration is the one warning (CFG-013, L4-YOLO-103); it leaves ok and exit_code alone
+    (single,) = [c for c in doc["checks"] if c["id"] == "CFG-013"]
+    assert (single["status"], single["severity"]) == ("fail", "warn")
+    assert {c["status"] for c in doc["checks"] if c["id"] not in skipped | host | {"CFG-013"}} == {"pass"}
     assert {c["id"] for c in doc["checks"] if c["status"] == "skip"} - host == skipped
     assert main(["doctor", "--repo", str(repo)], environ=environ) == 0
     table = capsys.readouterr().out

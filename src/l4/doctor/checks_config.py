@@ -5,6 +5,8 @@ CFG-008 (adoption-lessons L4-ADO-005): the harness running in CI is the pin of t
 CFG-012 (budget-guard L4-IMP-076, L4-IMP-077): a set `ci.time_budget` leaves room for one step after the margin, and
 does not shorten the job by more than the margin.
 
+CFG-013 (readiness-entry-and-actor L4-YOLO-103): a judge chain of one profile has no fallback judge (a warning).
+
 CFG-004: `gates.test.command` is set. The run rejects every unit without it (no test oracle), so nothing else in
 the configuration matters until it is.
 
@@ -368,3 +370,39 @@ def _cfg_012(ctx: DoctorContext) -> CheckResult:
 CFG_012 = register(
     Check("CFG-012", "The soft deadline leaves room for a step", "error", _cfg_012, scopes=CONFIG_SCOPES)
 )
+
+
+def _cfg_013(ctx: DoctorContext) -> CheckResult:
+    roles = ctx.cfg.roles
+    judges = list(dict.fromkeys(roles.judges))
+    plan = list(dict.fromkeys(roles.plan_judges))
+    if not judges:
+        return CheckResult("skip", "roles.judges is empty: CFG-002 says so")
+    problems = []
+    if len(judges) == 1:
+        text = f"roles.judges has one profile ({judges[0]}): unit verification has no fallback judge when it fails"
+        if not plan:
+            text += (
+                ", and a judge for plan readiness reviews only belongs in roles.plan_judges, which unit verification "
+                "never reads: do not cut roles.judges for a review"
+            )
+        problems.append(text)
+    if len(plan) == 1:
+        problems.append(
+            f"roles.plan_judges has one profile ({plan[0]}): the plan review has no fallback judge "
+            "(it does not fall back to roles.judges)"
+        )
+    if problems:
+        return CheckResult(
+            "fail",
+            "; ".join(problems),
+            "add a second judge profile, of another vendor where you can, to the chain named; put a judge for plan "
+            "reviews only in roles.plan_judges",
+        )
+    text = f"roles.judges has {len(judges)} profiles"
+    if plan:
+        text += f"; roles.plan_judges has {len(plan)}"
+    return CheckResult("pass", text)
+
+
+CFG_013 = register(Check("CFG-013", "A judge chain has a fallback", "warn", _cfg_013, scopes=CONFIG_SCOPES))
