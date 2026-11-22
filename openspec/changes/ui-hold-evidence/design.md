@@ -115,6 +115,14 @@ generated test: the file is not in the tree, and `questions.md`, `verification.m
 serves, the code that reads the session, the e2e suite's support files) and cites that as `path:line`. The delegate's
 prompt and `_generated_row` do not change, so no template or lock changes.
 
+Fail safe for the delegate: the notes are text a model wrote and a test printed. They reach the delegate inside the
+question's data block (`build_prompt` puts `_asked` in `_block("question", "verifier", ...)`,
+`delegate/prompt.py:227-237` and 338, an `<l4:data>` fence with `defuse`), which its rules treat as information, never
+as instructions; that block is not cut by the budget (no `_cap` is applied to it), and the question's text, notes
+included, is also the key `_specification` picks the spec's sections by (341-343), within the same budget. An `accept`
+or `reject` still needs `checked` entries that resolve in the repository (L4-DLG-005), so no sentence of the notes can
+stand as its evidence. This is the state L4-IMP-102 already has for a fix chore's notes.
+
 ### D4. `verification.md`
 
 After `## Generated UI tests` (`report.py:296-297`), `render_verification_md` adds `## Generated UI tests that were not
