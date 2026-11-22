@@ -213,6 +213,12 @@ What follows, read through the code:
 - `C` not among the family's criteria (263): as today.
 - Kiro: the plan is the provider's input, so a Kiro fix unit gets one `2.n` item where it got two.
 
+Other readers of a finding's criterion, read in the source: `aggregate_unit` (`aggregate.py:143`) never looks at it (a
+criterion fails only by its own outcome), `report.py:51` adds `(criterion C-…)` to the finding's line in
+`verification.md`, and `fixunit.py:112` and `:211` read it only to find findings with no criterion, which a hold's
+finding was never one of there (it always has a reject). `_about_satisfied_tests` (150-159) is false for a hold's
+finding that has a scenario, and one that has none and no reject of its criterion is skipped by point 3 first.
+
 Fail safe: the round's verdict, its findings' ids, severities and sources, which rejects exist and what each answer
 settles do not change; the planner groups and names differently, nothing more. No reject is consumed by a task that
 does not carry its reason. `ui_waivers` (`ui_step.py:269-276`) still ends a waiver on a later reject of the hold,
