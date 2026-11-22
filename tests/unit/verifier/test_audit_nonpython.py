@@ -38,13 +38,15 @@ def _report(*ids: str) -> TestReport:
     return TestReport({i: TestCase(i, "passed") for i in ids})
 
 
-def _step(tmp_path, files, monkeypatch, *, report=None, base_files: dict[str, str] | None = None):
+def _step(
+    tmp_path, files, monkeypatch, *, report=None, base_files: dict[str, str] | None = None, cfg: L4Config | None = None
+):
     """`base_files`: files of the base commit (a test the unit did not change). `report`: step 3's unit-gate report."""
     git, base, head = _repo(tmp_path, files, base_files)
     calls: list[str] = []
     wb = SimpleNamespace(
-        cfg=L4Config(), git=git, worktree=tmp_path, ref=SimpleNamespace(path=tmp_path / "openspec/changes/u", id="u"),
-        emit=lambda *a, **k: None,
+        cfg=cfg or L4Config(), git=git, worktree=tmp_path, emit=lambda *a, **k: None,
+        ref=SimpleNamespace(path=tmp_path / "openspec/changes/u", id="u"),
     )  # fmt: skip
     vc = SimpleNamespace(wb=wb, round=1, audit_writer=lambda: calls.append("writer"))
     run = SimpleNamespace(
@@ -113,6 +115,17 @@ def test_scn_ver_370_a_python_unit_that_changes_only_a_support_file_still_audits
         base_files={"tests/test_pricing.py": PY_TEST},
     )  # fmt: skip
     assert run.records["4a"].status == "ok"
+
+
+def test_scn_ver_358_a_support_file_outside_the_test_globs_is_not_python_code_for_the_scope(tmp_path, monkeypatch):
+    """A3: with the project's own globs a support file that no test glob matches is still test support, not code."""
+    cfg = L4Config.model_validate({"tdd": {"test_globs": ["checks/**"], "test_support_globs": ["helpers/**"]}})
+    files = {"web/app.ts": "1\n", "helpers/shared.py": "X = 1\n"}
+    run, calls = _step(tmp_path / "support", files, monkeypatch, report=NODE, cfg=cfg)
+    assert run.records["4a"].status == "not_run" and "helpers/shared.py" in _note(run) and calls == []
+    other = {"web/app.ts": "1\n", "tools/shared.py": "X = 1\n"}  # matches neither glob: it is Python code
+    code, _ = _step(tmp_path / "code", other, monkeypatch, report=NODE, cfg=cfg)
+    assert code.records["4a"].status == "ok"
 
 
 def test_scn_ver_371_a_unit_that_changes_only_a_python_browser_test_under_a_node_gate_does_not_audit(

@@ -303,6 +303,15 @@ def test_scn_imp_595_a_cited_criterion_with_only_browser_tests_is_held_and_says_
     assert bench.events("task.tests_added")[-1]["discriminating"] == [BROWSER_ID]
 
 
+def test_scn_imp_595_a_browser_only_chore_with_no_unit_base_is_accepted_and_not_held(make_bench, monkeypatch):
+    """With no unit base no run could have been made either way: the verifier decides, as for a unit-gate chore."""
+    monkeypatch.setattr(tdd, "unit_base", lambda wb: None)
+    bench, done, _ = chore(make_bench, monkeypatch, WRITE_BROWSER, task=BOUND, statuses={BROWSER_ID: "passed"})
+    assert done.status == "ok", done.reason
+    [added] = bench.events("task.tests_added")
+    assert added["e2e_tests"] == [BROWSER_ID] and added["discriminating"] == []
+
+
 def test_scn_imp_595_the_unit_tests_are_judged_and_the_browser_tests_go_along(make_bench, monkeypatch):
     """When every unit test is inconclusive the chore is held on the unit ids, not on the browser ones."""
     monkeypatch.setattr(

@@ -305,6 +305,38 @@ def test_scn_ver_365_a_usage_limit_cools_the_profile_and_moves_on(run_l4, valid_
     assert [e["status"] for e in run.events("verify.audit")] == ["accepted"]
 
 
+def test_scn_ver_365_a_profile_its_own_probe_vetoes_is_not_asked_after_a_limit(
+    run_l4, valid_spec, with_verifier, monkeypatch
+):
+    """The profile a limit moves to is checked against its own probe (kiro-judge D14), as the judges' is."""
+    from l4.agents.base import ProbeResult
+    from l4.agents.factory import ADAPTERS
+    from l4.agents.fake import FakeAdapter
+    from l4.availability.vendor import routed_from_listing
+
+    grown = routed_from_listing({"models": [{"model_id": "deepseek-3.2", "description": "DeepSeek V3.2"}]})
+    assert grown is not None  # a listing that grew a model of the implementer's vendor
+    kiro = FakeAdapter([], served_model=True, probes={"auth": ProbeResult("auth", True, {"routed": grown.to_detail()})})
+    monkeypatch.setitem(ADAPTERS, "kiro-cli", lambda: kiro)
+    cid = audited_criterion()
+    config = with_verifier(audit_sample_ratio=0.5)
+    config["profiles"] = {
+        **config["profiles"],
+        "impl": {"adapter": "fake", "vendor": "deepseek"},
+        "kiro-auto": {"adapter": "kiro-cli"},
+        "third": {"adapter": "fake", "vendor": "fifthco"},
+    }
+    config["roles"] = {"verifier_agent": ["auditor", "kiro-auto", "third"]}
+    limit = LimitSignal("fake", None, "usage_limit", None, "test", "You have hit your usage limit")
+    script = [red_step(), green_step(), Step(status="quota", limit=limit), writer_step(cid, AUDIT_KNOWN), JUDGE]
+    run = run_l4(script, **config)
+    assert run.code == 0, run.outcome
+    assert kiro.requests == []  # the vetoed profile was never asked
+    [fallback] = [e for e in run.events("availability.fallback") if e["role"] == "verifier_agent"]
+    assert fallback["from"] == "auditor"
+    assert [e["status"] for e in run.events("verify.audit")] == ["accepted"]
+
+
 def test_scn_ver_366_with_no_profile_left_the_unit_waits_and_the_reason_names_each_failure(
     run_l4, valid_spec, with_verifier
 ):
@@ -412,5 +444,9 @@ def test_scn_ver_363_a_refused_tool_call_moves_the_call_and_the_profile_is_skipp
     run = run_l4(script, **options)
     assert run.code == 0, run.outcome
     assert errors(run) == [("writer", "permission", "4a")]  # step 5 never asked the failed profile again
+    # the script is shared, so only the profile each request was made for shows who was asked: the audit call
+    # (refused) and then, by the second, the audit retry and both UI calls; step 5 never asked `writer`
+    asked = [r.profile.vendor for r in run.adapter.requests if r.role == "judge"][:4]
+    assert asked == ["thirdco", "fourthco", "fourthco", "fourthco"]
     assert [e["status"] for e in run.events("verify.audit")] == ["accepted"]
     assert len(run.events("verify.generated")) == 2
