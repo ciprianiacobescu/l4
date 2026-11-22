@@ -256,9 +256,16 @@ TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
 
 def test_redacted_cut_redacts_a_token_that_straddles_the_limit():  # SCN-VER-332
     redact = Redactor({}).redact_text
-    text = "x" * 40 + "\n" + "y" * 10 + TOKEN + "z" * 100
-    kept = redacted_cut(text, redact, 60)  # the 60th character falls inside the token
-    assert len(kept) <= 60 and TOKEN[:8] not in kept and TOKEN[8:] not in kept
+    # one line, so that no line end lets the cut drop the whole line: the 60th character falls inside the token, and a
+    # cut before the redaction would leave the first 14 characters of it, which no token shape matches
+    text = "y" * 45 + " " + TOKEN + "z" * 100
+    kept = redacted_cut(text, redact, 60)
+    assert len(kept) <= 60 and "y" * 45 in kept  # the line was cut at the limit, not dropped
+    assert all(TOKEN[i : i + 8] not in kept for i in range(len(TOKEN) - 7))
+    assert "glpat-" not in kept
+    assert "glpat-A1b2C3d4" in redact(text[:60])  # what cutting first would leave: a head that no token shape matches
+    text = "x" * 40 + "\n" + "y" * 9 + " " + TOKEN + "z" * 100  # a line end before it: the last line goes whole
+    kept = redacted_cut(text, redact, 60)
     assert all(TOKEN[i : i + 8] not in kept for i in range(len(TOKEN) - 7))
 
 
