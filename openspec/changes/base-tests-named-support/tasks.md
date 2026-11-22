@@ -76,3 +76,8 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   and tell the orchestrator where they differ; do not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the
   skill. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 5. Review fixes
+
+- [x] 5.1 L4-VER-079 keeps no file a base test belongs to, and none with no base report (SCN-VER-324..326): tests first
+  in `test_base_tests_named_support.py`, then `base_tests._in_report` and the lazy base reference of `_kept`.

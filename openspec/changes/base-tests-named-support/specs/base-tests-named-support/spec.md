@@ -10,14 +10,16 @@ reach the fix task with their failure text, and a repeated base-tests failure es
 When step 1 runs the base's tests (L4-VER-038), a file of the revert set SHALL stay at head for the run, and be listed
 under `Pre-existing tests changed with an allowance` as `<path> kept at head for the run (task <t>: changed by its red
 step, named by its reviewed text (<source>))`, when all of these hold: it is a regular file at the base and at head;
-it is no ignore file; the verifier's support rule (`is_support_file`) calls it support at head; at least one harness
-commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the ledger
+it is no ignore file; the verifier's support rule (`is_support_file`) calls it support at head; no test id of the base's
+test report belongs to it (the id's class name is the file's path, its dotted module or a class of it, or a dotted class
+name that ends the path without its extension); at least one harness commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the ledger
 holds a `task.unfrozen` with `reason: named_by_task`, the same unit and task, `red_sha` equal to that commit, a
 `source`, and the path in its `paths` or in a `kept` entry. A person's commit needs no cover. `git diff --numstat` of
 the base and head SHALL count at most 40 added and deleted lines for the file, and a binary file SHALL NOT be kept. At
 most three files per task SHALL be kept this way, in path order. The others are reverted, and the row's note counts them. The rule SHALL
 apply to the run of the base's tests only: the comparison of pre-existing tests (L4-VER-030, L4-VER-031) and every
-other allowance keep their rules. A file that fails any condition SHALL be reverted as before.
+other allowance keep their rules. With no base report (no baseline of the base, no earlier round's evidence, and a run at the merge base that gives none)
+nothing SHALL stay by this rule. A file that fails any condition SHALL be reverted as before.
 
 #### Scenario: SCN-VER-312 (+) A data file the task named stays at head and the base test passes
 - **Given** `test/arch/modules.ts` at the base, task 1.1's red commit that adds an edge to it, a `task.unfrozen{reason:
@@ -107,3 +109,23 @@ the way out. The code SHALL stay `same_failure`. With no such entry
   `support_reverted`
 - **When** each escalates `same_failure`
 - **Then** each reason is `round <n> failed the same way as round <m>: ...` as before
+
+#### Scenario: SCN-VER-324 (−) A file that a base test belongs to is reverted, whatever its name
+- **Given** `src/__tests__/render.ts`, `test/arch/repo.ts` and `test/helpers/x.ts`, which have no test-looking name,
+  that task 1.1's reviewed text names and its red commit changed (each in 40 lines or fewer), and a base report that
+  holds a test id whose class name is that path
+- **When** step 1 runs the base's tests
+- **Then** each file is reverted, `verify.base_tests.reverted` holds it, and no allowance lists it
+
+#### Scenario: SCN-VER-325 (−) With no base report nothing stays by this rule
+- **Given** a file of SCN-VER-312, and a unit with no baseline of its base, no earlier round's evidence and a run at the
+  merge base that gives no report
+- **When** step 1 runs the base's tests
+- **Then** the file is reverted and no allowance lists it, and a unit that names no such file never runs the merge base
+  for this
+
+#### Scenario: SCN-VER-326 (+) A data file with no test of its own stays, and a plan named people is no person's
+- **Given** `src/__tests__/data.ts`, named by task 1.1 and changed by its red commit, a base report whose ids belong to
+  other files, and a `source` of `plan:people@d`
+- **When** step 1 runs the base's tests
+- **Then** the file stays at head, and the line is in `allowed_tests` and not in `human_tests`

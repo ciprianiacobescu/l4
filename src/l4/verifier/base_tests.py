@@ -16,7 +16,7 @@ list), or from a run in a merge-base worktree.
 
 import posixpath
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -196,19 +196,24 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     return blocked, allowed, human
 
 
-def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
+def kept_files(ctx: IntegrityContext, paths: Sequence[str], base: TestReport | None = None) -> dict[str, str]:
     """The files of the revert set that stay at head for the run (second review M4): a test or support file (conftest,
     fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed or that a
     `task.unfrozen` frees, a support file that a task's reviewed text names and only that task's red commit changed
     (L4-VER-079), and a test module whose last change in `base..head` is a person's commit (the rule that excuses its
     failing tests, so the run uses the content the person set). Their effect on the tests is accepted and listed; every
     other file is reverted. A harness change to a support file is read by that listing and by the judge, whose diff
-    holds it. A support file a person changed last is reverted: it can change what other files' tests check."""
-    return _kept(ctx, paths)[0]
+    holds it. A support file a person changed last is reverted: it can change what other files' tests check. `base` is
+    the base's test report: a support file a task names stays only when no test of it maps to the file, and with no
+    report none stays this way (L4-VER-079)."""
+    return _kept(ctx, paths, lambda: base)[0]
 
 
-def _kept(ctx: IntegrityContext, paths: Sequence[str]) -> tuple[dict[str, str], dict[str, int]]:
-    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079)."""
+def _kept(
+    ctx: IntegrityContext, paths: Sequence[str], base_of: Callable[[], TestReport | None]
+) -> tuple[dict[str, str], dict[str, int]]:
+    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079). `base_of` gives
+    the base's test report, and is called only for a file that passed every other condition of L4-VER-079."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
     per_task: dict[tuple[str, str], int] = {}
@@ -219,7 +224,7 @@ def _kept(ctx: IntegrityContext, paths: Sequence[str]) -> tuple[dict[str, str], 
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
-        elif (named := _named_red_change(ctx, who, path, by_sha)) is not None:
+        elif (named := _named_red_change(ctx, who, path, by_sha, base_of)) is not None:
             key, task, reason = named
             if per_task.get(key, 0) < MAX_NAMED_SUPPORT:
                 per_task[key] = per_task.get(key, 0) + 1
@@ -263,13 +268,35 @@ def _names_red_change(ctx: IntegrityContext, commit: Commit, path: str) -> str |
     return None
 
 
+def _in_report(report: TestReport, path: str) -> bool:
+    """Does a test id of `report` belong to the file `path`? A pure reading of the id's classname, in the forms the
+    JUnit writers give: the path itself (`src/__tests__/a.ts::name`, with or without a leading `./`); the dotted module
+    of a pytest id, or one of its classes (`tests.test_a.TestX::name`); a dotted class name that ends the path without
+    its extension (`com.acme.Shared::name` and `src/test/java/com/acme/Shared.java`). `_file_of` finds only Python and
+    Go test files, and a file under `__tests__/` or `test/` of another language is a test file to its runner."""
+    stem = posixpath.splitext(path)[0]
+    for test_id in report.tests:
+        classname = test_id.partition("::")[0]
+        if classname.removeprefix("./") == path:
+            return True
+        dotted = classname.replace(".", "/")
+        if dotted == stem or dotted.startswith(stem + "/") or ("." in classname and stem.endswith("/" + dotted)):
+            return True
+    return False
+
+
 def _named_red_change(
-    ctx: IntegrityContext, who: list[list[str]], path: str, by_sha: Mapping[str, Commit]
+    ctx: IntegrityContext,
+    who: list[list[str]],
+    path: str,
+    by_sha: Mapping[str, Commit],
+    base_of: Callable[[], TestReport | None],
 ) -> tuple[tuple[str, str], str, str] | None:
     """L4-VER-079: ((unit, task), task, reason) when `path` is a support file that exists at the base and at head, is no
-    ignore file, is at most `MAX_NAMED_SUPPORT_LINES` changed lines, and every harness commit that changed it is the
-    red commit of a task whose reviewed text names it (a `task.unfrozen{named_by_task}` of that commit). A person's
-    commit needs no cover. Only `kept_files` reads this; `_allowance` is not widened (L4-VER-030 shares it)."""
+    ignore file, is at most `MAX_NAMED_SUPPORT_LINES` changed lines, no test of the base's report belongs to, and every
+    harness commit that changed it is the red commit of a task whose reviewed text names it (a
+    `task.unfrozen{named_by_task}` of that commit). A person's commit needs no cover. With no base report, nothing
+    stays. Only `kept_files` reads this; `_allowance` is not widened (L4-VER-030 shares it)."""
     harness = [r for r in who if is_harness(r)]
     if not harness:
         return None
@@ -288,6 +315,9 @@ def _named_red_change(
         return None
     lines = _changed_lines(ctx, path)
     if lines is None or lines > MAX_NAMED_SUPPORT_LINES:
+        return None
+    base = base_of()  # last: it may run the base's tests
+    if base is None or _in_report(base, path):
         return None
     commit, source = sources[0]
     tasks = list(dict.fromkeys(c.task for c, _ in sources))
@@ -400,8 +430,16 @@ def check_base_tests(
     if any(c.status == "failed" for c in prior):
         return Outcome(note="step 1 already failed", skipped=True)
     cfg = wb.cfg
+    command = cfg.gates.test.command
+    reference: list[tuple[TestReport | None, str, str]] = []
+
+    def base_reference() -> tuple[TestReport | None, str, str]:
+        if not reference:
+            reference.append(_base_reference(wb, ctx, command, round_no))
+        return reference[0]
+
     full = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
-    kept, over = _kept(ctx, [path for path, _ in full.changes])
+    kept, over = _kept(ctx, [path for path, _ in full.changes], lambda: base_reference()[0])
     plan = replace(full, changes=tuple(c for c in full.changes if c[0] not in kept))
     allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" not in why]
     people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" in why]
@@ -412,7 +450,6 @@ def check_base_tests(
         if kept:
             note = f"all {len(kept)} changed test and support file(s) are allowed and kept at head (listed)"
         return Outcome(note=note, allowed_tests=allowed_files, human_tests=people_files)
-    command = cfg.gates.test.command
     for setup in cfg.gates.setup:
         done = wb.run_gate("setup-base-tests", setup, network=True, builds_env=True)
         if done.status != "pass":
@@ -430,7 +467,7 @@ def check_base_tests(
         return Outcome([_blocker(GONE_TITLE, detail)], "no report from the run of the base's tests")
     needs_base = runner_changed or r1.collection_errors or any(c.status != "passed" for c in r1.tests.values())
     if needs_base:
-        r0, source, why = _base_reference(wb, ctx, command, round_no)
+        r0, source, why = base_reference()
         if r0 is None:
             return Outcome(note=f"no base reference: {why}", skipped=True)
     else:

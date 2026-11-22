@@ -1,6 +1,9 @@
 """A support file that a task's reviewed text names and its red step changed stays at head for the run of the base's
 tests (L4-VER-079). L4-VER-079 is slippable: its code is `base_tests._named_red_change`, and these are its tests."""
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import pytest
 
 from l4.gates.junit import TestCase, TestReport
@@ -15,6 +18,7 @@ GRAPH = "export const edges = [\n  ['src/a', 'src/c'],\n];\n"
 GRAPH_RED = "export const edges = [\n  ['src/a', 'src/c'],\n  ['src/a', 'src/b'],\n];\n"
 REPO_TEST = "test('graph', () => {\n  expect(violations(edges)).toEqual([]);\n});\n"
 EXTRA = "test/arch/extra.test.ts"  # a test module red changed: it is reverted, so the run happens
+BASE = passing_report("test.arch.repo__graph")  # the base report: no test of it belongs to a data file
 SOURCE = "plan:p@d"
 REASON = f"task 1.1: changed by its red step, named by its reviewed text ({SOURCE})"
 
@@ -46,8 +50,9 @@ def test_scn_ver_312_a_named_data_file_stays_at_head_and_is_listed(tmp_path, git
     ctx = ctx_of(repo, base, red, tasks)
     # a path in `paths` is already freed by `_allowance` (`unfrozen by <source>`): kept either way
     reason = REASON if via == "kept" else f"task 1.1: unfrozen by {SOURCE}"
-    assert kept_files(ctx, [MODULES]) == {MODULES: reason}
+    assert kept_files(ctx, [MODULES], BASE) == {MODULES: reason}
     wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    wb.baselines[base] = BASE
     out = check_base_tests(wb, ctx, prior=[], round_no=1)
     assert out.findings == []
     assert f"{MODULES} kept at head for the run ({reason})" in out.allowed_tests
@@ -66,6 +71,7 @@ def test_scn_ver_312_the_base_test_runs_against_the_head_version(tmp_path, git_e
             return super().run_gate(name, command, **kw)
 
     wb = Reading(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    wb.baselines[base] = BASE
     out = check_base_tests(wb, ctx_of(repo, base, red, tasks), prior=[], round_no=1)
     assert out.findings == [] and seen["base-tests"] == GRAPH_RED
 
@@ -75,7 +81,7 @@ def test_scn_ver_313_a_file_another_tasks_commit_also_changed_is_reverted(tmp_pa
     repo.events.append(named(red))
     repo.write({MODULES: GRAPH_RED + "// 1.2\n"})
     head = repo.commit("red 1.2", task="1.2", tdd="red")  # no event names this commit
-    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES], BASE) == {}
 
 
 @pytest.mark.parametrize("tdd", ["green", "exempt"])
@@ -84,7 +90,7 @@ def test_scn_ver_313_a_green_commit_of_the_task_puts_it_back(tmp_path, git_envir
     repo.events.append(named(red))
     repo.write({MODULES: GRAPH_RED + "// green\n"})
     head = repo.commit("green 1.1", task="1.1", tdd=tdd)
-    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_313_a_fix_units_commit_is_not_covered(tmp_path, git_environ):  # SCN-VER-313
@@ -93,7 +99,7 @@ def test_scn_ver_313_a_fix_units_commit_is_not_covered(tmp_path, git_environ):  
     repo.write({MODULES: GRAPH_RED})
     fix = repo.commit("red fix", task="1.1", tdd="red", unit="openspec:fix-thing")
     repo.events.append(named(fix))  # an event of the unit's task 1.1: the fix unit's commit is another unit
-    assert kept_files(ctx_of(repo, base, fix, [(UNIT, make_task("1.1"))]), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, fix, [(UNIT, make_task("1.1"))]), [MODULES], BASE) == {}
 
 
 def test_scn_ver_313_a_commit_without_a_task_trailer_is_not_covered(tmp_path, git_environ):  # SCN-VER-313
@@ -101,19 +107,19 @@ def test_scn_ver_313_a_commit_without_a_task_trailer_is_not_covered(tmp_path, gi
     repo.events.append(named(red))
     repo.write({MODULES: GRAPH_RED + "// x\n"})
     head = repo.commit_as_harness("lessons", phase="lessons")
-    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, head, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_314_an_older_reds_event_covers_nothing(tmp_path, git_environ):  # SCN-VER-314
     repo, base, red, tasks = named_repo(tmp_path, git_environ)
     repo.events.append(named("0" * 40))  # the event of an earlier red commit of a reopened task
-    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_314_an_event_without_a_source_covers_nothing(tmp_path, git_environ):  # SCN-VER-314
     repo, base, red, tasks = named_repo(tmp_path, git_environ)
     repo.events.append(named(red, source=""))
-    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_314_an_event_of_another_reason_or_task_covers_nothing(tmp_path, git_environ):  # SCN-VER-314
@@ -130,13 +136,13 @@ def test_scn_ver_314_an_event_of_another_reason_or_task_covers_nothing(tmp_path,
             kept=[{"path": MODULES, "why": "x"}],
         )
     )
-    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_314_an_event_for_another_path_covers_nothing(tmp_path, git_environ):  # SCN-VER-314
     repo, base, red, tasks = named_repo(tmp_path, git_environ)
     repo.events.append(named(red, path="test/arch/other.ts"))
-    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {}
 
 
 def test_scn_ver_314_an_ignore_file_a_test_module_and_an_added_file_are_reverted(tmp_path, git_environ):  # SCN-VER-314
@@ -153,7 +159,7 @@ def test_scn_ver_314_an_ignore_file_a_test_module_and_an_added_file_are_reverted
     for path in (".gitignore", "test/arch/repo.test.ts", "test/arch/new.ts"):
         repo.events.append(named(red, path=path))
     ctx = ctx_of(repo, base, red, tasks)
-    assert kept_files(ctx, [".gitignore", "test/arch/repo.test.ts", "test/arch/new.ts"]) == {}
+    assert kept_files(ctx, [".gitignore", "test/arch/repo.test.ts", "test/arch/new.ts"], BASE) == {}
 
 
 def test_scn_ver_314_a_rewrite_over_the_line_bound_is_reverted(tmp_path, git_environ):  # SCN-VER-314
@@ -162,7 +168,7 @@ def test_scn_ver_314_a_rewrite_over_the_line_bound_is_reverted(tmp_path, git_env
         tmp_path, git_environ, base={"test/arch/big.ts": "x\n"}, red={"test/arch/big.ts": big}
     )
     repo.events.append(named(red, path="test/arch/big.ts"))
-    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/big.ts"]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/big.ts"], BASE) == {}
 
 
 def test_scn_ver_314_a_binary_file_is_reverted(tmp_path, git_environ):  # SCN-VER-314
@@ -170,7 +176,7 @@ def test_scn_ver_314_a_binary_file_is_reverted(tmp_path, git_environ):  # SCN-VE
     (repo.path / "test/arch/img.dat").write_bytes(b"\x00\x01\x02\xff")
     red = repo.commit("binary", task="1.1", tdd="red")
     repo.events.append(named(red, path="test/arch/img.dat"))
-    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/img.dat"]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/img.dat"], BASE) == {}
 
 
 @pytest.mark.parametrize(("added", "stays"), [(40, True), (41, False)])
@@ -179,7 +185,7 @@ def test_scn_ver_314_forty_changed_lines_stay_and_forty_one_do_not(tmp_path, git
     appended = "export {};\n" + "".join(f"export const n{i} = {i};\n" for i in range(added))
     repo, base, red, tasks = named_repo(tmp_path, git_environ, base={path: "export {};\n"}, red={path: appended})
     repo.events.append(named(red, path=path))
-    assert (path in kept_files(ctx_of(repo, base, red, tasks), [path])) is stays
+    assert (path in kept_files(ctx_of(repo, base, red, tasks), [path], BASE)) is stays
 
 
 def test_scn_ver_314_only_the_first_three_named_files_stay_and_the_note_counts_the_rest(
@@ -191,9 +197,10 @@ def test_scn_ver_314_only_the_first_three_named_files_stay_and_the_note_counts_t
     for path in paths:
         repo.events.append(named(red, path=path))
     ctx = ctx_of(repo, base, red, tasks)
-    kept = kept_files(ctx, paths)
+    kept = kept_files(ctx, paths, BASE)
     assert MAX_NAMED_SUPPORT == 3 and sorted(kept) == paths[:3]
     wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    wb.baselines[base] = BASE
     out = check_base_tests(wb, ctx, prior=[], round_no=1)
     assert out.findings == []
     assert paths[3] in wb.events[0][1]["reverted"] and paths[0] not in wb.events[0][1]["reverted"]
@@ -229,7 +236,7 @@ def test_scn_ver_316_a_ledger_of_0_4_59_keeps_the_file_on_the_next_round(tmp_pat
             kept=[{"path": MODULES, "why": "a red test of this task"}],
         )
     )
-    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES]) == {MODULES: REASON}
+    assert kept_files(ctx_of(repo, base, red, tasks), [MODULES], BASE) == {MODULES: REASON}
 
 
 # the blocker's text and its records (L4-VER-080)
@@ -252,6 +259,7 @@ def failing_run(tmp_path, git_environ, *, named_task=True, extra=None, report=No
     repo.write({MODULES: GRAPH_RED + "// 1.2\n"})
     head = repo.commit("red 1.2", task="1.2", tdd="red")
     wb = ScriptedWb(repo, git_environ, [report or TestReport({FAILING_ID: failing_case()})], tmp_path / "unit")
+    wb.baselines[base] = BASE
     wb.baselines[base] = passing_report(FAILING_ID.replace("::", "__"))
     return wb, ctx_of(repo, base, head, tasks), repo
 
@@ -308,6 +316,7 @@ def test_a_reverted_file_a_person_and_a_taskless_harness_commit_changed_is_a_per
     repo.write({MODULES: GRAPH_RED + "// h\n", "tests/test_a.py": "def test_a():\n    assert 2\n"})
     head = repo.commit_as_harness("a harness commit with no task", phase="implementing")
     wb = ScriptedWb(repo, git_environ, [TestReport({FAILING_ID: failing_case()})], tmp_path / "unit")
+    wb.baselines[base] = BASE
     wb.baselines[base] = passing_report(FAILING_ID.replace("::", "__"))
     [finding] = check_base_tests(wb, ctx_of(repo, base, head, []), prior=[], round_no=1).findings
     assert wb.events[0][1]["support_reverted"] == [{"path": MODULES, "tasks": [], "people": True}]
@@ -320,6 +329,7 @@ def test_with_no_reverted_support_file_the_detail_is_as_before_and_the_key_is_em
     head = repo.commit("red", task="1.1", tdd="red")
     failed = TestReport({"tests.test_a::test_a": TestCase("tests.test_a::test_a", "failed", "boom")})
     wb = ScriptedWb(repo, git_environ, [failed], tmp_path / "unit")
+    wb.baselines[base] = BASE
     wb.baselines[base] = passing_report("tests.test_a__test_a")
     out = check_base_tests(wb, repo.context(base, head, tasks=[(UNIT, make_task("1.1"))]), prior=[], round_no=1)
     [finding] = out.findings
@@ -365,10 +375,91 @@ def test_an_event_that_names_a_commit_which_is_no_red_step_covers_nothing(tmp_pa
     repo.write({MODULES: GRAPH_RED + "// green\n"})
     green = repo.commit("green 1.1 alone", task="1.1", tdd="green")
     repo.events.append(named(green))  # the event names the commit, but it is a green commit
-    assert kept_files(ctx_of(repo, base, green, tasks), [MODULES]) == {}
+    assert kept_files(ctx_of(repo, base, green, tasks), [MODULES], BASE) == {}
 
 
 def test_a_path_no_commit_changed_is_not_kept_and_does_not_fail(tmp_path, git_environ):  # SCN-VER-314
     repo, base, red, tasks = named_repo(tmp_path, git_environ, base={"test/arch/untouched.ts": "x\n"})
     repo.events.append(named(red, path="test/arch/untouched.ts"))
-    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/untouched.ts", "no/such/file.ts"]) == {}
+    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/untouched.ts", "no/such/file.ts"], BASE) == {}
+
+
+# a file the base's own tests live in is never kept (L4-VER-079, the base report decides)
+
+
+def _no_base_run(monkeypatch, report=None):
+    """FAKE merge-base run: the base reference of a unit with no cached baseline (`report` None: it gave none)."""
+    monkeypatch.setattr("l4.verifier.base_tests.base_checkout", lambda wb, sha: _tree(wb))
+    monkeypatch.setattr(
+        "l4.verifier.base_tests.run_gate_at",
+        lambda wb, tree, spec, network: SimpleNamespace(report=report, reason="FAKE: no report"),
+    )
+
+
+@contextmanager
+def _tree(wb):
+    yield wb.worktree
+
+
+def _hosting_run(tmp_path, git_environ, path, ids, *, base_text="export const x = 1;\n"):
+    """A unit whose task 1.1 names `path`, a file with no test-looking name that red changed, and whose base report
+    holds `ids`. Returns the workbench, the context and the base report."""
+    repo, base, red, tasks = named_repo(tmp_path, git_environ, base={path: base_text}, red={path: base_text + "// r\n"})
+    repo.events.append(named(red, path=path))
+    report = TestReport({i: TestCase(i, "passed") for i in ids}) if ids else None
+    wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
+    if report is not None:
+        wb.baselines[base] = report
+    return wb, ctx_of(repo, base, red, tasks), report
+
+
+@pytest.mark.parametrize(
+    ("path", "ids"),
+    [
+        ("src/__tests__/render.ts", ["src/__tests__/render.ts::renders"]),
+        ("test/arch/repo.ts", ["test/arch/repo.ts::graph"]),
+        ("test/helpers/x.ts", ["./test/helpers/x.ts::a"]),
+        ("src/test/java/com/acme/Shared.java", ["com.acme.Shared::works"]),
+        ("tests/helpers.py", ["tests.helpers.TestIt::t"]),
+    ],
+)
+def test_scn_ver_324_a_named_file_a_base_test_lives_in_is_reverted(tmp_path, git_environ, path, ids):  # SCN-VER-324
+    wb, ctx, report = _hosting_run(tmp_path, git_environ, path, ids)
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert path in wb.events[0][1]["reverted"]
+    assert not any(a.startswith(f"{path} kept") for a in out.allowed_tests)
+    assert kept_files(ctx, [path], report) == {}
+
+
+def test_scn_ver_324_a_data_file_no_base_test_id_maps_to_stays(tmp_path, git_environ):  # SCN-VER-324
+    path = "src/__tests__/data.ts"
+    wb, ctx, report = _hosting_run(tmp_path, git_environ, path, ["src/__tests__/render.ts::renders", "a.b::c"])
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert any(a.startswith(f"{path} kept at head") for a in out.allowed_tests)
+    assert path not in wb.events[0][1]["reverted"]
+    assert kept_files(ctx, [path], report) == {
+        path: f"task 1.1: changed by its red step, named by its reviewed text ({SOURCE})"
+    }
+
+
+def test_scn_ver_325_with_no_base_report_nothing_is_kept_by_the_named_rule(tmp_path, git_environ, monkeypatch):
+    path = "test/arch/data.ts"  # SCN-VER-325
+    wb, ctx, _ = _hosting_run(tmp_path, git_environ, path, [])
+    _no_base_run(monkeypatch)
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert path in wb.events[0][1]["reverted"]
+    assert not any(a.startswith(f"{path} kept") for a in out.allowed_tests)
+    assert kept_files(ctx, [path]) == {} and kept_files(ctx, [path], None) == {}
+
+
+def test_scn_ver_325_the_base_reference_is_fetched_only_for_a_named_file(tmp_path, git_environ, monkeypatch):
+    repo, base = new_repo(tmp_path, git_environ, {"tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({"tests/test_a.py": "def test_a():\n    assert 2\n"})
+    head = repo.commit("red", task="1.1", tdd="red")
+    wb = ScriptedWb(repo, git_environ, [passing_report("tests.test_a__test_a")], tmp_path / "unit")
+    _no_base_run(monkeypatch)
+    monkeypatch.setattr(
+        "l4.verifier.base_tests.run_gate_at", lambda *a, **k: pytest.fail("the base was run for no named file")
+    )
+    out = check_base_tests(wb, ctx_of(repo, base, head, [(UNIT, make_task("1.1"))]), prior=[], round_no=1)
+    assert out.findings == []

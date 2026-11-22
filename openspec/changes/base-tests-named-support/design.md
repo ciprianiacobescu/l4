@@ -67,10 +67,22 @@ as already satisfied, and the general rule for a fix chore that changes nothing.
    and task, `red_sha == commit.sha`, a non-empty `source`, and the path in `paths` or in a `kept` entry's `path`. A
    person's commit in `who` needs no cover, as in `_allowance`. Matching `red_sha` means an event of an older red
    commit (a task reopened after a spec edit) covers nothing.
-5. `git diff --numstat <base> <head> -- <path>` counts at most `MAX_NAMED_SUPPORT_LINES = 40` added plus deleted
+5. No test id of the base's test report belongs to `path` (`_in_report`). Jest runs every file under `__tests__/` and
+   mocha every file under `test/`, and for a file that is not Python step 1's run is the only guard against a weakened
+   test of it; `is_support_file` calls such a file support for its name alone (`src/__tests__/render.ts`,
+   `test/arch/repo.ts`, `test/helpers/x.ts`). A test id belongs to a file when its class name is the file's path (with
+   or without `./`; Vitest and Playwright write it so), is the file's dotted module or a class of it (a pytest id), or
+   is a dotted class name that ends the path without its extension (a JVM or .NET id). `_file_of` is not used: it finds
+   only Python and Go test files, and widening it would change `split_allowed`. A file no id maps to, the motivating
+   data file with no tests of its own, stays eligible. The base report is step 1's base reference (the workbench
+   baseline, an earlier round's evidence or a run at the merge base), fetched through a callable only when a file has
+   passed every other condition, so a unit with no such file never runs the merge base for this. With no report
+   (the reference gave none) nothing stays: fail closed. The evidence of an earlier round lists only the tests that
+   passed at the base, which is enough: a test that failed there guards nothing.
+6. `git diff --numstat <base> <head> -- <path>` counts at most `MAX_NAMED_SUPPORT_LINES = 40` added plus deleted
    lines. A binary file (`-` counts) is not kept. A rewrite of a named file is reverted as before. The bound keeps an
    added entry or edge and rules out a replaced file.
-6. At most `MAX_NAMED_SUPPORT = 3` paths per (unit, task) are kept this way, in sorted path order (the bound of
+7. At most `MAX_NAMED_SUPPORT = 3` paths per (unit, task) are kept this way, in sorted path order (the bound of
    `unfreeze.MAX_PATHS_PER_QUESTION`). A later one is reverted as before, and the row's note says `<n> more support
    file(s) named by task <t> reverted (at most 3 kept)`.
 
