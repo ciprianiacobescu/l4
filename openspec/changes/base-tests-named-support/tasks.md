@@ -33,7 +33,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
 
 ## 2. The blocker's text and its records (L4-VER-080, D2)
 
-- [ ] 2.1 Write the tests first:
+- [x] 2.1 Write the tests first:
   - in `test_base_tests_named_support.py`: SCN-VER-317 (the lead text of both blocker titles, at most 5 support files,
     `(a person)` for a file only people changed, the tasks of the harness commits; no lead with no reverted support
     file, and the detail is then byte for byte as before); `verify.base_tests` carries `support_reverted` (at most 20);
@@ -47,7 +47,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
     whose finding is `a pre-existing test fails on the unit's code` and whose record has `gate: base-tests` and an
     excerpt: the fix chore's first prompt holds the block with the excerpt line.
   Run each file and see the new tests fail.
-- [ ] 2.2 Then: `BASE_FAILS_TITLE` and the branch in `shown_failure_ids` (`src/l4/verifier/failures.py`;
+- [x] 2.2 Then: `BASE_FAILS_TITLE` and the branch in `shown_failure_ids` (`src/l4/verifier/failures.py`;
   `base_tests.FAILS_TITLE` imports it); `unit_gate` in `failure_records` (`src/l4/verifier/gates.py`);
   `Outcome.failures` (`src/l4/verifier/integrity.py`); in `check_base_tests` the `support_reverted` list, the lead text,
   the records (with `case_excerpt` as `ladder.tests()` builds it) and `_emit(..., support_reverted=...)`; in
