@@ -20,6 +20,7 @@ from typing import Any
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.gates.junit import TestReport
+from l4.implementer.test_locate import file_of_id
 from l4.specs.base import Criterion
 from l4.state.ledger import LedgerEvent
 from l4.verifier.e2e_trace import e2e_coverage, trace_e2e
@@ -186,6 +187,38 @@ def unclosed_holds(gaps: Iterable[Criterion], outcomes: Iterable[GeneratedOutcom
             or (outcome.status == "not_testable" and outcome.covered_by)
         )
     ]
+
+
+def _holders(test_id: str, paths: Collection[str]) -> set[str]:
+    """Every one of `paths` that the head of `test_id` (before its first `::`) could name: the path itself or its end,
+    the path with dots for slashes (whole or its end), and the files of the dotted Python module (the longest prefix
+    that is one, as `file_of_id` reads it, also below a directory the id does not name)."""
+    head = test_id.split("::", 1)[0]
+    if not head:
+        return set()
+    found = {
+        p for p in paths if p == head or p.endswith("/" + head) or (d := p.replace("/", ".")) == head
+        or d.endswith("." + head)
+    }  # fmt: skip
+    parts = head.split(".")
+    for n in range(len(parts), 0, -1):
+        module = "/".join(parts[:n]) + ".py"
+        hits = {p for p in paths if p == module or p.endswith("/" + module)}
+        if hits:
+            return found | hits
+    return found
+
+
+def carry_file(test_id: str, walked: str | None, paths: Collection[str]) -> str | None:
+    """The file that holds the test of `test_id` for the carry of L4-VER-086, or None when that is in any doubt. Two
+    readings of the id must give the same file: `walked` (the dotted module found in the work tree, which reads
+    `src.pricing.total.test.ts` as `src/pricing/total.py` when that lies beside the test) and `file_of_id` over
+    `paths`; and no other of `paths` may be a file the id could name (a module of the same name under two roots). A
+    test that either reading cannot place, a test that is not Python included, is not placed."""
+    found = file_of_id(test_id, paths)
+    if found is None or walked != found or len(_holders(test_id, paths)) != 1:
+        return None
+    return found
 
 
 def carried_from_base(

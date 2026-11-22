@@ -14,6 +14,7 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier.types import CriterionEvidence, GeneratedOutcome, TracingTest
 from l4.verifier.ui_step import (
     carried_from_base,
+    carry_file,
     covered_by_step4,
     gap_findings,
     lost_notes,
@@ -637,3 +638,38 @@ def test_the_gap_finding_of_a_carried_criterion_says_it_is_unchanged_on_the_base
     assert "(L4-VER-086)" in finding.detail and "step 5 generates one" not in finding.detail
     [plain] = gap_findings([crit(CID)])
     assert "step 5 generates one." in plain.detail and "unchanged on the base" not in plain.detail
+
+
+# -- the file of a carried test is found by both readings of its id, and only when they agree (SCN-VER-351)
+
+TOTAL = ["src/pricing/total.py", "src/pricing/total.test.ts"]
+
+
+@pytest.mark.parametrize("test_id", ["src.pricing.total.test.ts::x", "src/pricing/total.test.ts::x"])
+def test_scn_ver_351_a_typescript_test_beside_a_python_module_of_its_stem_is_not_the_module(test_id):
+    # the module walk reads `src.pricing.total.test.ts` as `src/pricing/total.py`, which the unit did not change
+    assert carry_file(test_id, "src/pricing/total.py", TOTAL) is None
+    assert (
+        carry_file(test_id, "src/pricing/total.test.ts", TOTAL) is None
+    )  # a walk that happened to agree: two files fit
+
+
+def test_scn_ver_351_two_modules_of_one_name_under_two_roots_are_not_told_apart():
+    tree = ["tests/test_a.py", "pkg/tests/test_a.py"]
+    assert carry_file("tests.test_a::x", "tests/test_a.py", tree) is None  # which of the two ran is not known
+    assert carry_file("pkg.tests.test_a.TestX::x", "pkg/tests/test_a.py", tree) == "pkg/tests/test_a.py"
+    assert carry_file("tests/test_a.py::x", "tests/test_a.py", tree) is None
+
+
+def test_scn_ver_351_a_test_that_either_reading_cannot_place_is_not_placed():
+    assert carry_file("tests.test_a::x", None, ["tests/test_a.py"]) is None  # the module walk finds nothing
+    assert carry_file("tests.test_a::x", "tests/test_a.py", []) is None  # the id is in no file of the tree
+    assert carry_file("src.pricing.total.test.ts::x", None, ["src/pricing/total.test.ts"]) is None  # not Python
+    assert carry_file("", "tests/test_a.py", ["tests/test_a.py"]) is None
+
+
+@pytest.mark.parametrize("test_id", ["tests.test_a::x", "tests.test_a.TestX::x", "tests/test_a.py::x"])
+def test_scn_ver_351_the_plain_case_is_placed(test_id):
+    assert (
+        carry_file(test_id, "tests/test_a.py", ["tests/test_a.py", "tests/test_b.py", "src/a.py"]) == "tests/test_a.py"
+    )

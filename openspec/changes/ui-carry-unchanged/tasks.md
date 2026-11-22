@@ -1,9 +1,20 @@
-Read `design.md` first (D1-D7). Requirement: L4-VER-086 (`docs/SPEC.md`), scenarios SCN-VER-343..349. This change is
-SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `types.py`, `report.py`, `generate.py` and
-`fixunit.py`, in different functions), and it can be left out at integration. Then also revert its edits to
-`docs/SPEC.md` (L4-VER-086, SCN-VER-343..349, row 141, its sentence in L4-VER-067, the step-5 row of 10.2 and
-`verify.generated` in 12.1), `CHANGELOG.md` and `docs/runbook.md`. Run single test files only (`uv run --frozen pytest
-<file> -x -q`), never a whole directory, never two runs at once, and never a wait loop on `pgrep`.
+Read `design.md` first (D1-D7). Requirement: L4-VER-086 (`docs/SPEC.md`), scenarios SCN-VER-343..349 and SCN-VER-351.
+This change is SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `types.py`, `report.py`,
+`generate.py` and `fixunit.py`, in different functions), and it can be left out at integration. Then also remove all of
+its text, and nothing else:
+- `docs/SPEC.md`: the requirement L4-VER-086 with its `[V, …]` note; its sentence in L4-VER-067 (`, except a criterion
+  carried from the base, which raises none (L4-VER-086)`); its sentence in the step-5 row of 10.2 (`A UI criterion
+  unchanged on the base whose only tracing tests are passing `pass_to_pass` tests … is **carried from the base** …
+  (L4-VER-086).`); the `status: carried` clause of `verify.generated` in 12.1; row 141 of the change table; the
+  scenarios SCN-VER-343 to SCN-VER-349 and SCN-VER-351;
+- `CHANGELOG.md`: the bullet under Changed that starts `A UI criterion that a unit did not change is carried from the
+  base`;
+- `docs/runbook.md`: the paragraph that starts `From 0.4.60 a UI criterion that the unit did not change`;
+- `openspec/changes/ui-carry-unchanged/` (the folder);
+- the code and tests of the change are its own commits (`git log --format=%h\ %s 62188257..HEAD | grep ui-carry`
+  and the commits that name L4-VER-086 or the carry): revert them, not the commits of `ui-hold-evidence`.
+Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two runs at once, and
+never a wait loop on `pgrep`.
 
 ## 1. The rule (D1)
 
@@ -14,7 +25,8 @@ SLIPPABLE: it and `ui-hold-evidence` need nothing of each other (both touch `typ
   file in `changed`; a criterion in `rejected`); `rejected_ui_criteria` finds a reject of the criterion, of a UI hold
   named by `question.raised{criterion}`, of the stable hold id with no such event, and a consumed one; an accept is not
   a reject. Run and see them fail.
-- [x] 1.2 Then add `carried_from_base` and `rejected_ui_criteria` to `src/l4/verifier/ui_step.py` (pure, no git). Run
+- [x] 1.2 Then add `carried_from_base`, `carry_file` and `rejected_ui_criteria(events, criteria)` to
+  `src/l4/verifier/ui_step.py` (pure, no git). Run
   `tests/unit/verifier/test_ui_step.py`.
 
 ## 2. Step 5 and what it records (D2, D3)

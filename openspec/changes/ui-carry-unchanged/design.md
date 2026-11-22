@@ -48,11 +48,20 @@ criterion (D7); a criterion with any proof but `pass_to_pass`.
    (`{t for t, _ in ignored} <= {t.id for t in capped}`). Any other proof means a task of the unit proved something
    for `C`, or a person or a chore wrote a test for it: not carried. This replaces "no task names the scenario", which
    has no reading for an OpenSpec unit (`implementer/tdd.py:433-437`: an OpenSpec task cites no criteria).
-3. Every test of 2, listed or ignored, maps to a file (`file_of`: `file_of_test(wb, id)`, else `file_of_id(id,
-   worktree_files(wb), changed)`, the mapping `_test_blobs` makes; split it out so both use it), and no such file is in
-   `changed` (`unit_changed_files(wb.git, base_sha, head)`, which `_generate_step` already reads at 1272: what the unit
-   changed since its merge base). A test whose file is not found is not carried.
-4. `C` is not in `rejected`: `rejected_ui_criteria(events)` in `l4.verifier.ui_step` gives every criterion with a
+3. Every test of 2, listed or ignored, maps to a file (`file_of`: `ladder._carry_files`, which gives each id to
+   `ui_step.carry_file(id, file_of_test(wb, id), worktree_files(wb))`), and no such file is in `changed`
+   (`unit_changed_files(wb.git, base_sha, head)`, which `_generate_step` already reads at 1272: what the unit changed
+   since its merge base). `_test_blobs` keeps its own mapping (`file_of_test`, else `file_of_id` with `changed` first),
+   which binds a UI hold's accept: the carry must not change what an accept in force is bound to. The carry reads the
+   id both ways and fails closed: the dotted-module walk reads `src.pricing.total.test.ts` as `src/pricing/total.py`
+   when that lies beside the test, so a changed `.ts` test would look unchanged. `carry_file` gives a file only when the
+   walk and `file_of_id` over the tree give the same one and no other file of the tree could be what the id names (two
+   modules of one name under two roots: `tests.test_a` may be `tests/test_a.py` or `pkg/tests/test_a.py`). A test that
+   either reading cannot place is not carried, so a test that is not a Python module (the walk finds no module for it)
+   is never carried: a project whose browser-adjacent tests are all TypeScript keeps its UI holds (a narrowing taken
+   on purpose, SCN-VER-351; relaxing it means letting a `None` walk stand when `file_of_id` finds one non-Python file).
+   A test whose file is not found is not carried.
+4. `C` is not in `rejected`: `rejected_ui_criteria(events, criteria)` in `l4.verifier.ui_step` gives every criterion among `criteria` with a
    `human.verdict{decision: reject}` whose target is the criterion, or one of its UI holds (the targets of
    `question.raised{kind: verdict, criterion: C}` and `hold_id(ui_hold_text(C))`), consumed or not. A criterion that a
    reviewer ever rejected keeps step 5 and its hold, so a reject is never lost (`settle_holds` turns a reject into a

@@ -14,8 +14,10 @@ be *carried from the base* when all of these hold:
 - its evidence in the round's trace as step 5 starts is `covered` with no `held` reason; every test that traces it
   passed, has the proof `pass_to_pass`, carries no label of an unproven record, is within the per-test cap and is
   adequate; and every test listed as not evidence for it is a passing candidate over the cap;
-- the file of every such test, listed or not, is found in the work tree and is not among the files the unit changed
-  since its merge base;
+- the file of every such test, listed or not, is found in the work tree by two readings of the test's id that give the
+  same file (the dotted Python module, and `file_of_id` over the tree's files), no other file of the tree could be the
+  one the id names, and it is not among the files the unit changed since its merge base (a test that is not a Python
+  module is therefore not carried);
 - no `human.verdict` with the decision `reject` targets the criterion or one of its UI holds in the unit's ledger,
   consumed or not.
 A carried criterion SHALL get no writer call and no hold. It SHALL record `verify.generated{criterion, status:
@@ -76,3 +78,14 @@ cannot be checked (the baseline, a test's file, the changed files), the criterio
 - **When** the rounds end
 - **Then** the reused round restores `status: carried`, asks no writer and raises no hold; the fresh round supersedes
   the open question by its round and asks nothing about C's hold
+
+#### Scenario: SCN-VER-351 (−) A test whose file is in doubt keeps the hold
+- **Given** the unit of SCN-VER-343 with the work tree `src/pricing/total.py` and `src/pricing/total.test.ts`, and C
+  traced only by `src.pricing.total.test.ts::x`, a passing `pass_to_pass` test whose file the unit changed; or C traced
+  by `tests.test_a::x` where both `tests/test_a.py` and `pkg/tests/test_a.py` are in the tree and the second is the one
+  the unit changed; or C traced only by a test that is not a Python module
+- **When** step 5 runs
+- **Then** C is not carried: the module walk reads the first id as `src/pricing/total.py`, which the unit did not
+  change, and the other reading names the changed test file, so the two disagree; the second id could be either module;
+  the third has no Python module; step 5 asks the writer and holds C as before. The plain case, `tests/test_a.py` read
+  as the same file by both readings with no other file of that name, is carried as in SCN-VER-343

@@ -233,6 +233,7 @@ from l4.verifier.types import (
 )
 from l4.verifier.ui_step import (
     carried_from_base,
+    carry_file,
     covered_by_step4,
     edited_findings,
     gap_findings,
@@ -1246,6 +1247,16 @@ def _test_files(
     return files
 
 
+def _carry_files(wb: Workbench, trace: Sequence[CriterionEvidence]) -> dict[str, str | None]:
+    """Test id -> the file that holds it, for the carry of L4-VER-086, or None when that is in any doubt (`ui_step.
+    carry_file`: the dotted-module walk and `file_of_id` over the tree must agree, and no other file could be it).
+    `_test_files` is not used: it takes the walk's file whenever there is one, and `src.pricing.total.test.ts` walks to
+    `src/pricing/total.py` where that lies beside the test."""
+    ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
+    tree = worktree_files(wb) if ids else []  # once
+    return {i: carry_file(i, file_of_test(wb, i), tree) for i in ids}
+
+
 def _test_blobs(
     wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
 ) -> Callable[[str], str]:
@@ -1296,7 +1307,7 @@ def _generate_step(
     waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
     # a criterion the unit did not change, whose tests are the base's and pass, is carried (L4-VER-086): no writer, no
     # hold. A waived one stays waived. Every condition that cannot be checked leaves the gap as it was.
-    files = _test_files(wb, result.trace, changed)
+    files = _carry_files(wb, result.trace)
     open_gaps = [c for c in plan.gaps if c.id not in waived]
     carried = carried_from_base(
         open_gaps, result.trace, run.unchanged, files.get, changed,

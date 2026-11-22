@@ -528,12 +528,20 @@ def carry_repo(web_repo, tdd_repo, raw, monkeypatch):
     raw(tdd_repo.repo, "commit", "-q", "-m", "the archived pricing spec")
     raw(tdd_repo.repo, "push", "-q", "origin", "main")
     raw(tdd_repo.repo, "fetch", "-q", "origin")
-    state = {"carry": (KNOWN,), "file": "tests/test_base.py", "proof": "pass_to_pass"}
+    # `file` holds the base tests (their ids are its dotted module's, unless `ids` names others); `tree` is the work
+    # tree the ids are looked up in (FAKE: the unit's own tree is the web fixture's), `walk` what the dotted-module
+    # walk of `file_of_test` finds for them (None: `file`; "": no module)
+    state = {"carry": (KNOWN,), "file": "tests/test_base.py", "proof": "pass_to_pass", "ids": None, "tree": None,
+             "walk": None}  # fmt: skip
     real_trace, real_file = ladder.trace_criteria, ladder.file_of_test
+
+    def ids() -> dict[str, str]:
+        module = state["file"].removesuffix(".py").replace("/", ".")
+        return state["ids"] or {c: t.replace("tests.test_base", module) for c, t in BASE_OF.items()}
 
     def base_tests(*args, **kwargs):
         def only_base_test(e):
-            test = TracingTest(BASE_OF[e.criterion], "passed", state["proof"])
+            test = TracingTest(ids()[e.criterion], "passed", state["proof"])
             return dataclasses.replace(e, state="covered", tests=(test,), ignored=(), capped=())
 
         return [only_base_test(e) if e.criterion in state["carry"] else e for e in real_trace(*args, **kwargs)]
@@ -541,9 +549,15 @@ def carry_repo(web_repo, tdd_repo, raw, monkeypatch):
     monkeypatch.setattr(ladder, "trace_criteria", base_tests)
 
     def file_of(wb, test):
-        return state["file"] if test in BASE_OF.values() else real_file(wb, test)
+        if test not in ids().values():
+            return real_file(wb, test)
+        return state["file"] if state["walk"] is None else (state["walk"] or None)  # "": the walk finds no module
 
     monkeypatch.setattr(ladder, "file_of_test", file_of)
+    real_tree = ladder.worktree_files
+    monkeypatch.setattr(
+        ladder, "worktree_files", lambda wb: state["tree"] or [state["file"], *real_tree(wb)]
+    )  # FAKE tree: the base tests' file next to the real files
     return state
 
 
@@ -616,6 +630,40 @@ def test_scn_ver_346_a_red_proof_keeps_the_writer(run_l4, valid_spec, web_repo, 
     )
     assert run.code == 11, run.outcome
     assert "carried" not in {e["status"] for e in run.events("verify.generated")}
+
+
+@pytest.mark.parametrize(
+    ("tree", "walk", "known"),
+    [
+        # a Python module of the test's stem beside it: the module walk reads the test id as that module
+        (["src/pricing/total.py", "src/pricing/total.test.ts"], "src/pricing/total.py", "src.pricing.total.test.ts::x"),
+        # a module of the same name under two roots: which of the two ran is not known
+        (["tests/test_a.py", "pkg/tests/test_a.py"], "tests/test_a.py", "tests.test_a::x"),
+        # a test that is not Python: the module walk finds no file for it
+        (["src/pricing/total.test.ts"], "", "src.pricing.total.test.ts::x"),
+    ],
+    ids=["same-stem-module", "two-roots", "not-python"],
+)
+def test_scn_ver_351_a_test_whose_file_is_in_doubt_keeps_the_writer_and_the_hold(
+    run_l4, valid_spec, web_repo, carry_repo, tree, walk, known
+):
+    carry_repo.update(tree=tree, walk=walk, ids={KNOWN: known, UNKNOWN: known.replace("::x", "::y")}, file=tree[0])
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    made = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
+    assert made == {KNOWN: "accepted", UNKNOWN: "uncollectable"}  # nothing carried
+    assert len(writer_requests(run)) == 2
+
+
+def test_scn_ver_351_the_plain_case_is_carried_with_its_file_found_by_both_readings(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    carry_repo.update(tree=["tests/test_base.py", "tests/test_other.py", "src/pricing/total.py"])
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"
 
 
 def test_scn_ver_348_a_carry_does_not_pass_the_criterion_the_judge_calls_inadequate(

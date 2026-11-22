@@ -29,8 +29,10 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   behaviour the base already has, so such a criterion always ended as a hold; a follow-up that changed one web file
   raised holds for its merged parent's criteria that only the owner could answer. A carried criterion is listed
   (`verify.generated` with `status: carried`, its row of the generated UI tests table, step 5's note, its minor gap
-  finding) and still needs the judge's pass. A scenario restated under `MODIFIED` with any word changed is a new
-  criterion, as before (L4-VER-086).
+  finding) and still needs the judge's pass. A test whose file is in doubt keeps the hold: the file of every test must be
+  found by the dotted-module reading of its id and by the path reading alike, and no other file may fit (a TypeScript
+  test beside a Python module of its stem, one module name under two roots), so a test that is not a Python module is
+  not carried. A scenario restated under `MODIFIED` with any word changed is a new criterion, as before (L4-VER-086).
 
 ### Fixed
 - A reviewer who rejects a criterion and its UI hold in the same round now gets one fix task for that behaviour, with

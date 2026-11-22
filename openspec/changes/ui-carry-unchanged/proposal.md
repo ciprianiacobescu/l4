@@ -60,10 +60,10 @@ Non-goals: which criteria are UI-facing; fuzzy matching of scenario text; the wa
 
 ## Impact
 
-- `src/l4/verifier/ui_step.py` (`carried_from_base`, `rejected_ui_criteria`, `unclosed_holds`, `gap_findings`;
-  `lost_notes` stays as it is), `src/l4/verifier/generate.py` (`ui_gap_finding`), `src/l4/verifier/ladder.py`
+- `src/l4/verifier/ui_step.py` (`carried_from_base`, `carry_file`, `rejected_ui_criteria(events, criteria)`,
+  `unclosed_holds`, `gap_findings`; `lost_notes` stays as it is), `src/l4/verifier/generate.py` (`ui_gap_finding`), `src/l4/verifier/ladder.py`
   (`_Run.unchanged`, `traceability`, `_generate_step`), `src/l4/verifier/types.py` (`GenStatus`),
   `src/l4/verifier/report.py` (`_generated_rows`), `src/l4/verifier/fixunit.py` (the closed gaps).
-- `docs/SPEC.md` (L4-VER-086, SCN-VER-343..349, change-table row 141, the amendment to L4-VER-067, the step-5 row of
-  10.2, `verify.generated` in 12.1), `CHANGELOG.md`, `docs/runbook.md`.
+- `docs/SPEC.md` (L4-VER-086, SCN-VER-343..349 and SCN-VER-351, change-table row 141, the amendment to L4-VER-067, the
+  step-5 row of 10.2, `verify.generated` in 12.1), `CHANGELOG.md`, `docs/runbook.md`.
 - No new event, no configuration key, no template change; a new value of `verify.generated.status`.
