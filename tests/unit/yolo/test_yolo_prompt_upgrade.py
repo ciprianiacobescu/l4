@@ -162,6 +162,12 @@ def test_scn_yolo_287_the_status_of_an_active_plan_shows_no_prompt_change(world,
     assert world.l4("status", "p1") == 0
     out = capsys.readouterr().out
     assert "prompt changed" not in out and "review prompt" not in out
+    assert world.l4("status", "p1", "--json") == 0
+    plan = json.loads(capsys.readouterr().out)["plans"][0]
+    assert plan["status"] == "active"  # the state is kept
+    review = plan["review"]
+    assert review["state"] != "stale" and "prompt_changed" not in review and "stale" not in review
+    assert "review prompt" not in json.dumps(plan)
 
 
 # --- SCN-YOLO-288 ------------------------------------------------------------------------------------------------

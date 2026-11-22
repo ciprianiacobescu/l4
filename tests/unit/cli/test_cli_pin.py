@@ -13,7 +13,7 @@ import pytest
 from l4 import cli_pin
 from l4.cli import main
 from l4.commands import HANDLERS
-from l4.exitcodes import ExitCode
+from l4.exitcodes import ExitCode, L4Exit
 from l4.outcome import CommandResult
 
 SHA = "a" * 40
@@ -157,6 +157,27 @@ def test_a_directory_that_is_no_repository_is_no_pin(tmp_path, monkeypatch):
 
 
 # --- the guard ---------------------------------------------------------------------------------------------------
+
+
+def test_a_pin_that_cannot_be_read_is_no_pin_and_never_refuses(repo, monkeypatch, capsys):
+    """An exception while reading the pin is no pin: the check neither raises, nor refuses, nor warns (L4-OPS-026)."""
+    from l4.cli import _build_app
+
+    repo.commit_origin(vendored("0.4.62"))
+    app = _build_app(
+        {"repo": repo.root, "config_path": None, "log_format": "human", "verbose": 0, "quiet": 0}, repo.environ
+    )
+    with pytest.raises(L4Exit):  # the control: the same pin, readable, refuses this writing command of an older l4
+        cli_pin.check("retry", {}, app)
+    capsys.readouterr()
+
+    def FAKE_UNREADABLE(_app):  # noqa: N802
+        raise RuntimeError("FAKE: the pin cannot be read")
+
+    monkeypatch.setattr(cli_pin, "pinned_version", FAKE_UNREADABLE)
+    assert cli_pin.check("retry", {}, app) is None
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
 
 
 def test_scn_ops_56_an_older_l4_is_refused_before_it_reads_anything(repo, handled, capsys):
