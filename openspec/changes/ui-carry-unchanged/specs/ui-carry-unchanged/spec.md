@@ -35,7 +35,9 @@ cannot be checked (the baseline, a test's file, the changed files), the criterio
 - **When** step 5 runs
 - **Then** the writer is not asked about C, `verify.generated` records `status: carried` with `covered_by:
   [tests/test_rules.py::test_c]`, the generated UI tests table says `carried from the base`, no hold is raised for C,
-  its minor gap finding says it is unchanged on the base, and nothing is checked out when C was the only gap
+  its minor gap finding says it is unchanged on the base, and nothing is checked out when C was the only gap; with a
+  second gap that goes to the writer, only that gap is written for, and no UI hold is raised for C after the judge
+  step either
 
 #### Scenario: SCN-VER-344 (−) A scenario with a changed word is not carried
 - **Given** the unit of SCN-VER-343, where C's scenario text differs from the base's by two words

@@ -79,8 +79,12 @@ no writer (1303-1306), since it needs none.
 - Its minor gap finding stays: `ui_gap_finding(criterion, unproved, waived_by, carried=True)` says `No end-to-end test
   traces criterion C (…); it is unchanged on the base and its base tests pass, so step 5 generates none (L4-VER-086).`
 - Closed: `unclosed_holds` raises no hold for it; the fix planner's closed set (`fixunit.py:242-246`) takes it, so no
-  fix task is made for its gap; `lost_notes` treats it as a note with its `covered_by` (by D1 every tracing test is in
-  `covered_by`, so it cannot fire; the rule is there so a later change cannot open a hole).
+  fix task is made for its gap.
+- `lost_notes` (148-167) stays as it is and SHALL NOT take `carried`: its first guard (`o.status != "not_testable"`,
+  159) already skips a carried outcome. Were it to take one, `_covers` (126-129) refuses `pass_to_pass`, so no carried
+  test would count as still covering while the same tests would count as "another passing adequate test", and every
+  carried criterion would get its UI hold back after step 9 in any round where another gap went to the writer (the
+  only rounds that register `recheck`, `ladder.py:1308-1312, 1324`).
 - Nothing is accepted or answered: no `human.verdict`, no waiver for a later round. Each fresh round decides again.
 
 ### D4. Why it is safe, and what is left
@@ -90,7 +94,15 @@ files (3) and pass at the head (2). When the behaviour is in the base, a faithfu
 and step 5 returns `non_discriminating` (`generate.py:200-203`) without running the head. Every outcome is then a hold:
 `non_discriminating`, `not_testable` (not a note: `pass_to_pass` is no cover for L4-VER-067), or a wrong test (it fails
 at the base and the head, or errors). The hold asks a person to accept on a merge-base run that cannot show a break at
-the head. In the evidence, every such hold was accepted.
+the head. In the evidence, every such hold was accepted. Replayed on that evidence: the follow-up's three held
+criteria meet all four conditions of D1 (every tracing test `pass_to_pass` and passing, none listed as not evidence,
+their test files outside the two files the follow-up changed, no reject in its ledger), and so does the restated
+scenario of the other unit (its test file unchanged since the base).
+
+This reverses, for this one case, the rule that 0.4.56 chose on purpose (L4-VER-067: "the hold SHALL stay when only
+`pass_to_pass` tests trace the criterion"). That rule was written for the `not_testable` note, where a writer's word
+was weighed against step 4's cover; here no writer is asked, and the cover is the base's own tests of a scenario the
+unit did not change.
 
 What still stands before a PASS: the base's tests of the criterion pass at the head; the judge must pass the criterion,
 and when it calls those tests inadequate the criterion is `needs_human`, asked through its own question (L4-VER-003);
@@ -111,8 +123,9 @@ on a merge-base run that could not show the break.
 - A follow-up's family holds its merged parent's criteria. For OpenSpec they are unchanged once the parent's archive is
   in the follow-up's base (the archived specs then hold them); before that, nothing is unchanged and nothing is carried.
   For Kiro, `spec_baseline` reads the merged parent's criteria; a plain Kiro unit has no baseline and carries nothing.
-- A fix unit is verified with its parent as one family, from the parent's merge base (`ladder.py:2072`, `family_of`), so
-  "a file the unit did not change" means since the default branch, never since the fix unit's own start.
+- A fix unit is verified with its parent as one family (`ladder.py:2072`, `family_of`), and step 0 sets the base to
+  the merge base of the head with `origin/<forge.base_branch>` (`preconditions.py:278-288`), so "a file the unit did not
+  change" means since the default branch, never since a fix unit's own start.
 
 ### D6. Upgrade
 

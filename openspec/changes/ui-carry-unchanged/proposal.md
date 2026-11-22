@@ -38,9 +38,11 @@ base's cannot prove the new words.
 - A carry passes nothing: the criterion still needs an adequate passing tracing test and the judge's pass
   (L4-VER-003).
 
-SLIPPABLE: this loosens the gate of L4-VER-067 for one case. It is its own change and its own requirement so that it
-can be cut at integration without touching `ui-hold-evidence`. Recommended: ship it (design.md D4 says why it is safe
-and what risk is left).
+SLIPPABLE: this loosens the gate of L4-VER-067 for one case, and reverses for that case the rule 0.4.56 chose on
+purpose (the hold stays when only `pass_to_pass` tests trace a criterion). It is its own change and its own requirement
+so that it can be cut at integration without touching `ui-hold-evidence`. Recommended: ship it. Replayed on the
+evidence, all its conditions hold for the follow-up's three held criteria and for the restated scenario; design.md D4
+says why it is safe and what risk is left.
 
 Non-goals: which criteria are UI-facing; fuzzy matching of scenario text; the waiver; a criterion with any proof but
 `pass_to_pass`; a browser check of a carried criterion (D7).
@@ -58,8 +60,8 @@ Non-goals: which criteria are UI-facing; fuzzy matching of scenario text; the wa
 
 ## Impact
 
-- `src/l4/verifier/ui_step.py` (`carried_from_base`, `rejected_ui_criteria`, `unclosed_holds`, `lost_notes`,
-  `gap_findings`), `src/l4/verifier/generate.py` (`ui_gap_finding`), `src/l4/verifier/ladder.py` (`_Run.unchanged`,
+- `src/l4/verifier/ui_step.py` (`carried_from_base`, `rejected_ui_criteria`, `unclosed_holds`, `gap_findings`;
+  `lost_notes` stays as it is), `src/l4/verifier/generate.py` (`ui_gap_finding`), `src/l4/verifier/ladder.py` (`_Run.unchanged`,
   `traceability`, `_generate_step`), `src/l4/verifier/types.py` (`GenStatus`), `src/l4/verifier/report.py`
   (`_generated_rows`), `src/l4/verifier/fixunit.py` (the closed gaps).
 - `docs/SPEC.md` (L4-VER-086, SCN-VER-343..349, change-table row 141, the amendment to L4-VER-067, the step-5 row of

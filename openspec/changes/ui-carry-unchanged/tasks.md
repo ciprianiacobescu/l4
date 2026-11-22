@@ -21,7 +21,8 @@ L4-VER-067, the step-5 row of 10.2 and `verify.generated` in 12.1). Run single t
 - [ ] 2.1 Write the tests first:
   - in `tests/unit/verifier/test_ui_flow.py` (follow its stubs of the e2e gate and the writer): SCN-VER-343 (no writer
     request for C, the `verify.generated` event, no hold, the finding's detail, no base checkout when C is the only
-    gap, and with another gap the writer is asked for that one only); SCN-VER-345 and SCN-VER-347 through the ladder;
+    gap, and with another gap the writer is asked for that one only and no UI hold comes back for C after the judge
+    step); SCN-VER-345 and SCN-VER-347 through the ladder;
     SCN-VER-348 (a judge reply that calls `test_c` inadequate: C is `needs_human` and its criterion question is raised);
     the carry happens with `roles.verifier_agent` empty too;
   - in `tests/unit/verifier/test_report_m15.py`: the row of a `carried` outcome (and not the `covered by step 4` text);
@@ -32,8 +33,8 @@ L4-VER-067, the step-5 row of 10.2 and `verify.generated` in 12.1). Run single t
 - [ ] 2.2 Then add `carried` to `GenStatus` (`src/l4/verifier/types.py`); keep `_Run.unchanged` in `traceability`,
   split the test-to-file mapping out of `_test_blobs`, and carry in `_generate_step` before `gap_findings`
   (`src/l4/verifier/ladder.py`); `carried=` in `ui_gap_finding` (`src/l4/verifier/generate.py`) and `gap_findings`;
-  the closed sets of `unclosed_holds` and `lost_notes` (`src/l4/verifier/ui_step.py`) and of `_candidates`
-  (`src/l4/verifier/fixunit.py`); the row in `_generated_rows` (`src/l4/verifier/report.py`). Run the files of 2.1,
+  the closed set of `unclosed_holds` (`src/l4/verifier/ui_step.py`; leave `lost_notes` as it is, design D3) and of
+  `_candidates` (`src/l4/verifier/fixunit.py`); the row in `_generated_rows` (`src/l4/verifier/report.py`). Run the files of 2.1,
   then `tests/unit/verifier/test_generate.py`, `tests/unit/verifier/test_hold_binding.py` and
   `tests/unit/verifier/test_ladder_hold_fix.py`, one at a time.
 
