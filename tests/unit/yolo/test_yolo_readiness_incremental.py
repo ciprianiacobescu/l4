@@ -199,5 +199,6 @@ def test_sandbox_for_is_called_once_after_the_judge_is_chosen(world):
 
 
 def test_the_key_depends_on_the_prompt_version_and_the_kind():
+    """0.4.60 (L4-YOLO-101): the prompt version is 5, the plan entry shows `id` before `depends_on`."""
     assert material_key("unit", "x") != material_key("batch", "x") != material_key("unit", "y")
-    assert PROMPT_VERSION == 4
+    assert PROMPT_VERSION == 5

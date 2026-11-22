@@ -2,6 +2,7 @@
 material key. A subject that is not split keeps the prompt and the material key of 0.4.58."""
 
 import hashlib
+import json
 import re
 
 import pytest
@@ -86,8 +87,21 @@ def outside_data(prompt: str) -> str:
 # --- SCN-YOLO-276 ----------------------------------------------------------------------------------------------------
 
 
+def _as_of_0458(prompt: str) -> str:
+    """The prompt with each `plan entry` block rendered back with sorted keys, as 0.4.58 and 0.4.59 showed it."""
+
+    def back(match):
+        text = json.dumps(json.loads(match.group(2)), indent=2, sort_keys=True)
+        return f"{match.group(1)}{text}{match.group(3)}"
+
+    return re.sub(r'(<l4:data source="plan entry">\n)(.*?)(\n</l4:data>)', back, prompt, flags=re.S)
+
+
 def test_scn_yolo_276_a_unit_and_a_batch_that_fit_keep_the_prompt_and_the_keys_of_0458(tmp_path):
-    """The expected values were taken by running this on the 0.4.58 code (commit f0bc8a3c)."""
+    """The prompt hashes were taken by running this on the 0.4.58 code (commit f0bc8a3c) and still hold once each
+    prompt's `plan entry` block is rendered back with sorted keys (SCN-YOLO-284). Under 0.4.60 (L4-YOLO-101) the entry
+    shows `id` first and the prompt version is 5, so the material keys are new: their values were taken by running
+    this on the 0.4.60 code."""
     w = World(tmp_path)
     one, two = "openspec:data-contract", "openspec:service-api"
     w.rev = w.commit(
@@ -103,11 +117,11 @@ def test_scn_yolo_276_a_unit_and_a_batch_that_fit_keep_the_prompt_and_the_keys_o
     result, _ = review_plan_costed(
         w.app, make_cfg(), plan_of({one: [], two: [one]}), w.units, git=w.git, rev=w.rev, adapters={"fake": fake}
     )
-    assert PROMPT_VERSION == 4
+    assert PROMPT_VERSION == 5
     assert (result.units[one].material, result.units[two].material, result.batches["b1"].material) == (
-        "f45e103a2f50207b", "10ccc51ad25a92c8", "9b3b2be18e927743",
+        "c6ec1fa6576e4256", "3bd5356d8a609fb9", "3c74e52570b72502",
     )  # fmt: skip
-    assert [hashlib.sha256(r.prompt.encode()).hexdigest()[:16] for r in fake.requests] == [
+    assert [hashlib.sha256(_as_of_0458(r.prompt).encode()).hexdigest()[:16] for r in fake.requests] == [
         "bdd0fb29b01140c1", "637d60b3489df373", "de183686df9d117e",
     ]  # fmt: skip
 

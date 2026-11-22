@@ -210,7 +210,7 @@ def test_ticked_tasks_reach_the_judge_ticked_and_the_digest_ignores_them(world, 
     prompt = fake_ticked.requests[0].prompt
     assert TICKED in prompt and UNTICKED not in prompt
     assert NOTE in outside_blocks(prompt) and "shown unchecked" not in prompt
-    assert readiness.PROMPT_VERSION == 4
+    assert readiness.PROMPT_VERSION == 5  # 0.4.60: the plan entry shows `id` first (L4-YOLO-101)
     assert result.units[A].digest == unit_digest(world.git, plain, folder)  # the digest is of the unticked text
     world.git.run("update-ref", f"refs/remotes/origin/{unit_branch(A, cfg.forge.branch_prefix)}", plain)
     _, fake_plain = review(world, plan_of({A: []}), Step(structured=answer()), cfg=cfg)
