@@ -175,7 +175,9 @@ implementer:
 - `roles.plan_judges` is the chain of the plan readiness review. Leave it out and the review asks `roles.judges`; list
   it to put other judges, or another first judge, on the plan review without reordering the judges of your units. A
   list there replaces `judges` for the review only, and a judge of `judges` that you want in the review goes in it too.
-  The review moves a subject to the next judge when one fails, and keeps what it answered.
+  The review moves a subject to the next judge when one fails, and keeps what it answered. Never cut `roles.judges`
+  to one judge for a review: put the review's judge in `roles.plan_judges`. `l4 doctor` (CFG-013) warns when a judge
+  chain has one profile.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
 - The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.59`) before you
@@ -303,6 +305,11 @@ l4 upgrade --harness-ref v0.5.0
 
 Run it with the `l4` of the target version. It re-renders the workflow (and refreshes the copied action in copy mode)
 and prints the diff. Then commit and push.
+
+Move every local `l4` with the pin. From 0.4.60 a command that writes (retry, resume, restart, questions, accept,
+activate, go, ...) is refused outside CI when the local `l4` is older than the pin, and names the install;
+`--allow-older-cli` runs it anyway with a warning. An agent does not pass that flag on its own: it reports the refusal
+to the person.
 
 ## Self-hosted runners and GitLab
 

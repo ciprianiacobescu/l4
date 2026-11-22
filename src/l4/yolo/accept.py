@@ -156,6 +156,16 @@ def check(
     return None
 
 
+def kind_text(actor_kind: object, marker: object = None) -> str | None:
+    """How a plan event's `actor` and `marker` are shown (L4-YOLO-102): `person`, `agent: <marker>` or `agent: no
+    terminal`; None for an event that recorded no actor (it is shown with no kind, never as a person's)."""
+    if actor_kind == "person":
+        return "person"
+    if actor_kind == "agent":
+        return f"agent: {marker}" if marker else "agent: no terminal"
+    return None
+
+
 def _entry_of(latest_review: Mapping[str, Any], subject: str) -> Mapping[str, Any] | None:
     """The subject's entry in a `plan.reviewed` event's data (`units`, `batches`) or in a flat subject mapping."""
     if subject.startswith("batch:"):

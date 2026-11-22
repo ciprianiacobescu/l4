@@ -40,6 +40,7 @@ from typing import Any, NoReturn
 
 import click
 
+from l4 import __version__
 from l4.agents.activity import ago
 from l4.availability.errors import RoleUnavailable
 from l4.ci.detect import ci_like
@@ -1012,6 +1013,16 @@ def batch_entries(
     return out
 
 
+def _review_command(plan_id: str, state: PlanState, view: ReviewView | None) -> str:
+    """The command that makes the review a stale one needs. CI never reviews a plan stopped with `unit_rejected`
+    (L4-YOLO-004), so there the review is made here: `--local` (L4-YOLO-101)."""
+    base = f"l4 yolo review {plan_id}"
+    stale = view is not None and view.kind == "stale"
+    if stale and state.status == "stopped" and state.stop_reason == "unit_rejected":
+        return f"{base} --local"
+    return base
+
+
 def run_review(
     app: AppContext,
     *,
@@ -1078,6 +1089,12 @@ def run_review(
                 f"The configuration: nothing to review. Then l4 yolo activate {plan_id} --reason TEXT, and the "
                 f"unit's next run reads the corrected spec or configuration"
             )
+            rejected_view = _review_view(parsed, file.text, state, read.events, now)
+            if rejected_view.kind == "stale":  # CI never reviews this plan: the review it needs is made here
+                ctx.say(
+                    f"{plan_id}: the recorded review is stale and CI does not review a plan stopped with "
+                    f"unit_rejected: review it here with {_review_command(plan_id, state, rejected_view)}"
+                )
             return ExitCode.OK
         view = _review_view(parsed, file.text, state, read.events, now)
         if view.kind == "current":
@@ -1256,6 +1273,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     every condition of L4-YOLO-005 holds; nothing is recorded then."""
     if not reason.strip():
         raise L4Exit(ExitCode.USAGE_ERROR, "activate: --reason must say why")
+    who = accepting.actor(app.environ, _stdin_tty())
     plan_id = _plan_id(plan)
     ctx = _open(app)
     rev = _sync(ctx, who="activate")
@@ -1307,7 +1325,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
             )
         if view.kind == "stale":
             reasons = _stale_lines(ctx, parsed, file, state, read.events, now, units)
-            fix = f"l4 yolo review {plan_id}"
+            fix = _review_command(plan_id, state, view)
             if any(r.startswith("local: ") for r in reasons):
                 folders = _folders(parsed, units)
                 d = staleness.divergence(ctx.git, ctx.target_ref, [file.path, *folders.values()])
@@ -1362,7 +1380,7 @@ def run_activate(app: AppContext, *, plan: str, reason: str, no_run: bool = Fals
     event = _event(
         "plan.activated", plan_digest=plan_digest(file.text), digests=now, limits=parsed.limits.model_dump(mode="json"),
         merge=parsed.merge, by=ctx.who(), reason=reason.strip(), attempt_base=base, current=current,
-        accepted=accepted, **extra,
+        accepted=accepted, actor=who[0], marker=who[1], harness_version=__version__, **extra,
     )  # fmt: skip
     _append(store, [event], read.head)
     for a in cleared:
@@ -1395,7 +1413,11 @@ def run_cancel(app: AppContext, *, plan: str, reason: str) -> ExitCode:
     state = fold_plan(plan_id, read.events)
     if state.status in FINAL:
         raise L4Exit(ExitCode.USAGE_ERROR, f"cancel: {plan_id} is already {state.status}")
-    _append(store, [_event("plan.cancelled", by=ctx.who(), reason=reason.strip())], read.head)
+    who = accepting.actor(ctx.app.environ, _stdin_tty())
+    event = _event(
+        "plan.cancelled", by=ctx.who(), reason=reason.strip(), actor=who[0], marker=who[1], harness_version=__version__
+    )
+    _append(store, [event], read.head)
     ctx.say(f"{plan_id}: cancelled; nothing more is dispatched or merged. A unit already running finishes its run.")
     return ExitCode.OK
 
@@ -1573,9 +1595,12 @@ def run_resume(
     )  # fmt: skip
     if blocker is not None:
         raise L4Exit(ExitCode.USAGE_ERROR, f"resume: {blocker.message}")
-    data: dict[str, Any] = {"by": ctx.who(), "reason": reason.strip(), "extend": extend.as_data()}
-    if extending:  # who raised the limits, and whether the key let an agent (L4-YOLO-051)
-        data.update(actor=who[0], marker=who[1], agent_key=by_key)
+    data: dict[str, Any] = {
+        "by": ctx.who(), "reason": reason.strip(), "extend": extend.as_data(), "actor": who[0], "marker": who[1],
+        "harness_version": __version__,
+    }  # fmt: skip
+    if extending:  # whether the key let an agent raise the limits (L4-YOLO-051)
+        data.update(agent_key=by_key)
     _append(store, [_event("plan.resumed", **data)], read.head)
     ctx.say(f"{plan_id}: resumed")
     if not no_run:
@@ -1625,10 +1650,13 @@ def _next_line(
 ) -> str:  # fmt: skip
     status = state.status
     if status == "stopped" and state.stop_reason == "unit_rejected":  # R8: the person fixes the cause first
+        local = ""
+        if view is not None and view.kind == "stale":  # CI never reviews this plan (L4-YOLO-101)
+            local = f", then {_review_command(plan_id, state, view)} (the recorded review is stale)"
         return (
             f"fix the cause of the rejection of {state.stop_unit or 'the unit'}: its spec (push it; the next run "
-            f"records inputs_changed and CI reviews the plan) or the configuration, then l4 yolo activate {plan_id} "
-            f"--reason TEXT"
+            f"records inputs_changed and CI reviews the plan) or the configuration{local}, then l4 yolo activate "
+            f"{plan_id} --reason TEXT"
         )
     if status in _BEFORE_ACTIVATION or (
         status == "stopped" and state.stop_reason in ("inputs_changed", "unit_rejected")
@@ -1638,7 +1666,7 @@ def _next_line(
         if view is not None and view.covered and not view.problems:
             return f"l4 yolo activate {plan_id} --reason TEXT"
         if view is None or view.kind != "current":
-            return f"l4 yolo review {plan_id}"
+            return _review_command(plan_id, state, view)
         if view.problems:
             return (
                 f"l4 yolo findings {plan_id}: fix the specs it names and push them, or review the working tree "
@@ -1734,6 +1762,17 @@ def _force_lines(doc: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _resumed_by(events: Sequence[PlanEvent]) -> dict[str, Any] | None:
+    """The latest person's `plan.resumed` after the latest `plan.activated` that records an actor (L4-YOLO-102):
+    `{by, actor, marker, at}`. The harness's own resume (`by: harness`) is not a person's."""
+    last = max((i for i, e in enumerate(events) if e.type == "plan.activated"), default=-1)
+    for event in reversed(events[last + 1 :]):
+        if event.type == "plan.resumed" and event.data.get("by") != "harness" and event.data.get("actor"):
+            data = event.data
+            return {"by": data.get("by"), "actor": data.get("actor"), "marker": data.get("marker"), "at": event.at}
+    return None
+
+
 def _describe(
     ctx: _Ctx, rev: str | None, file: PlanFile | None, read: PlanRead, pid: str, units: _Units
 ) -> dict[str, Any]:
@@ -1742,7 +1781,10 @@ def _describe(
     out: dict[str, Any] = {
         "plan_id": pid, "status": state.status, "target": plan.target if plan else None,
         "merge": plan.merge if plan else state.merge, "activated_by": state.activated_by,
+        "activated_actor": state.activated_actor, "activated_marker": state.activated_marker,
     }  # fmt: skip
+    if (resumed := _resumed_by(read.events)) is not None:
+        out["resumed"] = resumed
     if file is not None and file.plan is not None and state.status not in (*FINAL, "active"):
         out["holds"] = len(holds_of({pid: state}, [file]).held)  # units no run touches until the plan is fixed
     out["activated_force"] = [  # L4-YOLO-062: the subjects the activation froze as force-accepted
@@ -2170,6 +2212,12 @@ def _since(ts: str) -> str:
     return ago((_now() - when).total_seconds()) if when else "?"
 
 
+def _kind_suffix(actor_kind: object, marker: object) -> str:
+    """` (person)` or ` (agent: <marker>)`; nothing for an event that recorded no actor."""
+    text = accepting.kind_text(actor_kind, marker)
+    return f" ({text})" if text else ""
+
+
 def _render(d: dict[str, Any]) -> str:
     head = f"plan {d['plan_id']}: {d['status']}"
     if d.get("target"):
@@ -2181,7 +2229,12 @@ def _render(d: dict[str, Any]) -> str:
             "completed or its file is removed"
         )
     if d.get("activated_by"):
-        lines.append(f"  activated by {d['activated_by']}")
+        lines.append(
+            f"  activated by {d['activated_by']}{_kind_suffix(d.get('activated_actor'), d.get('activated_marker'))}"
+        )
+    if d.get("resumed"):
+        r = d["resumed"]
+        lines.append(f"  resumed by {r['by']}{_kind_suffix(r.get('actor'), r.get('marker'))}")
     lines += [
         f"  {accepting.force_line(f['subject'], str(f['by']), str(f['reason']))}" for f in d.get("activated_force", [])
     ]

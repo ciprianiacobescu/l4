@@ -94,19 +94,20 @@ def test_exactly_the_cap_is_not_cut(world):
     assert "more are delivered" not in prompt
 
 
-def test_the_prompt_version_is_4_and_a_review_made_with_3_is_stale(tmp_path):
+def test_the_prompt_version_is_5_and_a_review_made_with_3_is_stale(tmp_path):
+    """0.4.60 (L4-YOLO-101): the version is 5 (it was 4 under 0.4.59); an older review is still stale."""
     from l4.yolo.state import fold_plan
 
     from .yolo_cycle_world import CycleWorld
 
-    assert PROMPT_VERSION == 4
+    assert PROMPT_VERSION == 5
     world = CycleWorld(tmp_path)
     world.plan()
     world.reviewed(prompt_version=3)
     assert fold_plan("p1", world.events()).review_prompt_version == 3
     world.step()
     assert world.kinds().count("plan.reviewed") == 2
-    assert fold_plan("p1", world.events()).review_prompt_version == 4
+    assert fold_plan("p1", world.events()).review_prompt_version == 5
 
 
 def test_the_plan_step_shows_the_judge_the_changes_archived_on_the_target(tmp_path):

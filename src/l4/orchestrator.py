@@ -679,6 +679,7 @@ class Orchestrator:
         *,
         signal: str | None = None,
         by: str | None = None,
+        actor: tuple[str, str | None] | None = None,
         extend_fix_rounds: int | None = None,
         extend_feedback_rounds: int | None = None,
         event: str = "unit.resumed",
@@ -690,9 +691,11 @@ class Orchestrator:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
         `l4 run` continues the unit. `signal` (`label:<event id>`) and `by` (`member`) say that a member's `l4:resume`
-        label asked for it: one resume per signal. `extend_fix_rounds` records `budget.extended` first, so that the fold
-        has the extra rounds when the verifier decides again; `extend_feedback_rounds` is the same for the feedback
-        limit (`feedback_rounds` in the same event, L4-FBK-006).
+        label asked for it: one resume per signal. `actor` (`l4.actor`: kind and marker) is what the command `l4 retry`,
+        `l4 resume` or `l4 restart` records beside the reason (L4-OPS-025); a label records none. `extend_fix_rounds`
+        records `budget.extended` first, so that the fold has the extra rounds when the verifier decides again;
+        `extend_feedback_rounds` is the same for the feedback limit (`feedback_rounds` in the same event,
+        L4-FBK-006).
 
         `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
         `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
@@ -711,7 +714,8 @@ class Orchestrator:
                 k: v for k, v in (("fix_rounds", extend_fix_rounds), ("feedback_rounds", extend_feedback_rounds)) if v
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
-        self.services.ledger.append(event, reason=reason[:300], **extra, **binding)
+        who = {"actor": actor[0], "marker": actor[1]} if actor is not None else {}  # a command's, never a label's
+        self.services.ledger.append(event, reason=reason[:300], **extra, **who, **binding)
         self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         edit = self._spec_edit() if self._takes_spec_edit else None
         stop_edge = {
@@ -1770,6 +1774,7 @@ def run_unit_in_worktree(
     resume_reason: str | None = None,
     resume_signal: str | None = None,
     resume_by: str | None = None,
+    resume_actor: tuple[str, str | None] | None = None,
     resume_extend_fix_rounds: int | None = None,
     resume_extend_feedback_rounds: int | None = None,
     resume_event: str = "unit.resumed",
@@ -1848,6 +1853,7 @@ def run_unit_in_worktree(
                 resume_reason,
                 signal=resume_signal,
                 by=resume_by,
+                actor=resume_actor,
                 extend_fix_rounds=resume_extend_fix_rounds,
                 extend_feedback_rounds=resume_extend_feedback_rounds,
                 event=resume_event,

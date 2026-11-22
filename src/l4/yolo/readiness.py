@@ -72,9 +72,10 @@ SCHEMA_ID = "l4/yolo-readiness@1"
 # 2: the material changed (tasks.md shown with the digest's normalisation and the note on check marks, prerequisite
 # units of a batch, review 7). 3: the units already delivered on the target are listed, with the note that a
 # dependency on one of them is satisfied. 4: tasks.md shown as it is; prerequisites spec first and their cut is not
-# blocking; material keys. A review recorded with another version is stale,
-# `plan.reviewed{prompt_version}`; an event without the key counts as 1.
-PROMPT_VERSION = 4
+# blocking; material keys. 5: the plan entry shows `id`, then `depends_on`, then the other keys (0.4.60).
+# A review recorded with another version is stale, `plan.reviewed{prompt_version}`; an event without the key
+# counts as 1.
+PROMPT_VERSION = 5
 MAX_DELIVERED = 60
 MAX_CALLS = 2  # the first answer and one repair prompt
 DEFAULT_TIMEOUT_S = 900
@@ -262,8 +263,21 @@ def _folder_blocks(folder: FolderText) -> str:
     return "\n\n".join(blocks) or "(the folder has no files)"
 
 
+def _ordered(value: Any) -> Any:
+    """A plan entry with each mapping's keys in the harness's own order: `id`, then `depends_on`, then the rest in
+    sorted order (L4-YOLO-101). A list keeps its order. The order is not the models' declared one, so a new field cannot
+    move `id` or `depends_on`."""
+    if isinstance(value, dict):
+        first = [key for key in ("id", "depends_on") if key in value]
+        rest = sorted(key for key in value if key not in first)
+        return {key: _ordered(value[key]) for key in (*first, *rest)}
+    if isinstance(value, list):
+        return [_ordered(item) for item in value]
+    return value
+
+
 def _entry(model: Any) -> str:
-    return json.dumps(model.model_dump(by_alias=True), indent=2, sort_keys=True)
+    return json.dumps(_ordered(model.model_dump(by_alias=True)), indent=2)
 
 
 @dataclass(frozen=True)

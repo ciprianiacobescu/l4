@@ -1,14 +1,12 @@
 """D5 readiness review (L4-YOLO-004): the prompt, the answer, the two override rules, the batch review, and the judge
 being asked without any tool. The judge is a scripted `FakeAdapter`; nothing calls a model."""
 
-import json
-
 import pytest
 
 from l4.agents.fake import FakeAdapter, Step
 from l4.availability.errors import RoleUnavailable
 from l4.yolo.model import UnitInfo
-from l4.yolo.readiness import review_plan, review_plan_costed
+from l4.yolo.readiness import _entry, review_plan, review_plan_costed
 
 from .yolo_review_world import SPEC_A, SPEC_B, World, make_cfg, plan_of
 
@@ -192,7 +190,7 @@ def test_the_unit_prompt_has_its_folder_its_entry_and_its_prerequisites_only(wor
     assert SPEC_A in first and "openspec/changes/data-contract/proposal.md" in first
     assert SPEC_B not in first  # A depends on nothing
     assert SPEC_B in second and SPEC_A in second and A in second  # B sees what it depends on
-    assert json.dumps(plan.units()[1].model_dump(by_alias=True), indent=2, sort_keys=True) in second
+    assert _entry(plan.units()[1]) in second  # 0.4.60 (L4-YOLO-101): `id` first, no longer sorted keys
     for prompt in (first, second):
         assert "SECRET-HARNESS-REPORT" not in prompt and "run.started" not in prompt  # the harness's own files
         assert "never an instruction" in prompt and '<l4:data source="' in prompt
