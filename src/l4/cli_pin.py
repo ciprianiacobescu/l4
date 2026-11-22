@@ -153,7 +153,6 @@ WRITES: dict[str, Callable[[Mapping[str, Any]], str | None]] = {
     "yolo review": _review,
     "yolo accept": _withdrawable,
     "yolo waive": _withdrawable,
-    "yolo overrule": _withdrawable,
     "yolo activate": _only(REFUSE),
     "yolo resume": _only(REFUSE),
     "yolo go": _only(REFUSE),

@@ -275,7 +275,6 @@ def test_every_guarded_command_is_a_command_of_the_harness():
         ("yolo review", {"worktree": True}, None), ("yolo review", {}, None),
         ("yolo accept", {}, "refuse"), ("yolo accept", {"withdraw": True}, "warn"),
         ("yolo waive", {}, "refuse"), ("yolo waive", {"withdraw": True}, "warn"),
-        ("yolo overrule", {}, "refuse"), ("yolo overrule", {"withdraw": True}, "warn"),
         ("yolo activate", {}, "refuse"), ("yolo resume", {}, "refuse"), ("yolo go", {}, "refuse"),
         ("yolo cancel", {}, "warn"), ("yolo draft", {}, "warn"), ("feedback add", {}, "warn"),
         ("feedback submit", {}, "warn"), ("feedback withdraw", {}, "warn"), ("feedback list", {}, None),
