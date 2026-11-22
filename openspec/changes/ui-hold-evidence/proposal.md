@@ -73,10 +73,12 @@ ledger's `verify.generated` event, the writer's template, the traces and screens
 
 - `src/l4/verifier/generate.py` (`_Verdict.excerpt`, `_discriminates`, `generate_ui_test`, a bounded code copy),
   `src/l4/verifier/types.py` (`GeneratedOutcome.excerpt`), `src/l4/verifier/report.py` (`_generated_json`, a new
-  section in `render_verification_md`), `src/l4/verifier/verdicts.py` (`_ui_hold_notes`, `_hold_question`,
+  section in `render_verification_md`), `src/l4/verifier/hold_evidence.py` (new: the numbered code, its bounds and `has_evidence`, below `verdicts.py` and
+  `report.py` so that neither imports the other), `src/l4/clarifier/ports.py` (`QuestionView.asked`) and
+  `src/l4/delegate/prompt.py` (the selection key), `src/l4/verifier/verdicts.py` (`_ui_hold_notes`, `_hold_question`,
   `_hold_finding`, `is_ui_hold_finding`), `src/l4/verifier/fixunit.py` (`_candidates`), `src/l4/implementer/excerpt.py`
   (a public name for the redact-then-cut helper, if the implementer adds one).
-- `docs/SPEC.md` (L4-VER-083..085, SCN-VER-331..342, 350, 352 and 353, change-table row 137, amendments to L4-VER-006, L4-VER-067 and the
+- `docs/SPEC.md` (L4-VER-083..085, SCN-VER-331..342, 350 and 352..354, change-table row 137, amendments to L4-VER-006, L4-VER-067 and the
   step-5 row of 10.2), `CHANGELOG.md`, `docs/runbook.md`, `plugins/l4/skills/l4/references/operate.md`.
 - Sizes: a hold's question grows by at most about 10,500 characters (3,000 of excerpt, 6,000 of numbered code: at most
   200 lines, the indent and the headings); a

@@ -108,6 +108,14 @@ of 0.4.59, which cut it at 4,000 characters before it redacted: it can end insid
 redaction of the copy itself removes to the edge. A secret value that the old cut split in the middle (its head is all
 that is left) matches no shape and cannot be found again; that part of the old flaw stays in those records.
 
+The numbered code, its bounds and the test of whether an outcome has anything to show live in
+`src/l4/verifier/hold_evidence.py` (`numbered_code`, `has_evidence`, `MAX_CODE_LINES`, `MAX_NUMBERED_CHARS`), which
+imports only `l4.verifier.types`. Both `verdicts.py` (the question's notes) and `report.py` (`verification.md`) read
+them, and neither imports the other (checked: importing one does not load the other, and `report.py` is imported by
+`evidence.py`, `fixloop.py` and `ladder.py`): defining them in either would add an import edge between the two for a
+few pure functions, and a later import in the other direction would close a cycle. A module below both keeps every
+import one-way.
+
 `_ui_hold_lines` adds one sentence to the Context when the notes are not empty: with an excerpt, `The harness notes
 below show the test step 5 wrote and why it failed at the head: read them to tell a wrong test from wrong code.`;
 without one, `The harness notes below show the test step 5 wrote.`
@@ -136,8 +144,13 @@ prompt and `_generated_row` do not change, so no template or lock changes.
 Fail safe for the delegate: the notes are text a model wrote and a test printed. They reach the delegate inside the
 question's data block (`build_prompt` puts `_asked` in `_block("question", "verifier", ...)`,
 `delegate/prompt.py:227-237` and 338, an `<l4:data>` fence with `defuse`), which its rules treat as information, never
-as instructions; that block is not cut by the budget (no `_cap` is applied to it), and the question's text, notes
-included, is also the key `_specification` picks the spec's sections by (341-343), within the same budget. An `accept`
+as instructions; that block is not cut by the budget (no `_cap` is applied to it). The key `_specification` picks the
+spec's sections by (341-343 and the batch's 380) is the title and the Context only, not the notes: `QuestionView` keeps
+the Context alone as `asked`, and `prompt.py` reads `context_without_notes`. Else a test that the writer wrote could
+steer which sections the delegate sees (a backticked name in its code picks the section that holds it), and a hold's
+selection would differ from 0.4.59's for the same question; with the notes left out, the selection of a hold is the same
+as in 0.4.59, and a fix chore's question (L4-IMP-102), whose notes the delegate read with the Context, no longer picks
+sections by its failure text. An `accept`
 or `reject` still needs `checked` entries that resolve in the repository (L4-DLG-005), so no sentence of the notes can
 stand as its evidence. This is the state L4-IMP-102 already has for a fix chore's notes.
 

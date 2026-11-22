@@ -29,7 +29,7 @@ bounded by its lines and by its own length, not only by the 4,000 characters of 
 indent of the container; a longer copy SHALL keep its first lines (their numbers are those of the excerpt's locations)
 and end with one line `… (cut: N more lines)`, which the 6,000 counts. They SHALL NOT be in the hold's text, its
 title or its Context, so the hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL say in
-one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt).
+one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt). The delegate reads the notes with the Context, but the sections of the specification it is shown are picked by the title and the Context alone: the notes steer none of them.
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
 table, with one list item per such outcome (criterion, status, attempts, path) and its failure and code as one block
 indented by six spaces. With no written test (no attempt gave code, or `waived`) nothing SHALL be added. Every piece
@@ -164,3 +164,10 @@ exist and what each answer settles SHALL be unchanged.
 - **When** the round raises the criterion's UI hold question
 - **Then** the question's notes hold the code before the key marker, `[REDACTED:private-key]` in its place and no
   line of the key's body
+
+#### Scenario: SCN-VER-354 (−) The harness notes pick no section of the specification the delegate reads
+- **Given** a UI hold's question whose Context names `per_account` and whose harness notes hold a test that names
+  `half_even`, and a design with a section for each name and a budget that holds one of them
+- **When** the delegate's prompt is built, alone or in a batch
+- **Then** the section of `per_account` is shown and that of `half_even` is cut, as for the same question without the
+  notes; the notes are still in the question's data block, after the Context

@@ -1,5 +1,5 @@
 Read `design.md` first (D1-D9). Requirements: L4-VER-083, L4-VER-084 and L4-VER-085 (`docs/SPEC.md`), scenarios
-SCN-VER-331..342, 350, 352 and 353. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
+SCN-VER-331..342, 350 and 352..354. Run single test files only (`uv run --frozen pytest <file> -x -q`), never a whole directory, never two
 runs at once, and never a wait loop on `pgrep`. Secrets in tests: use a token shape the redactor knows (`"glpat-" +
 "A1b2C3d4E5f6G7h8I9j0"`, as `tests/unit/implementer/test_excerpt_redaction.py` does); build a private-key block from
 parts so that no test file holds a key marker as one string.
@@ -88,8 +88,22 @@ parts so that no test file holds a key marker as one string.
 
 ## 5. Checks
 
-- [x] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342, 350, 352 and 353, change-table row 137 and the amendments to L4-VER-006,
+- [x] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342, 350 and 352..354, change-table row 137 and the amendments to L4-VER-006,
   L4-VER-067 and the step-5 row of 10.2. Check them against the code and tell the orchestrator where they differ; do
   not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the skill. Run `uv run --frozen python
   scripts/check_spec.py docs/SPEC.md`.
 - [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 6. Review fixes
+
+- [x] 6.1 The numbered code is bounded by its lines and its own length (`hold_evidence.numbered_code`: at most 200
+  lines and 6,000 characters, a cut copy ends with `… (cut: N more lines)`); the headers of `verdicts._ui_hold_notes` and
+  `report._unaccepted_blocks` and every number in SPEC L4-VER-083, the changelog, the runbook and the design say so
+  (SCN-VER-352; 4,000 empty lines and 2,000 one-character lines in `test_hold_verdicts.py`, the same in
+  `test_report_m15.py`, the bound itself in `numbered_code`'s own test).
+- [x] 6.2 `_ui_hold_notes(criterion, generated, redact)` redacts the code and the excerpt again with `redacted_cut`, for a
+  record of 0.4.59 that a reused round restores (SCN-VER-353).
+- [x] 6.3 A configured secret in the head failure is not in `GeneratedOutcome.excerpt` (`test_generate.py`), and
+  `test_excerpt.py` fails on its own when `redacted_cut` cuts before it redacts (SCN-VER-332).
+- [x] 6.4 The delegate's selection key is the title and the Context without the harness notes
+  (`QuestionView.context_without_notes`, SCN-VER-354).

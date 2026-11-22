@@ -42,6 +42,14 @@ class QuestionView:
     answer_text: str
     suggestion_text: str
     by: Literal["human", "clarifier"] | None  # who answered; None while the question is open
+    asked: str | None = None  # the Context alone, without the harness notes that `context` ends with; None: the same
+
+    @property
+    def context_without_notes(self) -> str:
+        """What the question itself says: the Context, never the harness notes (L4-VER-083). The delegate picks the
+        sections of the specification it reads by this and the title, so text that a model wrote or a test printed,
+        which the notes can hold, steers nothing."""
+        return self.context if self.asked is None else self.asked
 
     @classmethod
     def of(cls, question: Question) -> "QuestionView":
@@ -57,6 +65,7 @@ class QuestionView:
             options=options,
             answer_text=effective_answer(question) or "", suggestion_text=unescape_text(question.suggestion_text),
             by=answered_by(question) if is_answered(question) else None,
+            asked=unescape_text(question.context_text),
         )  # fmt: skip
 
 

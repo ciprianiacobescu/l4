@@ -18,7 +18,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   lines and 6,000 characters, and a longer copy ends with a line that says how many lines were cut), both redacted before
   they are cut and again after. `verification.md` has a new section, `## Generated
   UI tests that were not accepted`, with the same, and `verdict.json` keeps the excerpt as `generated[].excerpt`. The
-  hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again (L4-VER-083).
+  hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again. The delegate reads the
+  notes with the Context, but picks the sections of the specification it shows by the title and the Context alone, as
+  before (L4-VER-083).
 
 ### Changed
 - When the test step 5 wrote fails at the head, the writer's second attempt is told why, not only which tests failed: its
