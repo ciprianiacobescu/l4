@@ -56,7 +56,6 @@ from l4.schemacheck import validate
 from l4.vcs.git import Git
 from l4.yolo.admit import FINISHED_PHASES
 from l4.yolo.digest import current_unit_ref, is_excluded, unit_digest
-from l4.yolo.findings import MAX_OVERRULED, OVERRULED_REASON_CHARS, OVERRULED_TEXT_CHARS
 from l4.yolo.model import (
     PROFILE_NONE,
     JudgeFailure,
@@ -320,25 +319,6 @@ ORDER_NOTE = (
     "A prerequisite that is a unit of this plan is delivered and merged into the target before any unit that depends "
     "on it starts: the plan runs one unit at a time, in dependency order."
 )
-OVERRULED_NOTE = (
-    "A person overruled the findings below, which an earlier review of this subject raised, as false, for the reasons "
-    "given. Judge the text shown now. Raise such a finding again only when the text shown still has that defect, and "
-    "then say in its text why the person's reason does not apply."
-)  # names no unit and no batch: the finding and the reason are inside data blocks (L4-YOLO-107)
-Overruled = Mapping[str, Sequence[Mapping[str, str]]]  # subject name (`<unit id>` or `batch:<id>`) -> rows
-
-
-def _overruled_text(rows: Sequence[Mapping[str, str]]) -> str:
-    """The rebuttal of a subject (L4-YOLO-107): the note and one data block per overrule, newest first, at most
-    `MAX_OVERRULED`; text and reason cut. It is shown after the other notes and is not part of the material key."""
-    if not rows:
-        return ""
-    blocks = []
-    for r in rows[:MAX_OVERRULED]:
-        head = f"[{_label(str(r.get('criterion', '')))}/{_label(str(r.get('severity', '')))}]"
-        text, reason = str(r.get("text", ""))[:OVERRULED_TEXT_CHARS], str(r.get("reason", ""))[:OVERRULED_REASON_CHARS]
-        blocks.append(data_block("overruled finding", f"{head} {text}\nreason: {reason}"))
-    return "\n" + "\n".join([OVERRULED_NOTE, *blocks])
 
 
 def delivered_on_target(archived: Collection[str], phases: Mapping[str, str | None]) -> dict[str, str]:
@@ -391,21 +371,15 @@ def _unit_subject(
     deps: Sequence[tuple[str, FolderText | None]],
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
     dep_budget: int = MAX_DEPENDENCY_CHARS,
-    overruled: Sequence[Mapping[str, str]] = (),
 ) -> Subject:
     prerequisites = _prerequisites(plan, deps)
     context = data_block("context", _label(f"in batch {batch.id}; plan {plan.plan_id}, target {plan.target}"))
 
-    def text(listed: Mapping[str, str], rebuttal: Sequence[Mapping[str, str]]) -> str:
+    def text(listed: Mapping[str, str]) -> str:
         values = {
             "SUBJECT_KIND": "unit",
             "SUBJECT_ID": data_block("subject", _label(unit.id)),
-            "ENTRY": data_block("plan entry", _entry(unit))
-            + "\n"
-            + context
-            + "\n"
-            + TASKS_NOTE
-            + _overruled_text(rebuttal),
+            "ENTRY": data_block("plan entry", _entry(unit)) + "\n" + context + "\n" + TASKS_NOTE,
             "DEPENDENCIES": "\n\n".join(
                 [*prerequisites, _batch_deps(batch.depends_on), _delivered_note(plan, listed)]
             ).strip()
@@ -415,8 +389,8 @@ def _unit_subject(
         return _fill(MATERIAL_TEMPLATE, values)
 
     return Subject(
-        "unit", unit.id, text(delivered, overruled), folder.left_out, folder.binary, _cut_of(deps, dep_budget),
-        key_text=text({}, ()),
+        "unit", unit.id, text(delivered), folder.left_out, folder.binary, _cut_of(deps, dep_budget),
+        key_text=text({}),
     )  # fmt: skip
 
 
@@ -432,14 +406,13 @@ def _batch_subject(
     deps: Sequence[tuple[str, FolderText | None]] = (),
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
     dep_budget: int = MAX_DEPENDENCY_CHARS,
-    overruled: Sequence[Mapping[str, str]] = (),
 ) -> Subject:
     """`deps`: the prerequisites of the units of the batch that are not units of the batch, in plan order."""
     units = [u for u in batch.units if u.id not in skip]
     context = data_block("context", _label(f"plan {plan.plan_id}, target {plan.target}"))
     groups_only = batch.acceptance_profile == PROFILE_NONE
 
-    def text(listed: Mapping[str, str], rebuttal: Sequence[Mapping[str, str]]) -> str:
+    def text(listed: Mapping[str, str]) -> str:
         values = {
             "SUBJECT_KIND": "batch",
             "SUBJECT_ID": data_block("subject", _label(batch.id)),
@@ -448,8 +421,7 @@ def _batch_subject(
             + context
             + "\n"
             + TASKS_NOTE
-            + ("\n" + GROUPING_NOTE if groups_only else "")
-            + _overruled_text(rebuttal),
+            + ("\n" + GROUPING_NOTE if groups_only else ""),
             "DEPENDENCIES": "\n\n".join(
                 [*_prerequisites(plan, deps), _batch_deps(batch.depends_on), _delivered_note(plan, listed)]
             ).strip()
@@ -464,14 +436,7 @@ def _batch_subject(
     left_out = tuple(line for u in units for line in folders[u.id].left_out)
     not_shown = tuple(p for u in units for p in folders[u.id].binary)
     return Subject(
-        "batch",
-        batch.id,
-        text(delivered, overruled),
-        left_out,
-        not_shown,
-        _cut_of(deps, dep_budget),
-        groups_only,
-        text({}, ()),
+        "batch", batch.id, text(delivered), left_out, not_shown, _cut_of(deps, dep_budget), groups_only, text({})
     )
 
 
@@ -507,7 +472,6 @@ def _batch_part(
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
     dep_budget: int = MAX_DEPENDENCY_CHARS,
     skip: Collection[str] = (),
-    overruled: Sequence[Mapping[str, str]] = (),
 ) -> Subject:
     """One call of a batch reviewed in parts (L4-YOLO-098, design D6). With a `unit`: that unit's folder in full as a
     subject's is shown (its budgets and its cut), its prerequisites outside the batch as a batch shows them, and every
@@ -524,7 +488,7 @@ def _batch_part(
         shown = data_block("folder", _label(f"{unit.id} ({folders[unit.id].path})"))
         in_full = [shown + "\n" + _folder_blocks(folders[unit.id])]
 
-    def text(listed: Mapping[str, str], rebuttal: Sequence[Mapping[str, str]]) -> str:
+    def text(listed: Mapping[str, str]) -> str:
         if unit is None:
             names = "\n".join(f"- {_label(d)}" for d, _ in deps)
             before = [data_block("batch prerequisites outside it", names)] if deps else []
@@ -540,8 +504,7 @@ def _batch_part(
             + TASKS_NOTE
             + ("\n" + GROUPING_NOTE if groups_only else "")
             + "\n"
-            + note
-            + _overruled_text(rebuttal),
+            + note,
             "DEPENDENCIES": "\n\n".join([*before, _batch_deps(batch.depends_on), _delivered_note(plan, listed)]).strip()
             or "(none: the batch depends on nothing)",
             "FOLDERS": "\n\n".join([*in_full, *read_in_part]),
@@ -550,11 +513,11 @@ def _batch_part(
 
     if unit is None:
         return Subject(
-            "batch", batch.id, text(delivered, overruled), (), (), (), groups_only, text({}, ()), part="summary"
+            "batch", batch.id, text(delivered), (), (), (), groups_only, text({}), part="summary"
         )  # fmt: skip
     return Subject(
-        "batch", batch.id, text(delivered, overruled), folders[unit.id].left_out, folders[unit.id].binary,
-        _cut_of(deps, dep_budget), groups_only, text({}, ()), part=unit.id,
+        "batch", batch.id, text(delivered), folders[unit.id].left_out, folders[unit.id].binary,
+        _cut_of(deps, dep_budget), groups_only, text({}), part=unit.id,
     )  # fmt: skip
 
 
@@ -567,10 +530,9 @@ def _batch_summary(
     delivered: Mapping[str, str] = {},  # noqa: B006 - read only
     dep_budget: int = MAX_DEPENDENCY_CHARS,
     skip: Collection[str] = (),
-    overruled: Sequence[Mapping[str, str]] = (),
 ) -> Subject:
     """The summary part of a batch reviewed in parts: every unit read in part, no folder in full (design D6)."""
-    return _batch_part(plan, batch, None, folders, siblings, deps, delivered, dep_budget, skip, overruled)
+    return _batch_part(plan, batch, None, folders, siblings, deps, delivered, dep_budget, skip)
 
 
 IN_PARTS_FINDING = {
@@ -1108,7 +1070,6 @@ def review_plan_costed(
     time_left: Callable[[], float | None] | None = None,
     failed_before: Mapping[str, Sequence[str]] = {},  # noqa: B006 - read only
     kept: Collection[str] = (),
-    overruled: Overruled = {},  # noqa: B006 - read only
 ) -> tuple[ReviewResult, float]:
     """`review_plan` and the cost in dollars the judges reported (what the plan step charges to the plan). `done` names
     the units the plan already merged or integrated (`admit.done_units`): the target holds their work, so the judge is
@@ -1185,14 +1146,7 @@ def review_plan_costed(
                 result_units[unit.id] = _with_digest(blocked(f"unit_missing: {note}"), digest)
                 continue
             deps = [(d, dependency(d)) for d in unit.depends_on]
-            subjects.append(
-                (
-                    _unit_subject(
-                        plan, unit, batch, folder, deps, delivered, limits.dependency, overruled.get(unit.id, ())
-                    ),
-                    digest,
-                )
-            )
+            subjects.append((_unit_subject(plan, unit, batch, folder, deps, delivered, limits.dependency), digest))
     for batch in plan.batches:
         left = [u for u in batch.units if u.id not in done]
         if len(batch.units) > 1 and not left:
@@ -1204,19 +1158,7 @@ def review_plan_costed(
             batch_deps = [(d, dependency(d)) for d in outside]
             batch_info[batch.id] = (batch, left, batch_deps)
             subjects.append(
-                (
-                    _batch_subject(
-                        plan,
-                        batch,
-                        folders,
-                        done,
-                        batch_deps,
-                        delivered,
-                        limits.dependency,
-                        overruled.get(f"batch:{batch.id}", ()),
-                    ),
-                    None,
-                )
+                (_batch_subject(plan, batch, folders, done, batch_deps, delivered, limits.dependency), None)
             )
     asked: list[tuple[Subject, str | None, str]] = []
     refused: list[str] = []
@@ -1261,23 +1203,11 @@ def review_plan_costed(
         built = [
             _batch_part(
                 plan, batch, u, folders, read, [(d, dependency(d)) for d in u.depends_on if d not in inside],
-                delivered, limits.dependency, done, overruled.get(f"batch:{batch.id}", ()),
+                delivered, limits.dependency, done,
             )
             for u in shown
         ]  # fmt: skip
-        built.append(
-            _batch_summary(
-                plan,
-                batch,
-                folders,
-                read,
-                batch_deps,
-                delivered,
-                limits.dependency,
-                done,
-                overruled.get(f"batch:{batch.id}", ()),
-            )
-        )
+        built.append(_batch_summary(plan, batch, folders, read, batch_deps, delivered, limits.dependency, done))
         return [(part, material_key("batch-part", part.key_text)) for part in built]
 
     def kept_part(whole: Subject, part: Subject, key: str) -> Mapping[str, Any] | None:

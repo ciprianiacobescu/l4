@@ -81,7 +81,6 @@ from l4.yolo.findings import (
     judges_answering,
     kept_keys,
     latest_incomplete,
-    overruled_for_review,
     prior_entries,
     repeats_incomplete,
 )
@@ -998,7 +997,6 @@ class _Step:
                 time_left=self.budget,
                 failed_before=failed_before(ctx.read.events, PROMPT_VERSION),
                 kept=kept_keys(ctx.read.events, PROMPT_VERSION),
-                overruled=overruled_for_review(state),
             )
         except ReviewIncomplete as exc:  # what it answered is kept, the reason is recorded (L4-YOLO-099)
             self._review_incomplete(ctx, exc, digest=digest, order=list(admission.order), merge=plan.merge, rev=rev)
