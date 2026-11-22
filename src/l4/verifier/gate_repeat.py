@@ -56,36 +56,48 @@ def is_repeat(name: str) -> bool:
     return _REPEAT.fullmatch(name) is not None
 
 
-def pre_existing(git: Git, base_sha: str, head: str, red_tests: Collection[str]) -> Callable[[str], bool]:
-    """Is a failing test id pre-existing (design D1)? It is when it is not a red test of the unit (`red_tests`), its
-    file is found among the files of the head tree (a path that `base..head` changed is preferred when several
-    match, the cautious side) and `git diff <base> <head>` does not name that file. A test whose file is not found, a
-    Go id and any test at all when git fails are not. The tree and the diff are read once, on the first call."""
-    loaded: list[tuple[list[str], set[str]] | None] = []
-
-    def read() -> tuple[list[str], set[str]] | None:
-        if not loaded:
-            try:
-                listing = git.run_bytes("ls-tree", "-r", "--name-only", "-z", head).decode("utf-8", "replace")
-                loaded.append(([p for p in listing.split("\0") if p], set(_changed(git, base_sha, head))))
-            except GitError:
-                loaded.append(None)
-        return loaded[0]
+def untouched(tree: Sequence[str], changed: Collection[str], red_tests: Collection[str]) -> Callable[[str], bool]:
+    """The file rule of `pre_existing` on a tree and a set of changed paths that the caller holds: a test id is
+    untouched when it is not a red test (`red_tests`), its file is found among `tree` (a path of `changed` is preferred
+    when several match, the cautious side) and `changed` does not name that file. A test whose file is not found, and
+    a Go id, are not."""
+    paths, names = list(tree), set(changed)
 
     def check(test_id: str) -> bool:
-        state = read()
-        if state is None or test_id in red_tests or fold_subtest_id(test_id) in red_tests:
+        if test_id in red_tests or fold_subtest_id(test_id) in red_tests:
             return False
-        tree, changed = state
+        files, moved = paths, names
         head_part = test_id.split("::", 1)[0]
         extension = head_part.rsplit(".", 1)[-1] if "." in head_part else ""
         if extension in JS_EXTENSIONS:  # a spec id never names a Python or Go file (`app.spec.ts` is not `app.py`)
-            tree = [p for p in tree if p.endswith("." + extension)]
-            changed = {p for p in changed if p.endswith("." + extension)}
+            files = [p for p in files if p.endswith("." + extension)]
+            moved = {p for p in moved if p.endswith("." + extension)}
             # Playwright writes the file relative to its test directory (`auth/signin.spec.ts`): dots, as the others
             test_id = head_part.replace("/", ".") + test_id[len(head_part) :]
-        path = file_of_id(test_id, tree, changed)
-        return path is not None and path not in changed and file_of_id(test_id, sorted(changed)) is None
+        path = file_of_id(test_id, files, moved)
+        return path is not None and path not in moved and file_of_id(test_id, sorted(moved)) is None
+
+    return check
+
+
+def pre_existing(git: Git, base_sha: str, head: str, red_tests: Collection[str]) -> Callable[[str], bool]:
+    """Is a failing test id pre-existing (design D1)? It is when it is not a red test of the unit (`red_tests`), its
+    file is found among the files of the head tree (a path that `base..head` changed is preferred when several
+    match, the cautious side) and `git diff <base> <head>` does not name that file (`untouched`). A test whose file is
+    not found, a Go id and any test at all when git fails are not. The tree and the diff are read once, on the first
+    call."""
+    loaded: list[Callable[[str], bool] | None] = []
+
+    def check(test_id: str) -> bool:
+        if not loaded:
+            try:
+                listing = git.run_bytes("ls-tree", "-r", "--name-only", "-z", head).decode("utf-8", "replace")
+                tree = [p for p in listing.split("\0") if p]
+                loaded.append(untouched(tree, set(_changed(git, base_sha, head)), red_tests))
+            except GitError:
+                loaded.append(None)
+        rule = loaded[0]
+        return rule is not None and rule(test_id)
 
     return check
 
@@ -162,10 +174,12 @@ def _usable(outcome: TestGateOutcome, must_contain: Collection[str]) -> bool:
     )
 
 
-def _short_of_time(first_seconds: float) -> bool:
-    """Does the soft deadline leave less than another run needs: run 1's duration plus a margin?"""
+def short_of_time(first_seconds: float, *, runs: float = 1.0) -> bool:
+    """Does the soft deadline leave less than `runs` times run 1's duration plus a margin (the larger of 60 seconds and
+    a tenth of run 1's duration)? A repeat of step 3 needs one run's duration (`runs` 1); a task step's re-run
+    (L4-IMP-105) needs room for twice that, because the step goes on after it."""
     armed = deadline.current()
-    return armed is not None and armed.remaining_s() < first_seconds + max(MIN_MARGIN_S, 0.1 * first_seconds)
+    return armed is not None and armed.remaining_s() < runs * first_seconds + max(MIN_MARGIN_S, 0.1 * first_seconds)
 
 
 def _runs(numbers: Sequence[int]) -> str:
@@ -211,7 +225,7 @@ def settle(
     pending, made, stopped = set(failing), 1, ""
     run_1 = {i: report.tests[i].message for i in failing}
     while pending and made < runs:
-        if _short_of_time(first_seconds):
+        if short_of_time(first_seconds):
             stopped = "budget"
             break
         if reset is not None and not reset():

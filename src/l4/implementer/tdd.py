@@ -131,6 +131,7 @@ from l4.implementer.named_tests import NamedTests, language_of, named_tests, tes
 from l4.implementer.normalize import StepFacts, find_result, normalize
 from l4.implementer.opened import check_filled_helper, check_opened, unit_modules
 from l4.implementer.prompt import PromptContext, data_block, defuse, render_prompt, result_values_line
+from l4.implementer.recheck import recheck_step, tree_before
 from l4.implementer.reopen import is_reopened, pending_stale
 from l4.implementer.repaircheck import check_repair_files
 from l4.implementer.repaircheck import reason as repair_reason
@@ -263,6 +264,7 @@ class RedVerdict:
     ok: bool
     reason: str = ""
     excerpt: str = ""  # why the named tests failed (L4-IMP-008): for the next prompt only, not the ledger
+    regressed: tuple[str, ...] = ()  # set only by `red broke existing tests`, the last reason: the ids (L4-IMP-105)
 
 
 @dataclass
@@ -594,41 +596,61 @@ def classify_red(
             if hint is not None
             else ""
         )
-        return RedVerdict(False, f"red broke existing tests: {_list(regressed)}{more}", why(regressed))
+        return RedVerdict(
+            False, f"red broke existing tests: {_list(regressed)}{more}", why(regressed), regressed=tuple(regressed)
+        )
     return RedVerdict(True)
+
+
+class GreenWhy(tuple):  # type: ignore[type-arg]
+    """`(reason, ids)` of `green_failures`, a plain pair for every reader that unpacks or compares it, with `regressed`:
+    the ids of the reason `green broke existing tests`, empty for any other reason (L4-IMP-105: the structured marker
+    that lets a step re-run its gate, so no caller reads the text of a reason)."""
+
+    regressed: tuple[str, ...] = ()
 
 
 def green_failures(
     base: TestReport, red_ids: Sequence[str], gate: GateResult, superseded: Collection[str] = ()
-) -> tuple[str, list[str]]:
+) -> "GreenWhy":
     """Why the green gate run is not acceptable (empty when it is), and the ids of the tests the reason names.
-    `superseded`: the stale tests the red step replaced (L4-OPS-015) are not regressions."""
+    `superseded`: the stale tests the red step replaced (L4-OPS-015) are not regressions. The result is that pair, with
+    `regressed` set for `green broke existing tests` (L4-IMP-105)."""
+    reason, ids, regressed = _green_judged(base, red_ids, gate, superseded)
+    found = GreenWhy((reason, ids))
+    found.regressed = regressed
+    return found
+
+
+def _green_judged(
+    base: TestReport, red_ids: Sequence[str], gate: GateResult, superseded: Collection[str]
+) -> tuple[str, list[str], tuple[str, ...]]:
     report = gate.report
     if hung := gate_hung(gate):
-        return hang_reason(hung), [h.id for h in hung]
+        return hang_reason(hung), [h.id for h in hung], ()
     if gate.timed_out:
-        return gate.reason, []
+        return gate.reason, [], ()
     if report is None:
-        return f"the test gate produced no readable report ({gate.reason})", []
+        return f"the test gate produced no readable report ({gate.reason})", [], ()
     if report.collection_errors:
-        return f"tests not collected: {_list(report.collection_errors)}", []
+        return f"tests not collected: {_list(report.collection_errors)}", [], ()
     if report.executed == 0:
-        return "vacuous: 0 tests executed", []
+        return "vacuous: 0 tests executed", [], ()
     red_ids = list(dict.fromkeys(fold_subtest_id(i) for i in red_ids))  # a subtest is its test (L4-GAT-006)
     failing = [i for i in red_ids if i not in report.tests or report.tests[i].status != "passed"]
     if failing:
-        return f"red tests still failing: {_list(failing)}", failing
+        return f"red tests still failing: {_list(failing)}", failing, ()
     regressed = [
         i for i in base.ids_with("passed")
         if (i not in report.tests or report.tests[i].status != "passed") and i not in superseded
     ]  # fmt: skip
     if regressed:
-        return f"green broke existing tests: {_list(regressed)}", regressed
+        return f"green broke existing tests: {_list(regressed)}", regressed, tuple(regressed)
     known = set(base.tests) | set(red_ids)
     added = [i for i, c in report.tests.items() if i not in known and c.status in ("failed", "error")]
     if added:  # SPEC 7.2 green (b): no new failures relative to the base
-        return f"new failing tests added in green: {_list(added)}", added
-    return "", []
+        return f"new failing tests added in green: {_list(added)}", added, ()
+    return "", [], ()
 
 
 def check_green(base: TestReport, red_ids: Sequence[str], gate: GateResult) -> str:
@@ -1671,6 +1693,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     changed = wb.changed_files()
     test_files = any(_matches(tdd.test_globs, p) or _matches(tdd.test_support_globs, p) for p in changed)
+    reset = tree_before(wb)  # right before run 1, after the agent's edits: the tree a re-run starts from (L4-IMP-105)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, note=red_note(base_report))
     if (out := tampered("test run")) is not None:
         return out
@@ -1966,13 +1989,30 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     ]  # fmt: skip
     if broken := [t for t in still_rejected if (t.path, t.name) in set(listed.tests)]:
         return _reject_preexisting(wb, broken)  # a named test is changed in place, never removed: before the verdict
-    verdict = classify_red(
-        base_report, report, test_files_changed=test_files,
-        failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
-        rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
-        named_changed=[(t.path, t.name) for t in named_in_place], named_other=other_in_place,
-        named_unchanged=other_unchanged, named_proofs=named_proofs,
-    )  # fmt: skip
+
+    def judge(judged: TestReport) -> RedVerdict:
+        return classify_red(
+            base_report, judged, test_files_changed=test_files,
+            failure_kinds=True, allowed_passing=allowed, excerpt=excerpter(wb),
+            rules=trace_rules(wb.cfg.gates.test.command), superseded=stale.tests if stale else (),
+            named_changed=[(t.path, t.name) for t in named_in_place], named_other=other_in_place,
+            named_unchanged=other_unchanged, named_proofs=named_proofs,
+        )  # fmt: skip
+
+    verdict = judge(report)
+    if not verdict.ok and verdict.regressed:  # L4-IMP-105: the regression is the attempt's only reason
+        again = recheck_step(
+            wb, task=task.key, phase="red", attempt=attempt, run_1=gate, regressed=verdict.regressed,
+            red_tests=new_ids, reset=reset, extra_env=None, guard=lambda: tampered("test re-run"),
+        )  # fmt: skip
+        if again is not None:
+            if again.guard is not None:
+                return again.guard
+            if again.report is not None:  # every regressed test passed on the re-run: judged again on the merged report
+                report = again.report
+                verdict = judge(report)
+            else:
+                verdict = replace(verdict, reason=verdict.reason + again.suffix)
     if not verdict.ok:
         wb.discard_changes()
         return RedOutcome("failed", refused_note(verdict.reason), excerpt=verdict.excerpt)
@@ -2239,9 +2279,25 @@ def run_green(
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     extra_env = fix_gate_env(wb)
     mark = wb.mark_tested() if extra_env is None else None  # the tree the gate tests: taken before it can write (D1)
+    reset = tree_before(wb)  # right before run 1: the tree a re-run starts from (L4-IMP-105)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
     stuck = restore_replay(wb, "test run")
-    reason, named = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
+    why = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
+    suffix = ""
+    if why[0] and why.regressed:  # the regression is the attempt's only reason
+        again = recheck_step(
+            wb, task=task.key, phase="green", attempt=attempt, run_1=gate, regressed=why.regressed,
+            red_tests=red.new_ids, reset=reset, extra_env=extra_env, guard=lambda: restore_replay(wb, "test re-run"),
+        )  # fmt: skip
+        if again is not None:
+            stuck = stuck or again.guard
+            suffix = again.suffix
+            if again.report is not None:  # judged again on the merged report: a later reason still fails the attempt
+                gate = replace(gate, report=again.report)
+                why = green_failures(red.base_report, sorted(red.new_ids), gate, red.superseded)
+    reason, named = why
+    if reason:
+        reason += suffix  # `; failed again on a re-run (...)` or `; its re-run was not usable`, or nothing
     hung = gate_hung(gate) if reason else []
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     if hung:
@@ -3634,9 +3690,25 @@ def run_single(
     arm_replay_guard(wb)  # a replayed step commits exactly its saved patch
     extra_env = fix_gate_env(wb)
     mark = wb.mark_tested() if extra_env is None else None  # the tree the gate tests: taken before it can write (D1)
+    reset = tree_before(wb)  # right before run 1: the tree a re-run starts from (L4-IMP-105)
     gate = wb.run_gate("test", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports, extra_env=extra_env)
     stuck = restore_replay(wb, "test run")
-    reason, named = green_failures(base_report, [], gate)
+    why = green_failures(base_report, [], gate)
+    suffix = ""
+    if why[0] and why.regressed:  # the regression is the attempt's only reason
+        again = recheck_step(
+            wb, task=task.key, phase="single", attempt=attempt, run_1=gate, regressed=why.regressed, red_tests=(),
+            reset=reset, extra_env=extra_env, guard=lambda: restore_replay(wb, "test re-run"),
+        )  # fmt: skip
+        if again is not None:
+            stuck = stuck or again.guard
+            suffix = again.suffix
+            if again.report is not None:  # judged again on the merged report
+                gate = replace(gate, report=again.report)
+                why = green_failures(base_report, [], gate)
+    reason, named = why
+    if reason:
+        reason += suffix
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     if not reason and e2e_scope is not None:  # a browser-test finding: the unit gate cannot see its tests (L4-IMP-090)
         reason, excerpt = _e2e_chore_reason(wb, task, base, e2e_scope)
