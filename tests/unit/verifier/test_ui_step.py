@@ -625,6 +625,18 @@ def test_rejected_ui_criteria_finds_a_reject_of_the_criterion_its_hold_and_the_s
     assert rejected_ui_criteria([decided(1, "Q-006", hold_id(other), "reject", "x")], criteria) == frozenset()
 
 
+def test_rejected_ui_criteria_finds_a_reject_recorded_only_through_a_hold_with_the_old_text():  # SCN-VER-347
+    old = f"UI criterion {CID} has no end-to-end test (fails_at_head); see the generated UI tests table"
+    assert hold_id(old) != hold_id(HOLD)  # not the stable id of today, and no `criterion` on the event: the title only
+    raised_old = raised(1, "Q-001", hold_id(old), title=f"Hold {hold_id(old)}: {old}")
+    rejected = decided(2, "Q-001", hold_id(old), "reject", "x" * 64)
+    assert rejected_ui_criteria([raised_old, rejected], [CID, OTHER]) == {CID}
+    assert rejected_ui_criteria([raised_old, rejected], [OTHER]) == frozenset()  # the title names another criterion
+    accepted = decided(2, "Q-001", hold_id(old), "accept", "x" * 64)
+    assert rejected_ui_criteria([raised_old, accepted], [CID]) == frozenset()
+    assert rejected_ui_criteria([rejected], [CID]) == frozenset()  # no event names the hold: nothing links it
+
+
 def test_a_carried_outcome_closes_the_gap_and_is_no_hold():
     carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=(BASE_TEST,))
     assert unclosed_holds([crit(CID)], [carried]) == []
