@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 """A repeated base-tests failure escalates with the reverted support files and the way out (L4-VER-081)."""
 
 from l4.verifier.base_tests import FAILS_TITLE, GONE_TITLE
@@ -12,6 +13,7 @@ from l4.verifier.fixloop import (
 from .test_fixloop_escalation import BOT, blocker, commit, current, event, gate, previous, unit  # noqa: F401
 
 SUPPORT = [{"path": "test/arch/modules.ts", "tasks": ["1.1", "1.2"], "people": False}]
+WAY_OUT_LEAD = BASE_TESTS_WAY_OUT
 WAY = BASE_TESTS_WAY_OUT + "test/arch/modules.ts (task 1.1, 1.2)"
 
 
@@ -79,3 +81,31 @@ def test_the_way_out_survives_the_exit_reasons_cut_with_a_long_unit_id(unit):  #
     unit_id = "openspec:" + "u" * 31  # 40 characters
     shown = f"escalated: {reason}. Next: l4 retry --unit {unit_id} --reason TEXT"[:300]
     assert "then l4 retry:" in shown and "test/arch/modules.ts" in shown
+
+
+# the wiring in `decide_fix`: a unit whose step 1 reverts a support file twice
+
+from l4.agents.fake import Step  # noqa: E402
+
+from ..implementer.conftest import green_step, red_step, result  # noqa: E402
+from .test_base_tests import HANDSHAKE_CONFTEST, HANDSHAKE_IMPL, no_text_signals  # noqa: E402, F401
+from .test_fixloop_escalation import escalation  # noqa: E402, F401
+from .test_ladder_fix import no_fix_loop  # noqa: E402, F401  (the fix loop is on, as in `test_fixloop_escalation`)
+
+
+def test_a_repeated_base_tests_failure_escalates_with_the_way_out(
+    run_l4,
+    valid_spec,
+    no_text_signals,
+    escalation,  # noqa: F811
+):  # SCN-VER-320
+    red, green = red_step(), green_step()
+    red.writes = {**red.writes, "tests/conftest.py": HANDSHAKE_CONFTEST}
+    green.writes = {"src/pytdd/pricing.py": HANDSHAKE_IMPL}
+    nothing = Step(structured=result("single"))  # the fix chore finds nothing to change
+    run = run_l4([red, green, nothing, nothing, nothing, nothing])
+    assert [e["verdict"] for e in run.events("verify.verdict")][:2] == ["FAIL", "FAIL"]
+    code, detail = escalation[-1]
+    assert code == "same_failure"
+    assert detail.startswith(WAY_OUT_LEAD) and "tests/conftest.py (task 1.1)" in detail
+    assert "round 2 failed the same way as round 1" in detail

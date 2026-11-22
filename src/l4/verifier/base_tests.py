@@ -423,9 +423,10 @@ def check_base_tests(
         r1 = gate.report
         if r1 is not None and any(c.status in ("failed", "error") for c in r1.tests.values()):
             repeat = wb.run_gate("base-tests-repeat", command, reports=_reports(wb), extra_env=BASE_RUN_ENV).report
+    support = _support_reverted(ctx, reverted, {c.sha: c for c in commits(ctx)})  # L4-VER-080: recorded for every run
     if r1 is None:
         detail = f"the test gate gave no report with the unit's test and support files at the base ({gate.reason})"
-        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [], [])
+        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [], support)
         return Outcome([_blocker(GONE_TITLE, detail)], "no report from the run of the base's tests")
     needs_base = runner_changed or r1.collection_errors or any(c.status != "passed" for c in r1.tests.values())
     if needs_base:
@@ -446,7 +447,6 @@ def check_base_tests(
     failing = [i for i in judged.failing if i in blocked]
     gone = [i for i in judged.not_run if i in blocked]
     errors = _collection_lines(ctx, judged.collection_errors, gate.log_path)
-    support = _support_reverted(ctx, reverted, {c.sha: c for c in commits(ctx)}) if failing or gone or errors else []
     total = len([p for p in reverted if is_support_file(ctx.git, ctx.cfg, p, _rev_of(ctx, p))]) if support else 0
     records: dict[str, dict[str, str]] = {}
     if failing:

@@ -349,3 +349,11 @@ def test_a_ledger_of_0_4_59_without_the_key_changes_nothing_for_the_readers():  
 
     assert FAILS_TITLE == BASE_FAILS_TITLE
     assert shown_failure_ids({"a::b": {"gate": "test", "kind": "assertion", "message": "x"}}, FAILS_TITLE, "") == []
+
+
+def test_a_run_that_gave_no_report_still_records_the_reverted_support_files(tmp_path, git_environ):  # L4-VER-080
+    wb, ctx, _ = failing_run(tmp_path, git_environ)
+    wb._reports.clear()  # the gate gives no report
+    out = check_base_tests(wb, ctx, prior=[], round_no=1)
+    assert "gave no report" in out.findings[0].detail
+    assert wb.events[0][1]["support_reverted"] == [{"path": MODULES, "tasks": ["1.1", "1.2"], "people": False}]
