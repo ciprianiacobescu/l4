@@ -14,10 +14,11 @@ raises a consistency finding in another.
 - **interfaces.** Name every helper one unit gives another, with its signature, in the spec.
 - **missing_dependency.** Add `depends_on` when two units edit one function or file section, or when a document
   describes what another unit creates.
-- **test-support files.** Name a test-support file a task must change exactly, in code font (`conftest.py`, not
-  "the conftest"), in its task line or heading, on an active plan or the base branch. Its red step may then change it
-  (the base-tests run keeps that); its green step only a Python file red left alone. In green a data fixture or ignore
-  file needs a person's answer; `[test-infra]` opens none. Docs a test glob covers need a person's tag.
+- **test-support files.** Name a test-support file a task must change exactly, in code font
+  (`conftest.py`, not "the conftest"), in its reviewed task line or heading, on an active plan or the base branch. Its red
+  step may then change it (the base-tests run keeps that); its green step only a Python file red left alone. In green
+  a data fixture or ignore file needs a person's answer; `[test-infra]` opens none. Docs a test glob covers need a
+  person's tag.
 - **existing tests and helpers.** In the task line, name an existing test to change as `path::name` (at most 5) and
   a new helper module by path: red changes the test in place and stubs the helper, green fills it in.
 - **tasks.** Each task writes its own tests (red), then its code (green): no "failing tests" task before a "fix" task,
