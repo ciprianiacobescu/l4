@@ -1343,8 +1343,13 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 > - **A retake.** A test chore may not edit the test files that an earlier take of the same item added: they are
 >   existing test files, and an edit is put back (`guard.test_tamper`). Its prompt and its questions say so. When the
 >   verifier judged the item not addressed because such a test misses a check, the chore adds the check as new tests in
->   a new test file. If you would rather change the earlier test, commit the change on `<branch>` yourself and answer the
->   question.
+>   a new test file. A retake whose only change is such an edit is not done: the attempt fails and names the file the
+>   edit was put back from (it is no longer ticked as already done). If you would rather change the earlier test,
+>   commit the change on `<branch>` yourself and answer the question.
+> - **A chore that mixes unit and browser tests.** The discrimination runs use the unit gate only, so a browser test that
+>   the chore keeps next to a unit test that discriminates is not itself discriminated: the browser test goes along
+>   with the unit test's outcome. And a kept browser file that no e2e report showed passing (unseen) is still committed
+>   when another test of the chore counts: only a chore with no counted test fails on it.
 > - **`tdd.test_globs`.** A browser test file that no test glob matches is not a test file for a test chore: changing one
 >   fails the attempt (`a test chore may add tests only: it changed non-test files: …`). The default globs cover `e2e/`.
 
