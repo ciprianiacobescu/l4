@@ -11,7 +11,7 @@ When step 1 runs the base's tests (L4-VER-038), a file of the revert set SHALL s
 under `Pre-existing tests changed with an allowance` as `<path> kept at head for the run (task <t>: changed by its red
 step, named by its reviewed text (<source>))`, when all of these hold: it is a regular file at the base and at head;
 it is no ignore file; the verifier's support rule (`is_support_file`) calls it support at head; no test id of the base's
-test report belongs to it (the id's class name is the file's path, its dotted module or a class of it, or a dotted class
+test report belongs to it (`test_locate.file_of_id` finds the file for the id, or the id's class name is a dotted class
 name that ends the path without its extension); at least one harness commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the ledger
 holds a `task.unfrozen` with `reason: named_by_task`, the same unit and task, `red_sha` equal to that commit, a
 `source`, and the path in its `paths` or in a `kept` entry. A person's commit needs no cover. `git diff --numstat` of

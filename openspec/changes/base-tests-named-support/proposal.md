@@ -78,4 +78,6 @@ nothing. That rule belongs to the fix-chore work of this release.
 - `plugins/l4/skills/l4/references/spec.md`, `docs/runbook.md` (the row of `a pre-existing test fails on the unit's
   code`), `docs/SPEC.md` (L4-VER-079..081, SCN-VER-312..321 and 324..328, change-table row 136), `CHANGELOG.md`.
 - Ledger: `verify.base_tests` gains `support_reverted` (at most 20 entries). No new event, no configuration key.
-- Cost: none. The run of the base's tests is the same run; a kept file is one fewer file reverted.
+- Cost: the run of the base's tests is the same run, and a kept file is one fewer file reverted. A named file that passes
+  every other condition needs the base's report: with no baseline and no earlier round's evidence, step 1 runs the
+  merge base's setup and test gate once (as it already does when its own run is not all green).

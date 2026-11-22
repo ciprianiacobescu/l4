@@ -438,6 +438,8 @@ def _hosting_run(tmp_path, git_environ, path, ids, *, base_text="export const x 
         ("test/helpers/x.ts", ["./test/helpers/x.ts::a"]),
         ("src/test/java/com/acme/Shared.java", ["com.acme.Shared::works"]),
         ("tests/helpers.py", ["tests.helpers.TestIt::t"]),
+        ("e2e/auth/page.ts", ["auth/page.ts::opens the form"]),  # Playwright: relative to its test directory
+        ("src/render.test.helpers.ts", ["src.render.test.helpers.ts::x"]),  # a path with dots for slashes
     ],
 )
 def test_scn_ver_324_a_named_file_a_base_test_lives_in_is_reverted(tmp_path, git_environ, path, ids):  # SCN-VER-324
@@ -448,7 +450,7 @@ def test_scn_ver_324_a_named_file_a_base_test_lives_in_is_reverted(tmp_path, git
     assert kept_files(ctx, [path], report) == {}
 
 
-def test_scn_ver_324_a_data_file_no_base_test_id_maps_to_stays(tmp_path, git_environ):  # SCN-VER-324
+def test_scn_ver_326_a_data_file_no_base_test_id_maps_to_stays(tmp_path, git_environ):  # SCN-VER-326
     path = "src/__tests__/data.ts"
     wb, ctx, report = _hosting_run(tmp_path, git_environ, path, ["src/__tests__/render.ts::renders", "a.b::c"])
     out = check_base_tests(wb, ctx, prior=[], round_no=1)
@@ -459,13 +461,10 @@ def test_scn_ver_324_a_data_file_no_base_test_id_maps_to_stays(tmp_path, git_env
     }
 
 
-@pytest.mark.parametrize("via", ["kept", "paths"])
-def test_scn_ver_326_a_plan_named_people_does_not_file_the_kept_file_as_a_persons(
-    tmp_path, git_environ, via
-):  # SCN-VER-326
+def test_scn_ver_326_a_plan_named_people_does_not_file_the_kept_file_as_a_persons(tmp_path, git_environ):  # SCN-VER-326
     source = "plan:people-ops@d"  # the reason text embeds the source: routing must not read it
     repo, base, red, tasks = named_repo(tmp_path, git_environ)
-    repo.events.append(named(red, via=via, source=source))
+    repo.events.append(named(red, source=source))
     ctx = ctx_of(repo, base, red, tasks)
     wb = ScriptedWb(repo, git_environ, [passing_report("test.arch.repo__graph")], tmp_path / "unit")
     wb.baselines[base] = BASE

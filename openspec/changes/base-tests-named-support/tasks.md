@@ -83,8 +83,8 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   in `test_base_tests_named_support.py`, then `base_tests._in_report` and the lazy base reference of `_kept`.
 - [x] 5.2 The lead of L4-VER-080 says `(a harness commit)` for a file only a harness commit with no task changed, and
   `(a person)` only when a person's commit did (SCN-VER-327).
-- [x] 5.3 `check_base_tests` files a kept file as a person's line by the set `_kept` returns, not by the word `people` in
-  the reason (SCN-VER-326); `_allowance` is unchanged.
+- [x] 5.3 `check_base_tests` lists a file the named rule kept as an allowance by the set `_kept` returns, not by the word
+  `people` in its reason (SCN-VER-326); `_allowance` and the routing of its reasons are unchanged.
 - [x] 5.4 Tests that kill the surviving mutants of the named rule: exact path, a link or a deletion, another reason
   (SCN-VER-328, `test_base_tests_named_support.py`). Nothing in the code changed.
 - [x] 5.5 Docs: the skill's test-support bullet states the 3-file and 40-line bounds within the word cap; L4-VER-080 says

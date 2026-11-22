@@ -70,11 +70,16 @@ as already satisfied, and the general rule for a fix chore that changes nothing.
 5. No test id of the base's test report belongs to `path` (`_in_report`). Jest runs every file under `__tests__/` and
    mocha every file under `test/`, and for a file that is not Python step 1's run is the only guard against a weakened
    test of it; `is_support_file` calls such a file support for its name alone (`src/__tests__/render.ts`,
-   `test/arch/repo.ts`, `test/helpers/x.ts`). A test id belongs to a file when its class name is the file's path (with
-   or without `./`; Vitest and Playwright write it so), is the file's dotted module or a class of it (a pytest id), or
-   is a dotted class name that ends the path without its extension (a JVM or .NET id). `_file_of` is not used: it finds
-   only Python and Go test files, and widening it would change `split_allowed`. A file no id maps to, the motivating
-   data file with no tests of its own, stays eligible. The base report is step 1's base reference (the workbench
+   `test/arch/repo.ts`, `test/helpers/x.ts`). A test id belongs to a file when `test_locate.file_of_id(id, [path])` returns the path (the head of the id is the path,
+the path with dots for slashes, a dotted Python module or a class of it, or the end of such a path, which is how a
+runner that writes ids relative to its test directory is read; as in `gate_repeat.untouched`, the slashes of a
+JavaScript spec id are read as dots, and a leading `./` is dropped), or when the head is a dotted class name that ends
+the path without its extension (a JVM or .NET id: `com.acme.Shared` and `.../com/acme/Shared.java`). `file_of_id` is
+given only the candidate path, so it cannot give up on ambiguity: the id is the file's whenever it can be, which
+reverts more, never less. `_file_of` of this module is not used: it finds only Python and Go test files, and widening
+it would change `split_allowed`. A file no id maps to, the motivating
+   data file with no tests of its own, stays eligible. So does a file whose tests the report cannot place, because the
+runner's ids hold no path (jest-junit's default `{classname} {title}`): that is a limit of the rule, not a check. The base report is step 1's base reference (the workbench
    baseline, an earlier round's evidence or a run at the merge base), fetched through a callable only when a file has
    passed every other condition, so a unit with no such file never runs the merge base for this. With no report
    (the reference gave none) nothing stays: fail closed. The evidence of an earlier round lists only the tests that
@@ -94,12 +99,12 @@ The rule is in `kept_files` only. `_allowance` and `_unfrozen_source` are not ch
 `check_tests`, and a file that matches both a test glob and a support glob could otherwise widen L4-VER-030.
 `split_allowed` is not changed either: the file is kept, so the tests that read it run against the head version.
 
-`_kept` returns the set of paths the two people rules kept (only people's commits, or a person's commit last), and
-`check_base_tests` lists a kept file as a person's line only when it is in that set. It no longer reads the reason text
-(`"people" not in why`): the reason of a named file embeds the plan id (`plan:<id>@<digest>`) and `_allowance`'s embeds
-a source or a question text, so an id with the word in it filed the file as a person's. The routing of `_allowance`'s
-files moves to the same set: `_allowance` itself is unchanged, and the files it frees go to the same list as before
-except in that misfiled case. The kept file is listed with the allowances (283), under `## Pre-existing
+`_kept` returns the set of paths that this rule kept, and `check_base_tests` lists those as allowances whatever the
+reason says: the reason of a named file embeds the plan id (`plan:<id>@<digest>`), and an id with the word `people` in
+it filed the file as a person's (`"people" not in why`). The routing of every other kept file, `_allowance`'s
+(`unfrozen by <source>`, where the source is a plan id or a question text) included, is the reason text as in 0.4.59:
+replacing it by a flag would file a source with the word differently, so it is left, and is a decision for the owner.
+The kept file is listed with the allowances (283), under `## Pre-existing
 tests changed with an allowance (L4-VER-031)` of `verification.md`. The `kept_files` docstring changes: a harness
 change to a support file is now read by that listing and by the judge, whose diff holds the file (`_git_diff`).
 

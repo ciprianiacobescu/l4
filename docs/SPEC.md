@@ -6668,13 +6668,16 @@ whose name does not look like a test module); no test id of the base's test repo
 harness commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the
 ledger holds a `task.unfrozen` with `reason: named_by_task`, the same unit and task, `red_sha` equal to that commit, a
 `source`, and the path in its `paths` or in a `kept` entry. That event says the task's reviewed text names the path
-(L4-IMP-014). A test id belongs to a file when its class name is the file's path (with or without `./`), is the file's
-dotted module or a class of it (`tests.test_a.TestX`), or is a dotted class name that ends the path without its
-extension (`com.acme.Shared`). Jest runs every file under `__tests__/` and mocha every file under `test/`, and for a
+(L4-IMP-014). A test id belongs to a file when `test_locate.file_of_id` finds the file for it among that one path (the id's head
+is the path, the path with dots for slashes, a dotted Python module or a class of it, or the end of such a path, which
+reads a runner that writes ids relative to its test directory; for a spec id the slashes are read as dots, as in
+`gate_repeat.untouched`), or when the head is a dotted class name that ends the path without its extension
+(`com.acme.Shared`). Jest runs every file under `__tests__/` and mocha every file under `test/`, and for a
 file that is not Python this run is the only guard against a weakened test of it, so such a file is reverted. A file no
 id maps to, such as a data file with no tests of its own, stays eligible. The base report is the workbench's baseline,
 the `integrity.base_tests` of an earlier round or a run at the merge base (step 1's base reference); it is fetched only
-when a file passed every other condition, and with none nothing stays this way (fail closed). The manifest's kind and the
+when a file passed every other condition, and with none nothing stays this way (fail closed). A runner whose ids hold no
+path (jest-junit's default) gives the report no way to see a test file: such a file stays eligible. The manifest's kind and the
 entry's `why` text are not read: with the default globs a data file under `test/` is kind `test` there. A person's
 commit needs no cover. `git diff --numstat` of the base and head SHALL count at most 40 added and deleted lines for the
 file, and a binary file SHALL NOT be kept. At most three files per task SHALL stay this way, in path order. The others are reverted, and

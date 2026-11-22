@@ -27,12 +27,14 @@ from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
 from l4.implementer.excerpt import case_excerpt
 from l4.implementer.guards import IGNORE_FILE_GLOBS
+from l4.implementer.test_locate import file_of_id
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
 from l4.verifier.evidence import read_verdict
 from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, BASE_TESTS_GATE
+from l4.verifier.gate_repeat import JS_EXTENSIONS
 from l4.verifier.gates import failure_records
 from l4.verifier.integrity import (
     Commit,
@@ -212,21 +214,19 @@ def kept_files(ctx: IntegrityContext, paths: Sequence[str], base: TestReport | N
 def _kept(
     ctx: IntegrityContext, paths: Sequence[str], base_of: Callable[[], TestReport | None]
 ) -> tuple[dict[str, str], dict[str, int], set[str]]:
-    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079, the kept files
-    that are a person's). A person's file is one the two people rules keep: it is listed as a person's line, every
-    other as an allowance. That is decided here, never by reading the reason text, which embeds a plan id, a question
-    or a task title. `base_of` gives the base's test report, and is called only for a file that passed every other
-    condition of L4-VER-079."""
+    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079, the files kept by
+    L4-VER-079). `check_base_tests` lists the last as allowances whatever their reason says: it embeds a plan id, and
+    the word `people` in one is no person's commit. `base_of` gives the base's test report, and is called only for a
+    file that passed every other condition of L4-VER-079."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
-    people: set[str] = set()
+    named_files: set[str] = set()
     per_task: dict[tuple[str, str], int] = {}
     over: dict[str, int] = {}
     for path in sorted(paths):
         who = _introducers(ctx, path, lambda before, after: before != after)
         if _by_people(who):
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
-            people.add(path)
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
         elif (named := _named_red_change(ctx, who, path, by_sha, base_of)) is not None:
@@ -234,12 +234,12 @@ def _kept(
             if per_task.get(key, 0) < MAX_NAMED_SUPPORT:
                 per_task[key] = per_task.get(key, 0) + 1
                 kept[path] = reason
+                named_files.add(path)
             else:
                 over[task] = over.get(task, 0) + 1
         elif _last_by_people(who) and not is_support_file(ctx.git, ctx.cfg, path, _rev_of(ctx, path)):
             kept[path] = f"people changed it last ({', '.join(r[SHA][:10] for r in who)})"
-            people.add(path)
-    return kept, over, people
+    return kept, over, named_files
 
 
 def _regular(ctx: IntegrityContext, rev: str, path: str) -> bool:
@@ -275,18 +275,22 @@ def _names_red_change(ctx: IntegrityContext, commit: Commit, path: str) -> str |
 
 
 def _in_report(report: TestReport, path: str) -> bool:
-    """Does a test id of `report` belong to the file `path`? A pure reading of the id's classname, in the forms the
-    JUnit writers give: the path itself (`src/__tests__/a.ts::name`, with or without a leading `./`); the dotted module
-    of a pytest id, or one of its classes (`tests.test_a.TestX::name`); a dotted class name that ends the path without
-    its extension (`com.acme.Shared::name` and `src/test/java/com/acme/Shared.java`). `_file_of` finds only Python and
-    Go test files, and a file under `__tests__/` or `test/` of another language is a test file to its runner."""
+    """Does a test id of `report` belong to the file `path`? `test_locate.file_of_id` over this one path (the id's head
+    is the path, the path with dots for slashes, a dotted Python module or a class of it, or the end of such a path),
+    with the JavaScript reading of `gate_repeat.untouched` (a spec id is relative to the runner's test directory: its
+    slashes are dots), and one more form: a dotted class name that ends the path without its extension
+    (`com.acme.Shared::name` and `src/test/java/com/acme/Shared.java`). An id that holds no path (jest-junit's default
+    `{classname} {title}`) maps to no file: the report cannot see a test file then. With one path there is no
+    ambiguity to give up on: the id is the file's whenever it can be, which reverts more, never less."""
     stem = posixpath.splitext(path)[0]
     for test_id in report.tests:
-        classname = test_id.partition("::")[0]
-        if classname.removeprefix("./") == path:
+        head, sep, rest = test_id.partition("::")
+        head = head.removeprefix("./")
+        if head.rsplit(".", 1)[-1] in JS_EXTENSIONS:
+            head = head.replace("/", ".")
+        if file_of_id(head + sep + rest, [path]) == path:
             return True
-        dotted = classname.replace(".", "/")
-        if dotted == stem or dotted.startswith(stem + "/") or ("." in classname and stem.endswith("/" + dotted)):
+        if "." in head and stem.endswith("/" + head.replace(".", "/")):
             return True
     return False
 
@@ -448,10 +452,12 @@ def check_base_tests(
         return reference[0]
 
     full = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
-    kept, over, people = _kept(ctx, [path for path, _ in full.changes], lambda: base_reference()[0])
+    kept, over, named_files = _kept(ctx, [path for path, _ in full.changes], lambda: base_reference()[0])
     plan = replace(full, changes=tuple(c for c in full.changes if c[0] not in kept))
-    allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p not in people]
-    people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p in people]
+    # a file the named rule kept is an allowance; for the others the reason text decides, as in 0.4.59
+    human_kept = {p for p, why in kept.items() if "people" in why and p not in named_files}
+    allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p not in human_kept]
+    people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p in human_kept]
     changed = _changed(ctx.git, ctx.base_sha, ctx.head_sha)
     runner_changed = sorted(p for p in changed if any(glob_match(g, p) for g in cfg.tdd.runner_config_files))
     if not plan.changes and not runner_changed:
