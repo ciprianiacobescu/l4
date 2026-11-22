@@ -57,6 +57,7 @@ from l4.evidence.collect import (
 )
 from l4.evidence.report import evidence_json
 from l4.evidence.scope import file_kind
+from l4.evidence.testsran import file_of_test as report_file_of_test
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
@@ -263,6 +264,7 @@ from l4.verifier.verdicts import (
     unresolved_holds,
     verdict_targets,
 )
+from l4.verifier.writer_chain import WriterChain
 
 log = logging.getLogger("l4.verify")
 
@@ -1152,14 +1154,39 @@ def _evidence_tests(e: CriterionEvidence | None) -> tuple[str, ...]:
     return tuple(t.id for t in e.tests if t.status == "passed" and t.adequate) if e is not None else ()
 
 
-def _no_python(vc: VerifyContext, base_sha: str, head: str) -> bool:
-    """The unit changed files outside the harness, spec and documentation paths and none of them is a `.py` file
-    (tests included: a Python project's unit that only adds a test still audits). A unit that changed nothing there
-    is not judged non-Python."""
+NOT_PYTHON_NOTE = "audit sampling writes pytest tests only; changed code is not python"
+MAX_NAMED_FILES = 5
+
+
+def _audit_scope_note(vc: VerifyContext, base_sha: str, head: str, report: TestReport | None) -> str:
+    """Why step 4a does not run for this unit, else "" (L4-VER-089). The unit's changed files outside the harness, spec
+    and documentation paths decide: none is no reason to skip (a unit that changed nothing there is not judged
+    non-Python); no `.py` file is `NOT_PYTHON_NOTE`; Python code (a `.py` file that is neither a test nor test support,
+    the files the writer is shown) audits. A unit whose changed `.py` files are all tests or test support audits only
+    when step 3's unit-gate report holds a test of a Python file of the tree (the unit gate runs Python tests, so a
+    pytest audit file can be collected) or left no report (the rule of 0.4.59); a Python browser test of a TypeScript
+    unit is no reason to write a pytest audit."""
     wb = vc.wb
     unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
     files = changed_unit_files(wb.git, base_sha, head, wb.cfg, unit_rel)
-    return bool(files) and not any(p.endswith(".py") for p, _ in files)
+    if not files:
+        return ""
+    python = sorted(p for p, _ in files if p.endswith(".py"))
+    if not python:
+        return NOT_PYTHON_NOTE
+    tdd = wb.cfg.tdd
+    tests = [p for p in python if any(glob_match(g, p) for g in (*tdd.test_globs, *tdd.test_support_globs))]
+    if len(tests) < len(python) or report is None:
+        return ""
+    tree = frozenset(
+        p for p in wb.git.run("ls-tree", "-r", "--name-only", head, check=False).stdout.splitlines()
+        if p.endswith(".py")
+    )  # fmt: skip
+    if any(report_file_of_test(test_id, tree) for test_id in report.tests):
+        return ""
+    more = f" and {len(tests) - MAX_NAMED_FILES} more" if len(tests) > MAX_NAMED_FILES else ""
+    shown = ", ".join(tests[:MAX_NAMED_FILES]) + more
+    return f"{NOT_PYTHON_NOTE} (the changed Python files are tests or test support: {shown})"
 
 
 def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
@@ -1172,8 +1199,8 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
         else "verifier.audit_sample_ratio is 0" if ratio <= 0
         else ""
     )  # fmt: skip
-    if not why and _no_python(vc, base_sha, result.head_sha):
-        why = "audit sampling writes pytest tests only; changed code is not python"
+    if not why:
+        why = _audit_scope_note(vc, base_sha, result.head_sha, run.report)
     if why:
         run.records["4a"] = StepRecord("4a", "audit sampling", "not_run", note=why)
         return
@@ -1189,6 +1216,7 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
         out = run_audit(
             wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
             head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit, support=support,
+            report=run.report,
         )  # fmt: skip
         result.audit = out.records
         result.findings.extend(out.findings)
@@ -2145,13 +2173,21 @@ def verify_hook(ctx: HookContext) -> Trigger:
         vc.seat = seat_of(current)
         return backend(current, bench(current)), current.profile_name
 
-    def writer_for(stem: str) -> Callable[[], LLMBackend]:
+    writer_skip: set[str] = set()  # `verifier_agent` profiles that could not answer a call in this round (L4-VER-091)
+    writer_failures: list[str] = []  # `<profile>: <kind>: <detail>` of each, for the reason a unit waits with
+
+    def writer_for(stem: str, step: str, role: str) -> Callable[[], LLMBackend]:
         """The `verifier_agent` role, selected when it is needed (the audit sample is drawn, a UI criterion is a gap):
         the first usable profile of the chain that is independent of the implementers (C1); none is
-        `WaitingCapacity` (`no independent verifier`)."""
+        `WaitingCapacity` (`no independent verifier`). A call that a profile cannot answer is asked of the next one
+        (`WriterChain`, L4-VER-091), and the failed profile is skipped by both steps for the rest of the round."""
 
-        def open_writer() -> LLMBackend:
-            writer = select_judge(services.factory, cfg, services.ref.id, implementers, role="verifier_agent")
+        def select() -> Selected:
+            return select_judge(
+                services.factory, cfg, services.ref.id, implementers, role="verifier_agent", skip=writer_skip
+            )
+
+        def open_backend(writer: Selected) -> LLMBackend:
             by_writer = dataclasses.replace(wb, selected=writer)
             return AgentJudge(
                 writer.impl,
@@ -2162,6 +2198,19 @@ def verify_hook(ctx: HookContext) -> Trigger:
                 role="verifier_agent",
                 profile=writer.profile_name,
             )
+
+        def after_limit(limited: Selected, run: RunResult) -> Selected:
+            chosen = services.factory.on_limit(limited, run)  # cools the profile and selects again
+            if probe_vetoes(cfg, implementers, services.factory, chosen):  # D14: its own probe contradicts it
+                writer_skip.add(chosen.profile_name)
+                chosen = select()
+            return chosen
+
+        def open_writer() -> LLMBackend:
+            return WriterChain(
+                select, open_backend, after_limit, writer_skip, writer_failures, wb.emit, step, role,
+                wb.redactor.redact_text,
+            )  # fmt: skip
 
         return open_writer
 
@@ -2176,8 +2225,8 @@ def verify_hook(ctx: HookContext) -> Trigger:
     vc = VerifyContext(
         wb, _NoJudge() if resume else backend(selected, wb), selected.profile_name, implementers, round_no,
         JUDGE_TIMEOUT_S, seat=seat_of(selected), next_judge=None if resume else next_judge,
-        audit_writer=writer_for("verify-audit") if cfg.roles.verifier_agent else None,
-        ui_writer=writer_for("verify-ui") if cfg.roles.verifier_agent else None,
+        audit_writer=writer_for("verify-audit", "4a", "audit") if cfg.roles.verifier_agent else None,
+        ui_writer=writer_for("verify-ui", "5", "ui_tests") if cfg.roles.verifier_agent else None,
         s1=s1 if cfg.verifier.s1.enabled and has_system_one_profile(cfg) else None,
         shadow=ShadowWiring(s1.cache_file, services.app.repo / cfg.observability.log_dir / "system-one.jsonl",
                             dict(services.app.environ)) if cfg.verifier.s1.enabled and cfg.verifier.s1.shadow else None,

@@ -33,10 +33,12 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from l4.agents.factory import RoleUnavailable
+from l4.evidence.testsran import file_of_test
 from l4.fsutil import UnsafeFile, read_inside, unlink_inside
 from l4.gates.collection import collection_error, own_section
 from l4.gates.dryrun import narrow_ruff_paths
 from l4.gates.e2e import _PYTEST_VALUE_OPTIONS
+from l4.gates.junit import TestReport
 from l4.gates.runner import GateResult
 from l4.implementer.discrimination import confirm_pre_satisfied
 from l4.implementer.excerpt import lint_excerpt
@@ -112,24 +114,36 @@ def audit_directory(wb: Workbench) -> str:
     return "tests"
 
 
-def red_test_directory(wb: Workbench, base_sha: str, head: str) -> str | None:
+def red_test_directory(wb: Workbench, base_sha: str, head: str, report: TestReport | None) -> str | None:
     """The directory of the unit's own test files (a changed `.py` file of `tdd.test_globs` that defines a test at
-    head): the most common one, the shortest on a tie. The head report proves the test command collects it, which no
-    reading of the command can (an option's value is a path too). None when the unit changed no such file."""
+    head and of which step 3's unit-gate report holds a test): the most common one, the shortest on a tie. The head
+    report proves the test command collects it (L4-VER-090), which no reading of the command can (an option's value is a
+    path too). None when no changed test file qualifies, or when step 3 left no report: the caller then confirms the
+    folder with a collect-only run."""
+    if report is None:
+        return None
     tdd = wb.cfg.tdd
+    tree = frozenset(
+        wb.git.run("ls-tree", "-r", "--name-only", head, check=False).stdout.splitlines()
+    )  # the files the report's modules are resolved against
     counts: dict[str, int] = {}
     for path in _changed_files(wb, base_sha, head):
         if not path.endswith(".py") or not _matches(tdd.test_globs, path) or "test_l4_audit_c_" in path:
             continue
         shown = wb.git.run("show", f"{head}:{path}", check=False)
         found = facts_of(shown.stdout) if shown.returncode == 0 else None
-        if found and any(f.test for f in found.values()):
+        if found and any(f.test for f in found.values()) and _reported(report, path, tree):
             folder = PurePosixPath(path).parent.as_posix()
             if folder not in ("", "."):
                 counts[folder] = counts.get(folder, 0) + 1
     if not counts:
         return None
     return sorted(counts, key=lambda d: (-counts[d], len(d), d))[0]
+
+
+def _reported(report: TestReport, path: str, tree: frozenset[str]) -> bool:
+    """Whether step 3's unit-gate report holds a test of `path`."""
+    return any(file_of_test(test_id, (path,), tree) == path for test_id in report.tests)
 
 
 def confirm_collected(wb: Workbench, rel: str) -> bool:
@@ -229,6 +243,7 @@ def run_audit(
     timeout_s: int,
     emit: Callable[..., None],
     support: SupportPlan = NO_SUPPORT,
+    report: TestReport | None = None,
 ) -> AuditOutcome:
     """Write, run and judge the audit tests of `chosen`. `RoleLimit` (a usage limit) and `RoleUnavailable` (the writer
     cannot run) propagate: the unit waits for capacity. `emit(type, **data)` records `verify.audit`."""
@@ -238,8 +253,8 @@ def run_audit(
     changed = _changed_files(wb, base_sha, head)
     written: dict[str, str] = {}
     folder = red_test_directory(
-        wb, base_sha, head
-    )  # next to the unit's own tests: the head report proves it is collected
+        wb, base_sha, head, report
+    )  # next to the unit's own tests: step 3's report proves the command collects it (L4-VER-090)
     unconfirmed = folder is None
     folder = folder or audit_directory(wb)
     for cid in chosen:
