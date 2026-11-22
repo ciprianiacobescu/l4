@@ -20,9 +20,11 @@ from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
+from l4.verifier.hold_evidence import has_evidence, numbered_code
 from l4.verifier.judge import parts_text
 from l4.verifier.traceability import OVER_CAP_LABEL
 from l4.verifier.types import (
+    MAX_CODE_CHARS,
     REPLY_OUTCOMES,
     CriterionEvidence,
     CriterionOutcome,
@@ -62,7 +64,6 @@ def _traceability_line(result: VerifyResult) -> str:
 
 
 SNAPSHOT_LINK = ".l4-out/e2e/page.html"  # `gates.e2e.SNAPSHOT_RELPATH`: the page the head app served, a CI artefact
-MAX_CODE_CHARS = 4_000
 
 
 def _generated_for(result: VerifyResult, criterion: str) -> GeneratedOutcome | None:
@@ -125,6 +126,24 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         ]  # fmt: skip
         rows.append(f"| {' | '.join(_cell(c) for c in cells)} |")
     return rows
+
+
+def _unaccepted_blocks(result: VerifyResult) -> list[str]:
+    """One list item per generated test that was written and not accepted (L4-VER-083): the failure at the head and the
+    numbered code, as one block indented by six spaces. Redacted and scrubbed with the whole file."""
+    lines: list[str] = []
+    for g in result.generated:
+        if not has_evidence(g):
+            continue
+        where = f": `{_flat(g.path)}`" if g.path else ""
+        lines += [f"- {_flat(g.criterion)} ({g.status} after {g.attempts} attempt(s)){where}", ""]
+        if g.excerpt:
+            lines += ["      Failure at the head:", *(f"        {line}".rstrip() for line in g.excerpt.splitlines())]
+        if g.code and g.path:
+            lines += [f"      The test (at most {MAX_CODE_CHARS:,} characters):"]
+            lines += [f"      {line}".rstrip() for line in numbered_code(g.code)]
+        lines.append("")
+    return lines[:-1]
 
 
 def _s1_rows(result: VerifyResult) -> list[str]:
@@ -295,6 +314,8 @@ def render_verification_md(result: VerifyResult) -> str:
         lines += [""] + render_evidence_json(result.evidence)
     if result.generated:
         lines += ["", "## Generated UI tests", ""] + _generated_rows(result)
+        if any(has_evidence(g) for g in result.generated):
+            lines += ["", "## Generated UI tests that were not accepted", ""] + _unaccepted_blocks(result)
     if result.s1:
         lines += ["", "## S1 (recorded for calibration, never decides)", ""] + _s1_rows(result)
     if result.audit:
@@ -354,9 +375,11 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     data = dataclasses.asdict(g)
     data["tests"], data["artifacts"] = list(g.tests), list(g.artifacts)
     data["covered_by"] = list(g.covered_by)
-    data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]
+    data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]  # a copy `generate` already bounded and redacted
     if not data["code"]:
         del data["code"]
+    if not data["excerpt"]:
+        del data["excerpt"]
     return data
 
 

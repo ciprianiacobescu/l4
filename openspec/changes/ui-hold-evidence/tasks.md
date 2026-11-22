@@ -6,7 +6,7 @@ parts so that no test file holds a key marker as one string.
 
 ## 1. Step 5 keeps the failure and a bounded copy of the code (L4-VER-083, D1, D2)
 
-- [ ] 1.1 Write the tests first:
+- [x] 1.1 Write the tests first:
   - in `tests/unit/implementer/test_excerpt.py`: the redact-then-cut helper of D1 redacts a token that straddles the
     limit (no part of 8 characters or more is left), cuts at the last line end before the limit, cuts a single longer
     line at the limit, and leaves a text under the limit as the redactor gives it;
@@ -23,7 +23,7 @@ parts so that no test file holds a key marker as one string.
   - in `tests/unit/verifier/test_resume.py`: `restore_round` keeps `excerpt`, and a 0.4.59 record (no `excerpt`)
     restores with `""` and its stored code (SCN-VER-333).
   Run each file and see the new tests fail.
-- [ ] 1.2 Then add the helper to `src/l4/implementer/excerpt.py` (reuse `_redact_keys` and `_cut_at_line`), `excerpt`
+- [x] 1.2 Then add the helper to `src/l4/implementer/excerpt.py` (reuse `_redact_keys` and `_cut_at_line`), `excerpt`
   to `_Verdict` and to `GeneratedOutcome` (last field), the `failure_excerpt` call in the `fails_at_head` branch of
   `_discriminates`, and the bounded code and the excerpt in the `outcome` closure of `generate_ui_test`
   (`src/l4/verifier/generate.py`); `_generated_json` keeps or drops `excerpt` (`src/l4/verifier/report.py`). Define
@@ -32,7 +32,7 @@ parts so that no test file holds a key marker as one string.
 
 ## 2. The hold's question and the report (L4-VER-083, D3, D4)
 
-- [ ] 2.1 Write the tests first:
+- [x] 2.1 Write the tests first:
   - in `tests/unit/verifier/test_hold_verdicts.py`: SCN-VER-331 (`raise_verdict_questions(..., holds=[ui_hold_text(C)],
     generated=[<fails_at_head outcome with excerpt and code>])`: the section's `### Harness notes` holds the excerpt's
     lines and the code numbered, line 19 as `  19  ...`; the title and the `question.raised` event's `target` and
@@ -49,24 +49,24 @@ parts so that no test file holds a key marker as one string.
   - in `tests/unit/delegate/` (the file that tests `QuestionView` or the delegate's prompt): the delegate's prompt for a
     UI hold question holds the notes' excerpt line.
   Run each file and see the new tests fail.
-- [ ] 2.2 Then add `_ui_hold_notes` and the sentence to `_ui_hold_lines`, and pass `notes=` from `_hold_question`
+- [x] 2.2 Then add `_ui_hold_notes` and the sentence to `_ui_hold_lines`, and pass `notes=` from `_hold_question`
   (`src/l4/verifier/verdicts.py`); add the section to `render_verification_md` (`src/l4/verifier/report.py`). Run the
   files of 2.1, then `tests/unit/verifier/test_ui_flow.py`, `tests/unit/verifier/test_hold_binding.py` and
   `tests/unit/specs/test_questions.py`, one at a time.
 
 ## 3. The writer's retry (L4-VER-084, D5)
 
-- [ ] 3.1 Write the tests first in `tests/unit/verifier/test_generate.py`: SCN-VER-336 (the second request's prompt,
+- [x] 3.1 Write the tests first in `tests/unit/verifier/test_generate.py`: SCN-VER-336 (the second request's prompt,
   read from the fake writer, holds `the test fails at the head:`, `Why it failed at the head:` and the excerpt's line
   inside the retry reason data block); SCN-VER-337 (a `non_discriminating` first attempt: the retry reason is the
   reason alone; a second test that passes at the merge base after a `fails_at_head` first attempt ends
   `non_discriminating`). Run and see them fail.
-- [ ] 3.2 Then change the retry reason in `generate_ui_test`. No template file, no `templates.lock.json` change. Run
+- [x] 3.2 Then change the retry reason in `generate_ui_test`. No template file, no `templates.lock.json` change. Run
   `tests/unit/verifier/test_generate.py` and `tests/unit/verifier/test_testwriter.py` (if present), one at a time.
 
 ## 4. One behaviour, one fix task (L4-VER-085, D8)
 
-- [ ] 4.1 Write the tests first:
+- [x] 4.1 Write the tests first:
   - in `tests/unit/verifier/test_hold_verdicts.py`: `settle_holds` with a rejected UI hold gives a finding with
     `criterion == C` and the id, title, detail, severity and source of 0.4.59, for a reason with and without a
     `WHEN … THEN …`; `is_ui_hold_finding` is true for it and false for a rejected scope, coverage or judge-view hold's
@@ -80,7 +80,7 @@ parts so that no test file holds a key marker as one string.
   - in `tests/unit/verifier/test_ladder_hold_fix.py`: SCN-VER-342 with a stored NEEDS_HUMAN round and two rejects (the
     verdict is FAIL, the fix unit has one task).
   Run each file and see the new tests fail.
-- [ ] 4.2 Then set the criterion in `_hold_finding` and add `is_ui_hold_finding` (`src/l4/verifier/verdicts.py`), and
+- [x] 4.2 Then set the criterion in `_hold_finding` and add `is_ui_hold_finding` (`src/l4/verifier/verdicts.py`), and
   change `cited`, the sort, the skip and the scenario's name in `_candidates` (`src/l4/verifier/fixunit.py`). Run the
   files of 4.1, then `tests/unit/verifier/test_fixunit_reject_text.py`, `tests/unit/verifier/test_fixunit_finding_home.py`,
   `tests/unit/verifier/test_fixunit_test_only.py`, `tests/unit/verifier/test_fixunit_one_failure.py` and
@@ -88,8 +88,8 @@ parts so that no test file holds a key marker as one string.
 
 ## 5. Checks
 
-- [ ] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342 and 350, change-table row 137 and the amendments to L4-VER-006,
+- [x] 5.1 `docs/SPEC.md` holds L4-VER-083..085, SCN-VER-331..342 and 350, change-table row 137 and the amendments to L4-VER-006,
   L4-VER-067 and the step-5 row of 10.2. Check them against the code and tell the orchestrator where they differ; do
   not edit `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the skill. Run `uv run --frozen python
   scripts/check_spec.py docs/SPEC.md`.
-- [ ] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.

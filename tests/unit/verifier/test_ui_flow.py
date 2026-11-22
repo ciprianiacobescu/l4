@@ -465,3 +465,34 @@ def test_the_verdict_records_the_excerpt_of_a_module_the_e2e_gate_could_not_coll
     assert records, verdict["failures"]
     [excerpt] = [r["excerpt"] for r in records.values()]
     assert "no_such_module_for_the_excerpt" in excerpt and len(excerpt.splitlines()) <= 8 and len(excerpt) <= 600
+
+
+def test_scn_ver_342_a_round_that_asked_a_ui_hold_before_the_upgrade_is_fixed_under_its_criterion(
+    run_l4, valid_spec, web_repo, tdd_repo, raw
+):
+    """The reject of a UI hold, answered after the round was written, settles through `_hold_finding` when the round
+    is reused: the verdict is FAIL, the finding keeps the hold's id and now cites the criterion, and the fix unit's
+    scenario is under the criterion's requirement, never under `Rejected hold: ... — finding H-...`."""
+    import json
+
+    from ..orchestrator.conftest import edit_questions_on_origin
+
+    noted = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
+    first = run_l4([red_step(), web_green(), no_test(KNOWN), noted, JUDGE], **web_repo)
+    assert first.code == 11 and len(first.events("question.raised")) == 1
+    answer = "reject: the badge is missing. WHEN the cart shows a coupon THEN it names the code SAVE10"
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer=answer)
+    second = run_l4([], **web_repo)  # the stored NEEDS_HUMAN round is reused: no writer, no judge
+    assert second.code == 10, second.outcome
+    assert [e["verdict"] for e in second.events("verify.verdict")] == ["NEEDS_HUMAN", "FAIL"]
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    [hold] = [f for f in body["findings"] if f["id"].startswith("H-")]
+    assert hold["criterion"] == KNOWN and hold["source"] == "deterministic"
+    assert hold["title"].startswith("Rejected hold")
+    [spawned] = second.events("fix.spawned")
+    assert hold["id"] in spawned["findings"] and spawned["consumed"] == ["Q-001"]
+    delta = second.pushed(f"{UNIT_DIR}-fix-1/specs/pricing/spec.md")
+    assert "### Requirement: Discount codes \N{EM DASH} regression 1" in delta and "#### Scenario: Known code" in delta
+    assert "finding H-" not in delta and "Rejected hold" not in delta
+    tasks = second.pushed(f"{UNIT_DIR}-fix-1/tasks.md")
+    assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold["id"] in tasks

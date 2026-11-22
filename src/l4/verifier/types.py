@@ -192,6 +192,7 @@ GenStatus = Literal[
     "lint_failed", "writer_failed", "waived",
 ]  # fmt: skip
 RunOutcome = Literal["pass", "fail", "error"]  # the new test at the merge base / at the head
+MAX_CODE_CHARS = 4_000  # the copy of a generated test that is kept as evidence (L4-VER-083)
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,7 @@ class GeneratedOutcome:
     path: str | None = None  # repository-relative; set for every status that wrote a file
     attempts: int = 0
     reason: str = ""
-    code: str = ""  # the last test written: the evidence for a test that fails at the head
+    code: str = ""  # the last test written, redacted whole then cut at MAX_CODE_CHARS: the evidence (L4-VER-083)
     artifacts: tuple[str, ...] = ()  # traces and screenshots of the head run that failed
     cost_usd: float = 0.0
     model: str | None = None
@@ -217,6 +218,7 @@ class GeneratedOutcome:
     covered_by: tuple[
         str, ...
     ] = ()  # not_testable: the step-4 tests that cover the criterion; a note, no hold (L4-VER-067)
+    excerpt: str = ""  # fails_at_head (the attempt that wrote `code`): why the head run failed, redacted (L4-VER-083)
 
     @property
     def accepted(self) -> bool:

@@ -2,8 +2,10 @@
 
 import json
 
+from l4.implementer.excerpt import redacted_cut
+from l4.redact import Redactor
 from l4.verifier.evidence import restore_round
-from l4.verifier.report import render_verification_md, verdict_json
+from l4.verifier.report import render_verification_md, verdict_json, write_round_evidence
 from l4.verifier.types import (
     CriterionEvidence,
     CriterionOutcome,
@@ -63,7 +65,7 @@ def test_the_generated_section_lists_every_attempt_with_its_artifacts_and_reason
     assert "## Generated UI tests" in text
     refused = next(line for line in text.splitlines() if line.startswith("| C-68f2e098 | fails_at_head"))
     assert "test-results/t/trace.zip" in refused and "fails at the head" in refused
-    assert "def t(): ..." not in text  # the writer's code is an artefact, not report text
+    assert "def t(): ..." in text  # the unaccepted test is shown in its own section (L4-VER-083)
 
 
 NOTED = GeneratedOutcome(
@@ -128,3 +130,73 @@ def test_a_restored_round_keeps_steps_5_and_8_their_outcomes_and_their_status():
     assert [(s.step, s.status) for s in back.steps] == [("5", "reused"), ("8", "unavailable")]
     assert back.generated == [GeneratedOutcome(**{**ACCEPTED.__dict__, "code": ""}), REFUSED]
     assert back.s1 == original.s1
+
+
+EXCERPT = (
+    "tests.e2e.test_l4_c_68f2e098::test_badge:\n"
+    '  >       expect(page.get_by_role("heading", name="Orders")).to_be_visible()\n'
+    "  E       AssertionError: Locator expected to be visible\n"
+    "  e2e/test_l4_c_68f2e098.py:19: AssertionError"
+)
+CODE = "\n".join(f"line {n}" if n != 19 else "# the heading check" for n in range(1, 21)) + "\n"
+TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
+FAILED = GeneratedOutcome(
+    "C-68f2e098", "fails_at_head", "e2e/test_l4_c_68f2e098.py", 2, "the test fails at the head: t::x", CODE,
+    ("test-results/t/trace.zip",), base="fail", head="fail", excerpt=EXCERPT,
+)  # fmt: skip
+
+
+def test_verdict_json_stores_the_excerpt_when_there_is_one_and_no_key_when_there_is_none():  # SCN-VER-333
+    body = verdict_json(result(generated=[ACCEPTED, FAILED, REFUSED]))
+    accepted, failed, refused = body["generated"]
+    assert failed["excerpt"] == EXCERPT and failed["code"] == CODE
+    assert "excerpt" not in accepted and "excerpt" not in refused and refused["code"] == "def t(): ..."
+    back = restore_round(json.loads(json.dumps(body)), UNIT, 2)
+    assert back.generated[1] == FAILED  # a reused round keeps both
+
+
+def test_the_unaccepted_section_has_the_item_and_a_six_space_block_with_the_numbered_code():  # SCN-VER-333
+    text = render_verification_md(result(generated=[ACCEPTED, FAILED]))
+    lines = text.splitlines()
+    head = lines.index("## Generated UI tests that were not accepted")
+    assert lines.index("## Generated UI tests") < head
+    assert lines[head + 2] == "- C-68f2e098 (fails_at_head after 2 attempt(s)): `e2e/test_l4_c_68f2e098.py`"
+    block = lines[head + 3 : head + 3 + 4 + 1 + 20 + 1]
+    assert block[0] == "" and block[1] == "      Failure at the head:"
+    assert "          E       AssertionError: Locator expected to be visible" in block
+    assert "      The test (at most 4,000 characters):" in block
+    assert "        19  # the heading check" in block and "         1  line 1" in block
+    assert all(line.startswith("      ") for line in block[1:])
+    section = lines[head : head + 3 + 4 + 1 + 20 + 3]
+    assert not any(line.startswith("- C-de7f2d3f") for line in section)  # the accepted outcome has no item
+
+
+def test_no_unaccepted_section_without_a_written_test():  # SCN-VER-335
+    nothing = [
+        ACCEPTED,
+        GeneratedOutcome("C-a", "not_testable", reason="pure functions"),
+        GeneratedOutcome("C-b", "writer_failed", attempts=1, reason="no answer"),
+        GeneratedOutcome("C-c", "waived", by="Q-004"),
+        GeneratedOutcome("C-d", "fails_at_head", "e2e/test_l4_c_d.py", 2, "the test fails at the head: t::x"),
+    ]
+    assert "were not accepted" not in render_verification_md(result(generated=nothing))
+    assert "were not accepted" not in render_verification_md(result(generated=[]))
+
+
+def test_a_writer_failed_outcome_that_kept_a_test_is_listed():  # SCN-VER-350
+    kept = GeneratedOutcome("C-a", "writer_failed", "e2e/test_l4_c_a.py", 2, "no answer", "x = 1\n", excerpt="E  boom")
+    text = render_verification_md(result(generated=[kept]))
+    assert "- C-a (writer_failed after 2 attempt(s)): `e2e/test_l4_c_a.py`" in text and "         1  x = 1" in text
+
+
+def test_a_secret_in_the_code_or_the_failure_is_in_no_file_of_the_round(tmp_path):  # SCN-VER-332
+    redactor = Redactor({})
+    raw = "# " + "x" * 3983 + " " + TOKEN + "\n# more\n"  # one line: the token starts before the 4,000th character
+    kept = GeneratedOutcome(
+        "C-a", "fails_at_head", "e2e/test_l4_c_a.py", 2, "r", redacted_cut(raw, redactor.redact_text, 4000),
+        excerpt="E   RuntimeError: " + TOKEN,
+    )  # fmt: skip
+    write_round_evidence(tmp_path, 1, result(generated=[kept]), redactor)
+    for name in ("verification.md", ".l4/evidence/round-1/verification.md", ".l4/evidence/round-1/verdict.json"):
+        text = (tmp_path / name).read_text()
+        assert all(TOKEN[i : i + 8] not in text for i in range(len(TOKEN) - 7)), name

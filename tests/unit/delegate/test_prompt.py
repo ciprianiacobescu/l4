@@ -597,3 +597,20 @@ def test_the_sections_of_a_batch_are_picked_by_every_question():
     assert "Filler 5" not in p.user  # the budget held the keyed sections first
     first_only = [items[0], (verdict_view(2, context="the lockout rule"), items[1][1])]
     assert "uses `per_account` always" not in batch(first_only, tokens=120).user  # without its key, it is cut
+
+
+def test_the_delegate_reads_the_harness_notes_of_a_ui_hold_with_the_context(tmp_path):  # L4-VER-083
+    from l4.specs.questions import NewQuestion, QuestionsFile, raise_questions
+
+    failure = "tests.e2e.test_l4_c_1a2b3c4d::test_x:\n  E       AssertionError: Locator expected to be visible"
+    notes = f"Harness note: why the test step 5 wrote failed at the head:\n\n    {failure}\n"
+    raise_questions(
+        tmp_path, "add-thing",
+        [NewQuestion("Hold H-1", QuestionKind.VERDICT, (), "After round 1 the verifier cannot decide.", "now",
+                     ("accept", "reject: <reason>"), notes=notes)],
+        redactor=Redactor({}),
+    )  # fmt: skip
+    question = QuestionView.of(QuestionsFile.load(tmp_path / "questions.md").get("Q-001"))
+    text = prompt(question).text
+    assert "AssertionError: Locator expected to be visible" in text and "After round 1 the verifier" in text
+    assert text.index("After round 1") < text.index("Locator expected")  # the Context, then the notes

@@ -114,6 +114,16 @@ def test_a_noted_outcome_restores_with_its_covered_by_and_an_older_record_with_n
     assert [g.covered_by for g in back] == [(), ()] and back[0].status == "not_testable"
 
 
+def test_an_outcome_restores_with_its_excerpt_and_a_record_of_the_older_release_with_none():  # SCN-VER-333
+    kept = GeneratedOutcome("C-a", "fails_at_head", "e2e/test_l4_c_a.py", 2, "r", "def t(): ...", excerpt="E   boom")
+    result = VerifyResult(UNIT, 1, Verdict.NEEDS_HUMAN, "b" * 40, "c" * 40, subject_sha="abc", generated=[kept])
+    data = json.loads(json.dumps(verdict_json(result)))
+    assert restore_round(data, UNIT, 2).generated == [kept]
+    del data["generated"][0]["excerpt"]  # a verdict.json written by 0.4.59: no `excerpt`, no `carried` status
+    (back,) = restore_round(data, UNIT, 2).generated
+    assert back.excerpt == "" and back.code == "def t(): ..." and back.status == "fails_at_head"
+
+
 # --- the base merge commit (verifier 5.2 with M1.7: a merge that brings code is a new subject) -----------------------
 
 

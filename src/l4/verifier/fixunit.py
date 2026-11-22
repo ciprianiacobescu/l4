@@ -44,6 +44,7 @@ from l4.verifier.verdicts import (
     JUDGE_VIEW_REJECTED_TITLE,
     WHEN_THEN,
     is_coverage_hold_finding,
+    is_ui_hold_finding,
     rejection_note,
 )
 
@@ -229,7 +230,8 @@ def _candidates(
         picked += [
             (f, False) for f in result.findings if f.blocking and f.source in ("deterministic", "human", "feedback")
         ]  # fmt: skip
-        cited = {f.criterion for f, _ in picked if f.criterion}
+        # a rejected UI hold's finding cites its criterion for the planner's grouping, not for this rule (L4-VER-085)
+        cited = {f.criterion for f, _ in picked if f.criterion and not is_ui_hold_finding(f)}
         synthetic = [
             _synthetic(by_id[o.id], o.reason)
             for o in result.criteria
@@ -249,7 +251,8 @@ def _candidates(
             if f.severity is Severity.MINOR and not (f.title == UI_GAP_TITLE and f.criterion in closed)
         ]  # fmt: skip
     joined = _joined_to_gate(picked, result)
-    picked.sort(key=lambda pair: pair[0].id in joined)  # stable: a joining finding comes after the finding it joins
+    # stable: a joining finding comes after the finding it joins, and a UI hold's finding after its criterion's own
+    picked.sort(key=lambda pair: (pair[0].id in joined, is_ui_hold_finding(pair[0])))
     grouped: dict[str, _Candidate] = {}
     for f, minor in picked:
         if f.feedback is not None:  # one task per item, never shared and never dropped (L4-FBK-005)
@@ -267,7 +270,9 @@ def _candidates(
         if not verdicts and f.spec_gap:
             scenarios = [s for s in [when_then(f.suggested_fix)] if s]
         scenario = scenarios[0] if scenarios else None
-        if f.source == "human" and criterion is None and scenario is None:
+        # a UI hold rejected alone, with no scenario to pin, is the human's finding as before, not a red/green task
+        bare_hold = is_ui_hold_finding(f) and criterion is not None and criterion not in rejects and scenario is None
+        if f.source == "human" and (criterion is None or bare_hold) and scenario is None:
             why = (
                 "a rejected hold with no reason, or of a kind no fix can be derived from: the human decides it"
                 if f.id.startswith("H-")
@@ -312,9 +317,10 @@ def _candidates(
         if f.id not in cand.ids:
             cand.ids.append(f.id)
         cand.severity = min(cand.severity, f.severity, key=_SEVERITY_ORDER.__getitem__)
+        named = by_id[criterion].scenario if criterion and is_ui_hold_finding(f) else f.title  # L4-VER-085
         for text in scenarios:
             if text not in {t for _, _, t in cand.scenarios}:
-                cand.scenarios.append((f.id, f.title, text))
+                cand.scenarios.append((f.id, named, text))
         cand.consumed += [v.question for v in verdicts if v.question not in cand.consumed]
     return list(grouped.values()), skipped, unconverted
 

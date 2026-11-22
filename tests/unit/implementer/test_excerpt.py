@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from l4.gates.junit import TestCase, TestReport
-from l4.implementer.excerpt import case_excerpt, failure_excerpt, lint_excerpt
+from l4.implementer.excerpt import case_excerpt, failure_excerpt, lint_excerpt, redacted_cut
 from l4.redact import Redactor
 
 WORK = Path("/runner/work/unit-wt")
@@ -249,3 +249,32 @@ def test_a_collection_excerpt_redacts_before_the_cut_and_after_the_paths_are_mad
 
     collection_case_excerpt(f"E   cannot import {WORK}/src/x.py", worktree=WORK, tmp_root=None, redact=spy)
     assert len(seen) >= 2 and str(WORK) in seen[0] and str(WORK) not in seen[-1]  # inner: raw; outer: relative paths
+
+
+TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
+
+
+def test_redacted_cut_redacts_a_token_that_straddles_the_limit():  # SCN-VER-332
+    redact = Redactor({}).redact_text
+    text = "x" * 40 + "\n" + "y" * 10 + TOKEN + "z" * 100
+    kept = redacted_cut(text, redact, 60)  # the 60th character falls inside the token
+    assert len(kept) <= 60 and TOKEN[:8] not in kept and TOKEN[8:] not in kept
+    assert all(TOKEN[i : i + 8] not in kept for i in range(len(TOKEN) - 7))
+
+
+def test_redacted_cut_cuts_at_the_last_line_end_before_the_limit():
+    lines = [f"line {n:02}" for n in range(20)]
+    kept = redacted_cut("\n".join(lines), lambda t: t, 50)
+    assert kept == "\n".join(lines[:6]) and len(kept) <= 50
+    assert redacted_cut("a\nb\n" + "c" * 10, lambda t: t, 10) == "a\nb"
+
+
+def test_redacted_cut_cuts_one_long_line_at_the_limit_and_leaves_a_short_text_as_the_redactor_gives_it():
+    assert redacted_cut("x" * 100, lambda t: t, 30) == "x" * 30
+    assert redacted_cut("secret abc", lambda t: t.replace("secret", "[R]"), 4000) == "[R] abc"
+
+
+def test_redacted_cut_removes_a_half_key_block_to_the_edge():
+    begin = "-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"
+    kept = redacted_cut("\n".join(["ok", begin, "MIIEowIBAAKCAQEA" + "q" * 40]), Redactor({}).redact_text, 4000)
+    assert "MIIEow" not in kept and kept.startswith("ok")
