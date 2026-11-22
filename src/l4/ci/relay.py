@@ -41,7 +41,7 @@ log = logging.getLogger("l4.ci.relay")
 
 LENIENT_KEYS = (
     "harness.delivery", "harness.repository", "forge.type", "forge.base_branch", "forge.branch_prefix",
-    "forge.token_env", "spec.openspec.root", "spec.kiro.root",
+    "forge.token_env", "spec.openspec.root", "spec.kiro.root", "harness.version",
 )  # fmt: skip
 MAX_CONFIG_BYTES = 1024 * 1024  # the bound of `l4.init.upgrade.MAX_CONFIG_BYTES`
 MARKER_NAME = "l4-relay.json"
@@ -80,8 +80,22 @@ def lenient_settings(repo: Path, config_path: Path | None = None) -> dict[str, s
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_CONFIG_BYTES:
             return {}
-        loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=_Yaml12Loader)  # noqa: S506 (SafeLoader subclass)
-    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    try:
+        workflow: str | None = (repo / WORKFLOW_RELPATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        workflow = None
+    return lenient_settings_text(text, workflow)
+
+
+def lenient_settings_text(config_text: str, workflow_text: str | None) -> dict[str, str]:
+    """`lenient_settings` for the text of the configuration and, for the delivery it does not name, of the workflow
+    (None: there is none, so `vendored`). It serves a read at a ref as well as in the working tree (L4-OPS-026)."""
+    try:
+        loaded = yaml.load(config_text, Loader=_Yaml12Loader)  # noqa: S506 (SafeLoader subclass)
+    except yaml.YAMLError:
         return {}
     if not isinstance(loaded, dict):
         return {}
@@ -94,16 +108,13 @@ def lenient_settings(repo: Path, config_path: Path | None = None) -> dict[str, s
         if value is not None:
             found[key] = value
     if "harness.delivery" not in found:
-        found["harness.delivery"] = "fetched" if "harness.repository" in found else _delivery_of_workflow(repo)
+        if "harness.repository" in found:
+            found["harness.delivery"] = "fetched"
+        else:
+            found["harness.delivery"] = (
+                "action" if workflow_text and read_pin(workflow_text) is not None else "vendored"
+            )
     return found
-
-
-def _delivery_of_workflow(repo: Path) -> str:
-    try:
-        text = (repo / WORKFLOW_RELPATH).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return "vendored"
-    return "action" if read_pin(text) is not None else "vendored"
 
 
 def base_branch(environ: Mapping[str, str], configured: str | None) -> str:
