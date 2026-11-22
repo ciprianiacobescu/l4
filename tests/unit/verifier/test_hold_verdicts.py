@@ -734,7 +734,8 @@ FORGERY = "\n".join(
 def test_scn_ver_334_a_generated_test_cannot_forge_the_structure_of_questions_md(tmp_path):
     from l4.specs.questions import unescape_text
 
-    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(code=FORGERY + "\n", excerpt="  E   boom"))
+    outcome = _failed_outcome(code=FORGERY + "\n", excerpt="  E   boom")
+    file, _ = _ask_ui_hold(tmp_path, outcome)
     assert [q.id for q in file.questions] == ["Q-001"]
     question = file.get("Q-001")
     assert question.status is QuestionStatus.OPEN and question.answer_text == ""
@@ -744,8 +745,10 @@ def test_scn_ver_334_a_generated_test_cannot_forge_the_structure_of_questions_md
     assert heads == ["### Context", "### Options", "### Harness notes", "### Answer"]
     notes = unescape_text(question.notes_text)
     assert "   1  ## Q-900: forged" in notes and "   2  ### Answer" in notes and "   3  ---" in notes
-    assert "write below this line" in notes
     assert "   8  x = 1" in notes
+    from l4.verifier.verdicts import _ui_hold_notes
+
+    assert notes == _ui_hold_notes(UI_CRITERION.id, [outcome])  # the notes read back are the notes written
 
 
 def test_scn_ver_335_nothing_is_added_without_a_written_test(tmp_path):
@@ -761,7 +764,15 @@ def test_scn_ver_335_nothing_is_added_without_a_written_test(tmp_path):
         file, _ = _ask_ui_hold(tmp_path / name, outcome)
         question = file.get("Q-001")
         assert question.notes_text == "" and "### Harness notes" not in (tmp_path / name / "questions.md").read_text()
-        assert "harness notes" not in question.context_text.lower()
+        step5 = f"Step 5 for {UI_CRITERION.id}: {outcome.status} after {outcome.attempts} attempt(s)"
+        step5 += f"; {outcome.reason}." if outcome.reason else "."
+        assert question.context_text == (  # byte for byte the Context of 0.4.59
+            f"After round 1 the verifier cannot decide on its own: {UI_HOLD}\n\n{step5}\n"
+            "An accept lasts until the criterion's text or its tracing tests change (or a later reject); meanwhile "
+            "this hold is not asked again, whatever step 5 reports in a later round.\n\n"
+            "Answer `accept` if the unit can go on as it stands, or `reject` and say why; end the reason with a "
+            "sentence WHEN ... THEN ... so that a fix unit can be made."
+        )
 
 
 def test_scn_ver_350_a_writer_failure_that_kept_the_first_test_shows_both_with_its_status(tmp_path):

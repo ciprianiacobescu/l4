@@ -496,3 +496,58 @@ def test_scn_ver_342_a_round_that_asked_a_ui_hold_before_the_upgrade_is_fixed_un
     assert "finding H-" not in delta and "Rejected hold" not in delta
     tasks = second.pushed(f"{UNIT_DIR}-fix-1/tasks.md")
     assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold["id"] in tasks
+
+
+def answer_on_origin(tdd_repo, raw, answers: dict[str, str]) -> None:
+    """What a person does with several questions: one clone, each question answered, one push."""
+    from l4.specs.questions import QuestionsFile, QuestionStatus
+
+    from ..orchestrator.conftest import BRANCH
+
+    clone = tdd_repo.repo.parent / "human-several"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    path = clone / UNIT_DIR / "questions.md"
+    file = QuestionsFile.load(path)
+    assert file is not None
+    for qid, answer in answers.items():
+        file = file.set_status(qid, QuestionStatus("answered"))
+        body = file.get(qid).answer.body  # type: ignore[union-attr]
+        file = QuestionsFile.parse(file.data[: body.end] + answer.encode() + b"\n" + file.data[body.end :])
+    file.save(path)
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", "answer " + ", ".join(answers))
+    raw(clone, "push", "-q", "origin", BRANCH)
+
+
+def test_scn_ver_342_a_criterion_and_its_ui_hold_rejected_after_a_needs_human_round_are_one_task(
+    run_l4, valid_spec, web_repo, tdd_repo, raw
+):
+    """The round that asked both questions is reused once they are answered, so the rejects settle through this
+    harness's `_hold_finding`: FAIL, the hold's finding cites the criterion, and the fix unit has one task."""
+    import json
+
+    skipped = Step(structured=judge_reply([UNKNOWN]))  # a criterion the judge skipped is `needs_human`
+    first = run_l4(
+        [red_step(), web_green(), no_test(KNOWN), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), skipped], **web_repo
+    )
+    assert first.code == 11, first.outcome
+    asked = {e["target"]: e["id"] for e in first.events("question.raised")}
+    hold = next(t for t in asked if t.startswith("H-"))
+    assert set(asked) == {KNOWN, hold}
+    then = "WHEN the cart opens THEN it shows SAVE10"
+    answer_on_origin(
+        tdd_repo, raw,
+        {asked[KNOWN]: f"reject: the badge is missing. {then}", asked[hold]: f"reject: same. {then}"},
+    )  # fmt: skip
+    second = run_l4([], **web_repo)
+    assert second.code == 10, second.outcome
+    assert [e["verdict"] for e in second.events("verify.verdict")] == ["NEEDS_HUMAN", "FAIL"]
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    [finding] = [f for f in body["findings"] if f["id"] == hold]
+    assert finding["criterion"] == KNOWN and finding["severity"] == "major"
+    [spawned] = second.events("fix.spawned")
+    assert sorted(spawned["consumed"]) == sorted(asked.values())
+    tasks = second.pushed(f"{UNIT_DIR}-fix-1/tasks.md")
+    assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold in tasks
+    delta = second.pushed(f"{UNIT_DIR}-fix-1/specs/pricing/spec.md")
+    assert delta.count("#### Scenario:") == 1 and "finding H-" not in delta  # the same text is pinned once

@@ -51,7 +51,8 @@ def test_a_rejected_ui_hold_finding_cites_its_criterion_and_keeps_the_rest_of_0_
 def test_only_a_ui_hold_finding_is_one():
     scope = "scope: `src/inventory/stock.py` changes module `inventory`, which the spec does not name"
     coverage = "diff coverage: changed code not run by any test: `src/a.py::f`"
-    for hold in (scope, coverage, "diff coverage: not measured: the coverage plugin wrote no status"):
+    view = "judge view: the judge could not see all of the diff: `src/a.py`"
+    for hold in (scope, coverage, view, "diff coverage: not measured: the coverage plugin wrote no status"):
         [f] = settle_holds([], [hold], {hold_id(hold): reject(hold_id(hold), f"no. {WHEN_A}", "Q-001")})
         assert f.criterion is None and not is_ui_hold_finding(f)
     assert not is_ui_hold_finding(Finding(Severity.MAJOR, "Judge says", "d", "judge", CID))
