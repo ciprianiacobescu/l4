@@ -57,7 +57,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
 
 ## 3. The escalation (L4-VER-081, D3)
 
-- [ ] 3.1 Write the tests first in `tests/unit/verifier/test_fixloop_escalation.py` (or a new
+- [x] 3.1 Write the tests first in `tests/unit/verifier/test_fixloop_escalation.py` (or a new
   `test_fixloop_base_tests.py` next to it, with the round fixtures `repeated_failure` tests use): SCN-VER-320 (two
   stored FAIL rounds with the same `finding <id>` of `a pre-existing test fails on the unit's code`, a
   `verify.base_tests{round: 2, support_reverted: [{path: test/arch/modules.ts, tasks: [1.1, 1.2], people: false}]}`:
@@ -66,7 +66,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   `support_reverted`: the reason is as before); the reason with a unit id of 40 characters, put through the exit
   reason's form (`escalated: <detail>. Next: l4 retry --unit <u> --reason TEXT`, cut at 300), still holds `then l4
   retry:`. Run it and see the new tests fail.
-- [ ] 3.2 Then add `base_tests_way_out(events, round_no)` to `src/l4/verifier/fixloop.py` and use it in the
+- [x] 3.2 Then add `base_tests_way_out(events, round_no)` to `src/l4/verifier/fixloop.py` and use it in the
   `same_failure` branch (703-704) when the round's blocking findings hold `FAILS_TITLE` or `GONE_TITLE`. Run the file,
   then `tests/unit/verifier/test_fixloop.py` and `tests/unit/verifier/test_fixloop_escalate.py`, one at a time.
 

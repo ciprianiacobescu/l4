@@ -32,7 +32,7 @@ from l4.security.protected import glob_match
 from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
 from l4.verifier.evidence import read_verdict
-from l4.verifier.failures import BASE_FAILS_TITLE, BASE_TESTS_GATE
+from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, BASE_TESTS_GATE
 from l4.verifier.gates import failure_records
 from l4.verifier.integrity import (
     Commit,
@@ -57,7 +57,7 @@ from l4.verifier.support_base import is_support_file, support_at_base, unit_test
 from l4.verifier.types import IntegrityCheck, Severity
 
 FAILS_TITLE = BASE_FAILS_TITLE
-GONE_TITLE = "a pre-existing test no longer runs on the unit's code"
+GONE_TITLE = BASE_GONE_TITLE
 FLAKY_TITLE = "a pre-existing test is flaky on the unit's code"
 ROW = "pre-existing tests still pass"
 MAX_NAMED_SUPPORT = 3  # files per task that stay at head by L4-VER-079 (the bound of `unfreeze.MAX_PATHS_PER_QUESTION`)

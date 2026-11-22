@@ -8,6 +8,7 @@ from typing import Any
 
 GATE_FINDING_GATES = {"test gate failed": "test", "e2e gate failed": "e2e"}  # title -> the gate whose tests it names
 BASE_FAILS_TITLE = "a pre-existing test fails on the unit's code"  # step 1's finding; its records have the gate below
+BASE_GONE_TITLE = "a pre-existing test no longer runs on the unit's code"  # step 1's other base-tests finding
 BASE_TESTS_GATE = "base-tests"  # the `gate` of a record of a base test that step 1's run failed (L4-VER-080)
 TESTS_RAN_TITLES = ("new tests failed", "new tests errored")  # `check_tests_ran`: the new tests that did not pass
 COLLECTION_KIND = "collection"  # the `kind` of a module the gate could not collect
