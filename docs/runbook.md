@@ -1135,6 +1135,15 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   other status (`fails_at_head`, `uncollectable`, `writer_failed`, …) keeps the hold. From 0.4.56 the writer is also
   shown the suite's `e2e/conftest.py` and the other helper modules under `e2e/` as they are at the merge base (at most six files and 20,000 characters, the first 20 of the rest named; step 5's note says how many; when `e2e/` is a package the writer is told to import helpers as `from e2e.conftest import ...`), so a generated test can use the
   suite's own sign-in helper and fixtures.
+  From 0.4.60 the question of a UI hold whose generated test was not accepted has a `### Harness notes` subsection:
+  why the test failed at the head (for `fails_at_head`) and the test's code, numbered, at most 4,000 characters;
+  `verification.md` shows the same under `## Generated UI tests that were not accepted`. Read them before you answer:
+  when the test starts from something the product does not have (a session set up another way, a route the app does
+  not serve, a mock that lacks what the app reads), its failure says nothing about the product: judge the criterion on
+  the product's code and its other tests, `accept` when they show it holds, and when the product is wrong `reject` with
+  a `WHEN … THEN …`. The test file is not in the tree, so cite the product's code, not the test. When you reject a
+  criterion and its UI hold in the same round, the fix unit gets one task for both (one scenario when both reasons end
+  with the same sentence).
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria
   than `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria and

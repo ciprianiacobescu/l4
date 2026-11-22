@@ -171,6 +171,12 @@ push. The harness reads only answers whose Status says they are submitted.
   the files it names; otherwise split the change into smaller units. A `reject` escalates the unit with
   `judge_view_rejected`; its way out is in `l4 status --unit` (`l4 restart` after the split, or `--replace` with an
   accept, then `l4 retry`).
+- A hold `UI criterion C-… has no end-to-end test` whose step 5 wrote a test (harness 0.4.60 and later): its
+  `### Harness notes` show the test's code, numbered, and, for `fails_at_head`, why it failed at the head. Read them to
+  tell a wrong test from wrong code: a test that starts from something the product does not have (a session set up
+  another way, a route the app does not serve, a mock that lacks what the app reads) says nothing about the product.
+  The test is not in the tree: check and cite the product's code. To reject the behaviour, reject the criterion and its
+  UI hold with the same `WHEN … THEN …`: the fix unit gets one task.
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, but the only tests that trace it trace more criteria than
   `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria. Read

@@ -6,6 +6,33 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Added
+- A UI hold's question now shows the test step 5 wrote and why it failed at the head. Before, the question gave the
+  status and the ids of the failing tests only, and the generated file is removed after the run, so the delegate and
+  people could not tell a wrong test from wrong code: in a consumer's units the generated browser test failed on its own
+  wrong premise (a session put where the app does not read it, a route without the app's prefix, a session mock without
+  a user) at least four times, and each cost a round. Now the question's `### Harness notes` hold the head run's failure
+  (the retry prompt's excerpt: at most 40 lines and 3,000 characters) and the test's code (at most 4,000 characters, each
+  line numbered), both redacted before they are cut and again after. `verification.md` has a new section, `## Generated
+  UI tests that were not accepted`, with the same, and `verdict.json` keeps the excerpt as `generated[].excerpt`. The
+  hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again (L4-VER-083).
+
+### Changed
+- When the test step 5 wrote fails at the head, the writer's second attempt is told why, not only which tests failed: its
+  retry reason holds the same excerpt. A second test is still kept only when it fails at the merge base and passes at
+  the head (L4-VER-084).
+
+### Fixed
+- A reviewer who rejects a criterion and its UI hold in the same round now gets one fix task for that behaviour, with
+  both reasons, both questions consumed, and one new scenario when the two scenarios are the same text. Before, the fix
+  unit had two tasks (the second one "already satisfied") and two criteria with the same scenario, which the next round
+  asked about again. A UI hold rejected alone with a `WHEN … THEN …` now gets its scenario under the criterion's
+  requirement, named after the criterion's scenario, instead of a requirement named after the hold (L4-VER-085).
+- `verdict.json` redacted a generated test's code after cutting it at 4,000 characters, so a secret that the cut split
+  could stay in part. The code is now redacted whole, then cut at a line end, then redacted again (L4-VER-083).
+
 ## 0.4.59 (2026-11-19)
 
 ### Added
