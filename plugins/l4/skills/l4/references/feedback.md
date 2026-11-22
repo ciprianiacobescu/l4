@@ -29,7 +29,7 @@ l4 feedback withdraw FB-002         # not after it was addressed
 |---|---|---|
 | `refactor` | A chore. Test files are put back if touched, and at least one other file must change. | The existing tests pass unchanged, and the judge. |
 | `duplication` | The same as `refactor`. | The same. |
-| `tests` | A test chore: new tests only, and production code may not change. | The new tests pass, and the judge. |
+| `tests` | A test chore: new tests only, and production code may not change. A browser test (Python, under the e2e directory) counts when the e2e gate runs it (from 0.4.60). A retake adds what is missing as new tests in a new file: the earlier take's test files are not edited. | The new tests pass, and the judge. |
 | `config` | Red, then green, against two built criteria: "WHEN NAME is set THEN … use its value instead of the value at `<place>`" and "WHEN NAME is not set THEN … CONTINUE TO behave as before". | The tests, NAME appearing in the changed non-test code, and the judge. |
 | `behaviour` | Red, then green, against your `--when`/`--then`. | The tests and the judge. |
 

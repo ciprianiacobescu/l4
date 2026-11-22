@@ -171,6 +171,8 @@ from .conftest import TESTS, green_step, red_step  # noqa: E402
 UNIT_TASK = Task("1.1", "1.1", "1.1 Add `apply_discount`", False, " ", 0, 3, 3)
 TESTS_TASK = Task("1.2", "1.2", "1.2 Changed code that no test runs (H-0a1b2c3d)", False, " ", 0, 3, 3)
 HOLD = ["H-0a1b2c3d"]
+# L4-IMP-109: `no tests added` says what each gate found; a step that kept no test file says so first
+NO_TESTS = "no tests added: this step kept no new test file and appended no test; the test gate ("
 NEW_TESTS = "from pytdd.pricing import total\n\n\ndef test_total_of_two():\n    assert total([1.0, 2.0]) == 3.0\n"
 APPENDED = TESTS + "\n\ndef test_total_of_none():\n    from pytdd.pricing import total\n\n    assert total([]) == 0\n"
 
@@ -233,7 +235,7 @@ def test_an_edited_existing_test_is_put_back_with_a_note(make_bench):
 
 def test_a_test_chore_that_adds_no_test_fails(make_bench):
     bench, done = run_tests_chore(make_bench, Step(structured=result("single")))
-    assert done.status == "failed" and done.reason == "no tests added"
+    assert done.status == "failed" and done.reason.startswith(NO_TESTS)
     assert bench.events("task.tests_added") == []
     assert [e["task"] for e in bench.events("task.done")] == ["1.1"]  # only the unit's own task is done
 
@@ -272,7 +274,7 @@ def test_an_appended_test_that_shadows_an_existing_one_is_put_back(make_bench):
     bench, done = run_tests_chore(
         make_bench, Step(writes={"tests/test_discount.py": shadow}, structured=result("single"))
     )
-    assert done.status == "failed" and done.reason == "no tests added"
+    assert done.status == "failed" and done.reason.startswith(NO_TESTS)
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS
     assert [e["path"] for e in bench.events("guard.test_tamper")] == ["tests/test_discount.py"]
 
@@ -289,7 +291,7 @@ def test_an_appended_autouse_fixture_that_neuters_the_proof_tests_is_put_back(ma
     bench, done = run_tests_chore(
         make_bench, Step(writes={"tests/test_discount.py": neuter}, structured=result("single"))
     )
-    assert done.status == "failed" and done.reason == "no tests added"
+    assert done.status == "failed" and done.reason.startswith(NO_TESTS)
     assert (bench.wb.worktree / "tests" / "test_discount.py").read_text() == TESTS
     [tamper] = bench.events("guard.test_tamper")
     assert tamper["path"] == "tests/test_discount.py"

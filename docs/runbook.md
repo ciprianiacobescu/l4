@@ -1336,6 +1336,32 @@ A breaker stopped the unit during `implementing` or `fixing`. A secret in the ou
 >   tests: a wrong one is a technical question whose first option is the edit. Otherwise the green prompt says they are
 >   not frozen and a wrong one may be corrected.
 
+> **NOTE:** From 0.4.60, a test chore (a feedback item of kind `tests`, a rejected coverage hold) counts the browser
+> tests it writes. When `gates.e2e` is configured and the step added a Python browser test under the e2e test
+> directory (or changed one's own definition), the chore runs `gates.build` (when configured) and the e2e gate
+> (`e2e-test-chore`) after its test gate. A browser test counts as added when the e2e report shows it passed; one that
+> fails refuses the attempt with its failure text; one the report does not show does not count
+> (`e2e.task_tests_unseen`, `phase: single`).
+>
+> - **`no tests added: …`** now says what each gate found: the test gate, then the e2e gate (not configured, no browser
+>   test written, the run skipped and why, or the browser tests its report did not show passing). Read it before you
+>   answer anything: a browser test that the unit gate cannot see is now counted only through the e2e gate.
+> - **A cited criterion.** When the chore's task cites a criterion and its only new tests are browser tests, the chore
+>   is held with a harness question: the discrimination runs use the unit gate, which cannot run browser tests, so a
+>   person (or an allowed agent) decides whether they look at the answer.
+> - **A retake.** A test chore may not edit the test files that an earlier take of the same item added: they are
+>   existing test files, and an edit is put back (`guard.test_tamper`). Its prompt and its questions say so. When the
+>   verifier judged the item not addressed because such a test misses a check, the chore adds the check as new tests in
+>   a new test file. A retake whose only change is such an edit is not done: the attempt fails and names the file the
+>   edit was put back from (it is no longer ticked as already done). If you would rather change the earlier test,
+>   commit the change on `<branch>` yourself and answer the question.
+> - **A chore that mixes unit and browser tests.** The discrimination runs use the unit gate only, so a browser test that
+>   the chore keeps next to a unit test that discriminates is not itself discriminated: the browser test goes along
+>   with the unit test's outcome. And a kept browser file that no e2e report showed passing (unseen) is still committed
+>   when another test of the chore counts: only a chore with no counted test fails on it.
+> - **`tdd.test_globs`.** A browser test file that no test glob matches is not a test file for a test chore: changing one
+>   fails the attempt (`a test chore may add tests only: it changed non-test files: …`). The default globs cover `e2e/`.
+
 > **NOTE:** From 0.4.59, a fix task carries the failure text of the tests it is about. Verification records, for the
 > first 20 failing tests of each gate, a redacted `excerpt` (at most 8 lines and 600 characters) in the `failures` map of
 > `verdict.json`. A fix task whose findings name failing tests gets a block of them (8 tests and 6,000 characters at
@@ -1677,6 +1703,15 @@ retry and the `l4 yolo resume`.
   `options.provider`, add a judge with a larger output limit to `roles.judges`, or, on an opencode profile, set
   `options.max_output_tokens` to the model's maximum output ([10.10](#1010-the-output-limit-of-an-opencode-profile)).
   The failure line of such a run names the key.
+- Every profile of `roles.verifier_agent` failed the audit writer's call at step 4a in this round. The reason reads
+  `no profile of roles.verifier_agent could answer: <profile>: <kind>: <detail>; …`, and the ledger has one
+  `availability.judge_error` with `role: verifier_agent` per profile. From 0.4.60 a profile that fails (`kind: length`,
+  its reply stopped at the output limit; `kind: permission`, the model tried a tool in the tool-less writer call and the
+  permission rules refused it; `kind: error`, any other error) is skipped for the round and the next independent profile
+  gets the call, so the unit waits only when none is left. Before 0.4.60 the first failure parked the unit, and the
+  retry often chose the same profile again. To fix it: for `length`, set `options.max_output_tokens` on the opencode
+  profile ([10.10](#1010-the-output-limit-of-an-opencode-profile)); for `permission`, move the profile down or out of
+  `roles.verifier_agent`, since the writer call never allows a tool; or add another independent profile to the role.
 - The plan review has no judge. It is not a capacity wait: no unit is parked. The review records
   `plan.review_incomplete` (reason `no_judge`) with each judge and why it was skipped, and a later run asks the rest.
   Set `roles.plan_judges` beside `roles.judges` to give the plan review its own chain

@@ -339,6 +339,7 @@ def test_the_audit_directory_is_the_one_of_the_units_own_red_test_file(tmp_path,
     from types import SimpleNamespace
 
     from l4.config.schema import L4Config
+    from l4.gates.junit import TestCase, TestReport
     from l4.vcs.git import Git
     from l4.verifier.audit import red_test_directory
 
@@ -357,9 +358,10 @@ def test_the_audit_directory_is_the_one_of_the_units_own_red_test_file(tmp_path,
     )
     head = repo.commit("work", task="1.1", tdd="red")
     wb = SimpleNamespace(git=Git(repo.path, environ=git_environ), cfg=L4Config(), worktree=repo.path)
-    assert red_test_directory(wb, base, head) == "tests/unit"
+    report = TestReport({"tests.unit.test_new::test_n": TestCase("tests.unit.test_new::test_n", "passed")})
+    assert red_test_directory(wb, base, head, report) == "tests/unit"  # step 3's report shows the test (L4-VER-090)
     nothing = repo.commit("more", task="1.2", tdd="green")
-    assert red_test_directory(wb, head, nothing) is None
+    assert red_test_directory(wb, head, nothing, report) is None
 
 
 def test_without_a_red_test_file_the_command_directory_is_confirmed_by_a_collect_only_run(tmp_path):  # SCN-VER-115

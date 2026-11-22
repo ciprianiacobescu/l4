@@ -72,6 +72,7 @@ class PromptContext:
     e2e_base_url_env: str = "L4_E2E_BASE_URL"
     unfrozen: tuple[tuple[str, str], ...] = ()  # green only: (frozen test path, question id) that a human answer freed
     named: tuple[str, ...] = ()  # green only: support files the task's own text opened
+    retake_tests: bool = False  # single only, with `adds_tests`: the chore retakes a feedback item (L4-IMP-111)
     adds_tests: bool = False  # single only: the chore adds tests (a coverage hold's task): `single_tests.md`
     # single only (L4-IMP-091): the failing tests of the unit's own that a repair chore may repair, one line each
     # (`path::name (kind, gate): first line of the error`); non-empty: `single_repair.md`
@@ -296,6 +297,33 @@ def _job_name(job: str) -> str:
     return defuse(" ".join(job.split())[:MAX_JOB_NAME_CHARS]).replace("`", "'")
 
 
+def _test_chore_blocks(ctx: PromptContext) -> list[str]:
+    """L4-IMP-111: what a test chore may change, built here so that no template version moves."""
+    blocks: list[str] = []
+    if ctx.e2e_dir:
+        directory = ctx.e2e_dir.rstrip("/")
+        text = (
+            f"# Browser tests\nA browser test you add as a Python test under `{directory}/` (for example "
+            f"`{directory}/test_<name>.py`) counts as an added test: after your step the harness builds the app, "
+            "serves it and runs the e2e gate, and a browser test of this step must pass there. You cannot run it in "
+            "this sandbox."
+        )
+        if not ctx.e2e_frozen:
+            text += (
+                f" This project's test globs do not cover `{directory}/`, so a file there is not a test file for this "
+                "task: changing one fails the attempt."
+            )
+        blocks.append(text)
+    if ctx.retake_tests:
+        blocks.append(
+            "# This item was taken before\nA verifier judged that an earlier take of this feedback item did not do "
+            "what it asks. The test files that take added are existing test files now: an edit of one is put back. Add "
+            "what the item still asks for as new tests, with new names, in a new test file, and say in "
+            "notes_for_verifier which earlier tests they complete."
+        )
+    return blocks
+
+
 def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     if role not in ("red", "green", "single"):
         raise ValueError(f"no prompt template for role {role!r}")
@@ -370,6 +398,8 @@ def render_prompt(role: Role, ctx: PromptContext) -> RenderedPrompt:
     for placeholder, value in fills:
         phase_text = phase_text.replace(placeholder, value)
     after.append(phase_text)
+    if role == "single" and ctx.adds_tests and not repairing:
+        after += _test_chore_blocks(ctx)
     if role == "single" and ctx.ci_job:
         after.append("# CI failure\n" + CI_JOB_LINE.format(job=_job_name(ctx.ci_job)))
     gate = (
