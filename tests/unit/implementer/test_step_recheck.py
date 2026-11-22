@@ -305,7 +305,24 @@ def test_scn_imp_575_red_fails_with_both_runs_in_the_reason_when_it_fails_again(
     assert bench.events("task.red_ok") == []
 
 
-def test_scn_imp_575_red_s_tamper_check_runs_after_the_re_run(make_bench):
+def test_scn_imp_575_red_s_tamper_check_runs_after_the_re_run(make_bench, monkeypatch):
+    from l4.implementer.stubs import ProductionGuard
+
+    bench = make_bench([red_step()])
+    order: list[str] = []
+    flaky = FakeFlaky(bench, PRE)
+    original = flaky.run_gate
+    bench.wb.run_gate = lambda name, command, **kw: (order.append(f"gate {name}"), original(name, command, **kw))[1]
+    check = ProductionGuard.check
+    monkeypatch.setattr(
+        ProductionGuard, "check", lambda self, where: (order.append(f"guard {where}"), check(self, where))[1]
+    )
+    assert run_red(bench.wb, TASK, attempt=1).status == "ok"
+    assert order.index("gate test-recheck") < order.index("guard test re-run")
+    assert order.index("guard test run") < order.index("gate test-recheck")
+
+
+def test_scn_imp_575_a_production_file_a_test_wrote_during_the_re_run_fails_red(make_bench):
     bench = make_bench([red_step()])
     flaky = FakeFlaky(bench, PRE)
     original = flaky.run_gate
