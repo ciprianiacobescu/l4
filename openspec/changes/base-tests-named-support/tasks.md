@@ -8,7 +8,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
 
 ## 1. A named support file stays at head (L4-VER-079, D1)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/verifier/test_base_tests_named_support.py`:
+- [x] 1.1 Write the tests first in a new `tests/unit/verifier/test_base_tests_named_support.py`:
   - SCN-VER-312: `kept_files` keeps `test/arch/modules.ts` (at the base and at head, changed by the `L4-TDD: red`
     commit of task 1.1, `task.unfrozen{reason: named_by_task, red_sha: <that sha>, source: plan:p@d, paths: [], kept:
     [{path, why: "a red test of this task"}]}`) with the reason `task 1.1: changed by its red step, named by its
@@ -25,7 +25,7 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
     pre-existing test changed in it: `integrity.check_tests` still blocks it (`_allowance` is unchanged);
   - SCN-VER-316: the events of a 0.4.59 ledger (no new key) give the same kept reason.
   Run the file and see the new tests fail.
-- [ ] 1.2 Then add `MAX_NAMED_SUPPORT = 3`, `MAX_NAMED_SUPPORT_LINES = 40` and `_named_red_change(ctx, who, path, by_sha)` to
+- [x] 1.2 Then add `MAX_NAMED_SUPPORT = 3`, `MAX_NAMED_SUPPORT_LINES = 40` and `_named_red_change(ctx, who, path, by_sha)` to
   `src/l4/verifier/base_tests.py` and call it from `kept_files` after `_allowance`, with a per-task count for the cap
   and the note of D1. Update the `kept_files` docstring (what reads a harness change to a support file now). Do not
   change `integrity._allowance`, `_unfrozen_source` or `split_allowed`. Run the new file, then

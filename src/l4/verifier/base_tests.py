@@ -16,7 +16,7 @@ list), or from a run in a merge-base worktree.
 
 import posixpath
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -25,12 +25,14 @@ from l4.config.schema import duration_seconds
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
+from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
-from l4.vcs.authorship import SHA
+from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
 from l4.verifier.evidence import read_verdict
 from l4.verifier.integrity import (
+    Commit,
     IntegrityContext,
     Outcome,
     _allowance,
@@ -43,6 +45,7 @@ from l4.verifier.integrity import (
     _listed,
     _named_by_task,
     _text,
+    _unit_of,
     commits,
     tagged_files,
 )
@@ -54,6 +57,8 @@ FAILS_TITLE = "a pre-existing test fails on the unit's code"
 GONE_TITLE = "a pre-existing test no longer runs on the unit's code"
 FLAKY_TITLE = "a pre-existing test is flaky on the unit's code"
 ROW = "pre-existing tests still pass"
+MAX_NAMED_SUPPORT = 3  # files per task that stay at head by L4-VER-079 (the bound of `unfreeze.MAX_PATHS_PER_QUESTION`)
+MAX_NAMED_SUPPORT_LINES = 40  # added plus deleted lines of such a file
 _PARAMETRISED = re.compile(r"\S+\[.*\]")  # the test-name part of a pytest id with a parameter: `test_x[a-b]`
 
 
@@ -189,21 +194,104 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
 def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
     """The files of the revert set that stay at head for the run (second review M4): a test or support file (conftest,
     fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed or that a
-    `task.unfrozen` frees, and a test module whose last change in `base..head` is a person's commit (the rule that
-    excuses its failing tests, so the run uses the content the person set). Their effect on the tests is accepted and
-    listed; every other file is reverted. A support file a person changed last is reverted: it can change what other
-    files' tests check, and no other check reads a harness change to it."""
+    `task.unfrozen` frees, a support file that a task's reviewed text names and only that task's red commit changed
+    (L4-VER-079), and a test module whose last change in `base..head` is a person's commit (the rule that excuses its
+    failing tests, so the run uses the content the person set). Their effect on the tests is accepted and listed; every
+    other file is reverted. A harness change to a support file is read by that listing and by the judge, whose diff
+    holds it. A support file a person changed last is reverted: it can change what other files' tests check."""
+    return _kept(ctx, paths)[0]
+
+
+def _kept(ctx: IntegrityContext, paths: Sequence[str]) -> tuple[dict[str, str], dict[str, int]]:
+    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079)."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
-    for path in paths:
+    per_task: dict[tuple[str, str], int] = {}
+    over: dict[str, int] = {}
+    for path in sorted(paths):
         who = _introducers(ctx, path, lambda before, after: before != after)
         if _by_people(who):
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
+        elif (named := _named_red_change(ctx, who, path, by_sha)) is not None:
+            key, task, reason = named
+            if per_task.get(key, 0) < MAX_NAMED_SUPPORT:
+                per_task[key] = per_task.get(key, 0) + 1
+                kept[path] = reason
+            else:
+                over[task] = over.get(task, 0) + 1
         elif _last_by_people(who) and not is_support_file(ctx.git, ctx.cfg, path, _rev_of(ctx, path)):
             kept[path] = f"people changed it last ({', '.join(r[SHA][:10] for r in who)})"
-    return kept
+    return kept, over
+
+
+def _regular(ctx: IntegrityContext, rev: str, path: str) -> bool:
+    """`path` is a regular file (not a link, not a submodule) at `rev`."""
+    listed = ctx.git.run("ls-tree", "-z", rev, "--", f":(literal){path}", check=False).stdout
+    return listed.split(" ", 1)[0] in ("100644", "100755") and " blob " in listed
+
+
+def _changed_lines(ctx: IntegrityContext, path: str) -> int | None:
+    """Added plus deleted lines of `path` in `base..head`; None for a binary file or when git cannot count."""
+    out = ctx.git.run("diff", "--numstat", ctx.base_sha, ctx.head_sha, "--", f":(literal){path}", check=False).stdout
+    fields = out.split("\t")
+    if len(fields) < 3 or not fields[0].isdigit() or not fields[1].isdigit():
+        return None
+    return int(fields[0]) + int(fields[1])
+
+
+def _names_red_change(ctx: IntegrityContext, commit: Commit, path: str) -> str | None:
+    """The `source` of the `task.unfrozen{named_by_task}` of this red commit that lists `path`, else None."""
+    for e in ctx.events:
+        if (
+            e.type != "task.unfrozen" or e.data.get("reason") != "named_by_task"
+            or e.data.get("task") != commit.task or _unit_of(ctx, e) != commit.unit
+            or e.data.get("red_sha") != commit.sha
+        ):  # fmt: skip
+            continue
+        listed = [str(p) for p in e.data.get("paths") or []]
+        listed += [str(k.get("path")) for k in e.data.get("kept") or [] if isinstance(k, dict)]
+        source = e.data.get("source")
+        if path in listed and isinstance(source, str) and source:
+            return source
+    return None
+
+
+def _named_red_change(
+    ctx: IntegrityContext, who: list[list[str]], path: str, by_sha: Mapping[str, Commit]
+) -> tuple[tuple[str, str], str, str] | None:
+    """L4-VER-079: ((unit, task), task, reason) when `path` is a support file that exists at the base and at head, is no
+    ignore file, is at most `MAX_NAMED_SUPPORT_LINES` changed lines, and every harness commit that changed it is the
+    red commit of a task whose reviewed text names it (a `task.unfrozen{named_by_task}` of that commit). A person's
+    commit needs no cover. Only `kept_files` reads this; `_allowance` is not widened (L4-VER-030 shares it)."""
+    harness = [r for r in who if is_harness(r)]
+    if not harness:
+        return None
+    sources: list[tuple[Commit, str]] = []
+    for record in harness:
+        commit = by_sha.get(record[SHA])
+        source = _names_red_change(ctx, commit, path) if commit is not None and commit.tdd == "red" else None
+        if commit is None or source is None:
+            return None
+        sources.append((commit, source))
+    if any(glob_match(g, path) for g in IGNORE_FILE_GLOBS):
+        return None
+    if not (_regular(ctx, ctx.base_sha, path) and _regular(ctx, ctx.head_sha, path)):
+        return None
+    if not is_support_file(ctx.git, ctx.cfg, path, ctx.head_sha):
+        return None
+    lines = _changed_lines(ctx, path)
+    if lines is None or lines > MAX_NAMED_SUPPORT_LINES:
+        return None
+    commit, source = sources[0]
+    tasks = list(dict.fromkeys(c.task for c, _ in sources))
+    label = ", ".join(tasks)
+    return (
+        (commit.unit, commit.task),
+        commit.task,
+        f"task {label}: changed by its red step, named by its reviewed text ({source})",
+    )
 
 
 def _rev_of(ctx: IntegrityContext, path: str) -> str:
@@ -278,7 +366,7 @@ def check_base_tests(
         return Outcome(note="step 1 already failed", skipped=True)
     cfg = wb.cfg
     full = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
-    kept = kept_files(ctx, [path for path, _ in full.changes])
+    kept, over = _kept(ctx, [path for path, _ in full.changes])
     plan = replace(full, changes=tuple(c for c in full.changes if c[0] not in kept))
     allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" not in why]
     people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" in why]
@@ -334,6 +422,8 @@ def check_base_tests(
         f"{judged.still_passing + len(allowed) + len(human)} of {judged.passed_at_base} base tests pass on the unit's "
         f"code with its {len(reverted)} test and support files at the base (base: {source})"
     )
+    for task, count in sorted(over.items()):
+        note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
     _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors)
     record = {
         "base_sha": ctx.base_sha,
