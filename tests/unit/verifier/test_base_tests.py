@@ -58,6 +58,16 @@ def test_a_code_swap_in_the_test_file_fails_the_run_alone(run_l4, valid_spec, no
     assert "tests.test_pricing::test_total_adds_prices" in text
 
 
+def test_a_failed_base_test_has_a_base_tests_record_in_the_verdict(run_l4, valid_spec, no_text_signals):  # SCN-VER-318
+    red = red_step()
+    red.writes = {**red.writes, "tests/test_pricing.py": CODE_SWAP}
+    run = run_l4([red, broken_total_green(), judge_step()])
+    failed_at_step_1(run, RUN_TITLE)
+    verdict = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    record = verdict["failures"]["tests.test_pricing::test_total_adds_prices"]
+    assert record["gate"] == "base-tests" and record["kind"] and record["message"]
+
+
 CHECKS = "from pytdd import total\n\n\ndef assert_total(prices, expected):\n    assert total(prices) == expected\n"
 CHECKS_WEAK = "def assert_total(prices, expected):\n    return None\n"
 HELPER_PRICING = (
@@ -179,6 +189,7 @@ from contextlib import contextmanager  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 from l4.config.schema import L4Config  # noqa: E402
+from l4.redact import Redactor  # noqa: E402
 from l4.vcs.git import Git  # noqa: E402
 from l4.verifier.base_tests import check_base_tests, split_allowed  # noqa: E402
 
@@ -302,6 +313,8 @@ class ScriptedWb:
         self.worktree = repo.path
         self.cfg = L4Config(gates={"test": {"command": "pytest", "reports": ["junit.xml"]}})
         self.baselines = {}
+        self.redactor = Redactor({})
+        self.unit_cache = unit_dir / "cache"
         self.ref = SimpleNamespace(path=unit_dir, id=UNIT)
         self.events, self.runs, self._reports = [], [], list(reports)
 

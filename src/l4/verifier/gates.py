@@ -186,6 +186,7 @@ def failure_records(
     *,
     excerpt: Callable[[TestCase], str] | None = None,
     collection_excerpt: Callable[[str], str] | None = None,
+    unit_gate: str = "test",
 ) -> tuple[dict[str, dict[str, str]], int]:
     """L4-VER-069: for each test id that failed or errored, the gate it failed in (`test` for the unit report, `e2e` for
     the browser report, which wins for an id both hold), the kind the JUnit reader gave (`error` for an error of no
@@ -196,10 +197,11 @@ def failure_records(
     `MAX_TEST_FAILURES` records (the first ids in order) and the second value counts the ones left out; the `e2e` side
     is whole, because a fix chore asks for those tests. With `excerpt` (L4-VER-078) the first `MAX_EXCERPT_RECORDS`
     records of each gate in id order, a module that did not collect among them, also get an `excerpt` when it is not
-    empty: `excerpt(case)` for a test, `collection_excerpt(detail)` for a module."""
+    empty: `excerpt(case)` for a test, `collection_excerpt(detail)` for a module. `unit_gate` is the `gate` value of the
+    unit side: `base-tests` for the base tests step 1's run failed (L4-VER-080)."""
     out: dict[str, dict[str, str]] = {}
     dropped = 0
-    for gate, report in (("test", unit), ("e2e", browser)):
+    for gate, report in ((unit_gate, unit), ("e2e", browser)):
         if report is None:
             continue
         found: dict[str, dict[str, str]] = {}
@@ -223,7 +225,7 @@ def failure_records(
                     "message": _first_line(redact, report.collection_details.get(module) or module),
                 },
             )
-        if gate == "test" and len(found) > MAX_TEST_FAILURES:
+        if gate == unit_gate and len(found) > MAX_TEST_FAILURES:
             dropped = len(found) - MAX_TEST_FAILURES
             found = {i: found[i] for i in sorted(found)[:MAX_TEST_FAILURES]}
         if excerpt is not None:

@@ -25,12 +25,15 @@ from l4.config.schema import duration_seconds
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
+from l4.implementer.excerpt import case_excerpt
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
 from l4.verifier.evidence import read_verdict
+from l4.verifier.failures import BASE_FAILS_TITLE, BASE_TESTS_GATE
+from l4.verifier.gates import failure_records
 from l4.verifier.integrity import (
     Commit,
     IntegrityContext,
@@ -53,11 +56,13 @@ from l4.verifier.playwright import base_checkout
 from l4.verifier.support_base import is_support_file, support_at_base, unit_test_plan
 from l4.verifier.types import IntegrityCheck, Severity
 
-FAILS_TITLE = "a pre-existing test fails on the unit's code"
+FAILS_TITLE = BASE_FAILS_TITLE
 GONE_TITLE = "a pre-existing test no longer runs on the unit's code"
 FLAKY_TITLE = "a pre-existing test is flaky on the unit's code"
 ROW = "pre-existing tests still pass"
 MAX_NAMED_SUPPORT = 3  # files per task that stay at head by L4-VER-079 (the bound of `unfreeze.MAX_PATHS_PER_QUESTION`)
+MAX_SUPPORT_REVERTED = 20  # entries of `verify.base_tests.support_reverted`
+MAX_LEAD_FILES = 5  # support files the blocker's lead names
 MAX_NAMED_SUPPORT_LINES = 40  # added plus deleted lines of such a file
 _PARAMETRISED = re.compile(r"\S+\[.*\]")  # the test-name part of a pytest id with a parameter: `test_x[a-b]`
 
@@ -358,6 +363,36 @@ def _base_reference(
     return result.report, "base worktree", ""
 
 
+def _support_reverted(
+    ctx: IntegrityContext, reverted: Sequence[str], by_sha: Mapping[str, Commit]
+) -> list[dict[str, Any]]:
+    """L4-VER-080: for each reverted file that is a support file, `{path, tasks, people}`: the tasks of the harness
+    commits that changed it and whether a person's commit did. Sorted by path, at most `MAX_SUPPORT_REVERTED`."""
+    support = sorted(p for p in reverted if is_support_file(ctx.git, ctx.cfg, p, _rev_of(ctx, p)))
+    found: list[dict[str, Any]] = []
+    for path in support[:MAX_SUPPORT_REVERTED]:
+        who = _introducers(ctx, path, lambda before, after: before != after)
+        tasks = [c.task for r in who if is_harness(r) and (c := by_sha.get(r[SHA])) is not None]
+        found.append({"path": path, "tasks": list(dict.fromkeys(tasks)), "people": any(not is_harness(r) for r in who)})
+    return found
+
+
+def _lead(support: Sequence[Mapping[str, Any]], total: int, files: int, verb: str) -> str:
+    """The start of a base-tests blocker's detail (L4-VER-080): which support files the run reverted and who changed
+    them. Empty when it reverted none."""
+    if not support:
+        return ""
+    named = []
+    for entry in support[:MAX_LEAD_FILES]:
+        who = f"task {', '.join(entry['tasks'])}" if entry["tasks"] else "a person"
+        named.append(f"{entry['path']} ({who})")
+    more = f" (+{total - MAX_LEAD_FILES} more)" if total > MAX_LEAD_FILES else ""
+    return (
+        f"with the unit's test and support files at their base version (support files reverted: "
+        f"{', '.join(named)}{more}; {files} files in all), these base tests {verb}: "
+    )
+
+
 def check_base_tests(
     wb: Workbench, ctx: IntegrityContext, *, prior: Sequence[IntegrityCheck], round_no: int
 ) -> Outcome:
@@ -390,7 +425,7 @@ def check_base_tests(
             repeat = wb.run_gate("base-tests-repeat", command, reports=_reports(wb), extra_env=BASE_RUN_ENV).report
     if r1 is None:
         detail = f"the test gate gave no report with the unit's test and support files at the base ({gate.reason})"
-        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [])
+        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [], [])
         return Outcome([_blocker(GONE_TITLE, detail)], "no report from the run of the base's tests")
     needs_base = runner_changed or r1.collection_errors or any(c.status != "passed" for c in r1.tests.values())
     if needs_base:
@@ -411,11 +446,20 @@ def check_base_tests(
     failing = [i for i in judged.failing if i in blocked]
     gone = [i for i in judged.not_run if i in blocked]
     errors = _collection_lines(ctx, judged.collection_errors, gate.log_path)
+    support = _support_reverted(ctx, reverted, {c.sha: c for c in commits(ctx)}) if failing or gone or errors else []
+    total = len([p for p in reverted if is_support_file(ctx.git, ctx.cfg, p, _rev_of(ctx, p))]) if support else 0
+    records: dict[str, dict[str, str]] = {}
     if failing:
         detail = [f"{i} ({_first_line(r1.tests[i].message or r1.tests[i].status)})" for i in failing]
-        findings.append(_blocker(FAILS_TITLE, _listed(detail)))
+        findings.append(_blocker(FAILS_TITLE, _lead(support, total, len(reverted), "fail") + _listed(detail)))
+        redact, tmp_root = wb.redactor.redact_text, wb.unit_cache / "gate-tmp"  # as `ladder.tests()` (L4-VER-078)
+        records, _ = failure_records(
+            TestReport({i: r1.tests[i] for i in failing}), None, redact, unit_gate=BASE_TESTS_GATE,
+            excerpt=lambda case: case_excerpt(case, worktree=wb.worktree, tmp_root=tmp_root, redact=redact),
+        )  # fmt: skip
     if gone or errors:
-        findings.append(_blocker(GONE_TITLE, _listed([*gone, *errors])))
+        lead = _lead(support, total, len(reverted), "no longer run")
+        findings.append(_blocker(GONE_TITLE, lead + _listed([*gone, *errors])))
     if flaky:
         findings.append(_blocker(FLAKY_TITLE, _listed(flaky), Severity.MINOR))
     note = (
@@ -424,7 +468,7 @@ def check_base_tests(
     )
     for task, count in sorted(over.items()):
         note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
-    _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors)
+    _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors, support)
     record = {
         "base_sha": ctx.base_sha,
         "command": command,
@@ -432,16 +476,22 @@ def check_base_tests(
         "collection_errors": list(r0.collection_errors),
     }
     return Outcome(
-        findings, note, allowed_tests=[*allowed_files, *allowed], human_tests=[*people_files, *human], base_tests=record
+        findings,
+        note,
+        allowed_tests=[*allowed_files, *allowed],
+        human_tests=[*people_files, *human],
+        base_tests=record,
+        failures=records,
     )
 
 
 def _emit(
     wb: Workbench, round_no: int, ctx: IntegrityContext, source: str, reverted: Sequence[str], judged: Judged,
-    flaky: Sequence[str], allowed: Sequence[str], errors: Sequence[str],
+    flaky: Sequence[str], allowed: Sequence[str], errors: Sequence[str], support: Sequence[Mapping[str, Any]] = (),
 ) -> None:  # fmt: skip
     wb.emit(
         "verify.base_tests", round=round_no, base_sha=ctx.base_sha, base_source=source, reverted=list(reverted),
         passed_at_base=judged.passed_at_base, still_passing=judged.still_passing, failing=judged.failing,
         not_run=judged.not_run, collection_errors=list(errors), flaky=list(flaky), allowed=list(allowed),
+        support_reverted=[dict(e) for e in support],
     )  # fmt: skip

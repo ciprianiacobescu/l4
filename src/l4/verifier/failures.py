@@ -7,6 +7,8 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 GATE_FINDING_GATES = {"test gate failed": "test", "e2e gate failed": "e2e"}  # title -> the gate whose tests it names
+BASE_FAILS_TITLE = "a pre-existing test fails on the unit's code"  # step 1's finding; its records have the gate below
+BASE_TESTS_GATE = "base-tests"  # the `gate` of a record of a base test that step 1's run failed (L4-VER-080)
 TESTS_RAN_TITLES = ("new tests failed", "new tests errored")  # `check_tests_ran`: the new tests that did not pass
 COLLECTION_KIND = "collection"  # the `kind` of a module the gate could not collect
 _CUT_LIST = re.compile(r" and \d+ more$")
@@ -94,13 +96,16 @@ def e2e_ids_of(verdict: Mapping[str, Any] | None, finding_ids: Sequence[str]) ->
 def shown_failure_ids(failures: Any, title: str, detail: str) -> list[str]:
     """L4-IMP-102: the tests a finding is about, for the failure block of its fix task, sorted. `test gate failed` /
     `e2e gate failed`: every record of that gate, collection records included; `new tests failed` / `new tests
-    errored`: the recorded ids its detail names (the part that matches, even when the list was cut); any other title,
-    and a verdict that predates the `failures` map: none."""
+    errored`: the recorded ids its detail names (the part that matches, even when the list was cut); `a pre-existing
+    test fails on the unit's code`: every record of the gate `base-tests` (L4-VER-080); any other title, and a verdict
+    that predates the `failures` map: none."""
     if not isinstance(failures, Mapping):
         return []
     records = {str(i): r for i, r in failures.items() if isinstance(r, Mapping)}
     if (gate := GATE_FINDING_GATES.get(title)) is not None:
         return sorted(i for i, r in records.items() if r.get("gate") == gate)
+    if title == BASE_FAILS_TITLE:  # L4-VER-080: the base tests step 1's run failed
+        return sorted(i for i, r in records.items() if r.get("gate") == BASE_TESTS_GATE)
     if title in TESTS_RAN_TITLES:
         return sorted(named_known_ids(detail, set(records))[0])
     return []

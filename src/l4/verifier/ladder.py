@@ -744,6 +744,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         result.integrity = run_integrity(ctx)
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
+        if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
+            result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
         blocking = [f.title for f in result.integrity.findings if f.blocking]
         note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"
