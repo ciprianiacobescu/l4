@@ -309,7 +309,9 @@ def test_the_record_is_cut_at_twenty_entries(tmp_path, git_environ):
     assert len(wb.events[0][1]["support_reverted"]) == 20 and "(+21 more); 27 files in all)" in finding.detail
 
 
-def test_a_reverted_file_a_person_and_a_taskless_harness_commit_changed_is_a_person_s(tmp_path, git_environ):
+def test_a_reverted_file_a_person_and_a_taskless_harness_commit_changed_is_a_person_s(  # SCN-VER-327
+    tmp_path, git_environ
+):
     repo, base = new_repo(tmp_path, git_environ, {MODULES: GRAPH, "tests/test_a.py": "def test_a():\n    assert 1\n"})
     repo.write({MODULES: GRAPH_RED})
     repo.commit_as_human("a person edits")
@@ -321,6 +323,20 @@ def test_a_reverted_file_a_person_and_a_taskless_harness_commit_changed_is_a_per
     [finding] = check_base_tests(wb, ctx_of(repo, base, head, []), prior=[], round_no=1).findings
     assert wb.events[0][1]["support_reverted"] == [{"path": MODULES, "tasks": [], "people": True}]
     assert f"reverted: {MODULES} (a person); 2 files in all)" in finding.detail
+
+
+def test_a_reverted_file_only_a_taskless_harness_commit_changed_is_a_harness_commit_s(  # SCN-VER-327
+    tmp_path, git_environ
+):
+    repo, base = new_repo(tmp_path, git_environ, {MODULES: GRAPH, "tests/test_a.py": "def test_a():\n    assert 1\n"})
+    repo.write({MODULES: GRAPH_RED, "tests/test_a.py": "def test_a():\n    assert 2\n"})
+    head = repo.commit_as_harness("lessons", phase="lessons")  # no L4-Task trailer
+    wb = ScriptedWb(repo, git_environ, [TestReport({FAILING_ID: failing_case()})], tmp_path / "unit")
+    wb.baselines[base] = passing_report(FAILING_ID.replace("::", "__"))
+    [finding] = check_base_tests(wb, ctx_of(repo, base, head, []), prior=[], round_no=1).findings
+    assert wb.events[0][1]["support_reverted"] == [{"path": MODULES, "tasks": [], "people": False}]
+    assert f"reverted: {MODULES} (a harness commit); 2 files in all)" in finding.detail
+    assert "(a person)" not in finding.detail
 
 
 def test_with_no_reverted_support_file_the_detail_is_as_before_and_the_key_is_empty(tmp_path, git_environ):

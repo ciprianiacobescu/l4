@@ -6699,8 +6699,8 @@ L4-VER-079), `{path, tasks, people}` with the tasks of the harness commits that 
 commit did, sorted by path, at most 20. When it is not empty, the detail of `a pre-existing test fails on the unit's
 code` and of `a pre-existing test no longer runs on the unit's code` SHALL start with `with the unit's test and support
 files at their base version (support files reverted: <path> (task <t>[, <t2>]), ... (+<n> more); <k> files in all),
-these base tests fail: ` (`no longer run: ` for the second; a file only people changed is `(a person)`), at most 5
-files, and go on with the list of today. The lead comes first because a fix chore's detail is cut at 600 characters.
+these base tests fail: ` (`no longer run: ` for the second; a file a person's commit changed and no task's did is
+`(a person)`, one only a harness commit with no task changed is `(a harness commit)`), at most 5 files, and go on with the list of today. The lead comes first because a fix chore's detail is cut at 600 characters.
 The detail SHALL NOT say that a test passes at head: step 1 never runs it there. Each blocked failing base test SHALL
 have a record in the round's `failures` (L4-VER-069) with `gate: base-tests`, its kind, its first line and the excerpt
 of L4-VER-078, built and redacted the same way. Step 3 never runs after such a blocker, so no record is replaced. The
@@ -16278,6 +16278,13 @@ scenario is a spec defect (§26).
   other files, and a `source` of `plan:people@d`
 - **When** step 1 runs the base's tests
 - **Then** the file stays at head, and the line is in `allowed_tests` and not in `human_tests`
+
+#### SCN-VER-327 (+) A file that a harness commit with no task changed is not called a person's · L4-VER-080
+- **Given** a reverted support file that only a harness commit with no `L4-Task` trailer (a lessons commit) changed, and
+  another that a person's commit also changed
+- **When** step 1 raises the blocker
+- **Then** the lead names the first as `(a harness commit)` and `support_reverted` holds `people: false` for it; the
+  second is `(a person)`
 
 ## MODIFIED Requirements
 

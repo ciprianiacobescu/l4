@@ -414,7 +414,10 @@ def _lead(support: Sequence[Mapping[str, Any]], total: int, files: int, verb: st
         return ""
     named = []
     for entry in support[:MAX_LEAD_FILES]:
-        who = f"task {', '.join(entry['tasks'])}" if entry["tasks"] else "a person"
+        if entry["tasks"]:
+            who = f"task {', '.join(entry['tasks'])}"
+        else:  # no task trailer: a person's commit, or a harness commit with none (a lessons commit)
+            who = "a person" if entry["people"] else "a harness commit"
         named.append(f"{entry['path']} ({who})")
     more = f" (+{total - MAX_LEAD_FILES} more)" if total > MAX_LEAD_FILES else ""
     return (

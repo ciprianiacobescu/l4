@@ -134,7 +134,8 @@ When it is not empty, the detail of `a pre-existing test fails on the unit's cod
 runs on the unit's code` starts with `with the unit's test and support files at their base version (support files
 reverted: <p> (task <t>[, <t2>]), ... (+<n> more); <k> files in all), these base tests fail: ` (`no longer run:` for
 the second). The current list follows (`_listed` of the ids with their first lines, then the gone ids and collection
-lines). At most 5 support files are named, each `(a person)` when only people's commits changed it. The lead comes
+lines). At most 5 support files are named, each `(a person)` when a person's commit changed it and no task's did, and `(a harness commit)` when only a harness
+commit with no `L4-Task` trailer did (a lessons commit; `people` is false for it). The lead comes
 first because a chore's detail is cut at 600 characters (`fixunit.py:448`). The detail says what the run did. It does
 not say that the test passes at head: step 1 never runs it there.
 

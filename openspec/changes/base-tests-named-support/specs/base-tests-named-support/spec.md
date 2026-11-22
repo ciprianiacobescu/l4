@@ -59,8 +59,9 @@ nothing SHALL stay by this rule. A file that fails any condition SHALL be revert
 When step 1's run reverted a support file, the detail of `a pre-existing test fails on the unit's code` and of `a
 pre-existing test no longer runs on the unit's code` SHALL start with `with the unit's test and support files at their
 base version (support files reverted: <path> (task <t>), ...; <k> files in all), these base tests fail:` (`no longer
-run:` for the second), at most 5 support files, each with the tasks of the harness commits that changed it or `(a
-person)`. The detail SHALL NOT say that a test passes at head. `verify.base_tests` SHALL carry `support_reverted:
+run:` for the second), at most 5 support files, each with the tasks of the harness commits that changed it, `(a
+person)` when a person's commit changed it and no task's did, or `(a harness commit)` when only a harness commit with no
+task changed it. The detail SHALL NOT say that a test passes at head. `verify.base_tests` SHALL carry `support_reverted:
 [{path, tasks, people}]`, at most 20 entries. Each failing base test of the blocker SHALL have a record in the round's
 `failures` with `gate: base-tests`, its kind, its first line and the excerpt of L4-VER-078 (bounded and redacted the
 same way). The failure block of a fix task for `a pre-existing test fails on the unit's code` SHALL hold every
@@ -129,3 +130,10 @@ the way out. The code SHALL stay `same_failure`. With no such entry
   other files, and a `source` of `plan:people@d`
 - **When** step 1 runs the base's tests
 - **Then** the file stays at head, and the line is in `allowed_tests` and not in `human_tests`
+
+#### Scenario: SCN-VER-327 (+) A file that a harness commit with no task changed is not called a person's
+- **Given** a reverted support file that only a harness commit with no `L4-Task` trailer (a lessons commit) changed, and
+  another that a person's commit also changed
+- **When** step 1 raises the blocker
+- **Then** the lead names the first as `(a harness commit)` and `support_reverted` holds `people: false` for it; the
+  second is `(a person)`
