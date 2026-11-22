@@ -357,3 +357,18 @@ def test_a_run_that_gave_no_report_still_records_the_reverted_support_files(tmp_
     out = check_base_tests(wb, ctx, prior=[], round_no=1)
     assert "gave no report" in out.findings[0].detail
     assert wb.events[0][1]["support_reverted"] == [{"path": MODULES, "tasks": ["1.1", "1.2"], "people": False}]
+
+
+def test_an_event_that_names_a_commit_which_is_no_red_step_covers_nothing(tmp_path, git_environ):  # SCN-VER-313
+    repo, base, red, tasks = named_repo(tmp_path, git_environ)
+    repo.git("reset", "-q", "--hard", base)
+    repo.write({MODULES: GRAPH_RED + "// green\n"})
+    green = repo.commit("green 1.1 alone", task="1.1", tdd="green")
+    repo.events.append(named(green))  # the event names the commit, but it is a green commit
+    assert kept_files(ctx_of(repo, base, green, tasks), [MODULES]) == {}
+
+
+def test_a_path_no_commit_changed_is_not_kept_and_does_not_fail(tmp_path, git_environ):  # SCN-VER-314
+    repo, base, red, tasks = named_repo(tmp_path, git_environ, base={"test/arch/untouched.ts": "x\n"})
+    repo.events.append(named(red, path="test/arch/untouched.ts"))
+    assert kept_files(ctx_of(repo, base, red, tasks), ["test/arch/untouched.ts", "no/such/file.ts"]) == {}
