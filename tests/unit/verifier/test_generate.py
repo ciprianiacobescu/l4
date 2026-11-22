@@ -352,6 +352,19 @@ def test_a_secret_in_the_code_that_straddles_the_cut_is_in_no_part_of_the_copy(w
     assert all(TOKEN[i : i + 8] not in done.code for i in range(len(TOKEN) - 7))
 
 
+def test_a_configured_secret_in_the_failure_is_not_in_the_excerpt_the_outcome_keeps(web):  # SCN-VER-332
+    from l4.redact import Redactor
+
+    bench, _ = web
+    secret = "hunter2-" + "k9x7q2m4"  # a configured value: no token shape matches it, only the redactor's own table
+    bench.wb.redactor = Redactor({"E2E_PASSWORD": secret})
+    wrong = READ + f"\n\n\ndef test_shows_nine_items():\n    assert '9 items' in page(), 'signed in as {secret}'\n"
+    done = run_one(web, Writer(code(wrong), code(wrong)))
+    assert done.status == "fails_at_head" and EXCERPT_LINE in done.excerpt and "signed in as" in done.excerpt
+    assert secret not in done.excerpt and "[REDACTED" in done.excerpt  # redacted where step 5 builds the excerpt
+    assert secret not in done.code and secret not in done.reason
+
+
 def test_the_excerpt_belongs_to_the_attempt_that_wrote_the_kept_code(web):  # SCN-VER-350
     bench, _ = web
     bench.wb.cfg.gates.lint = ["sh -c '! grep -q LINTME e2e/test_l4_c_de7f2d3f.py'"]
