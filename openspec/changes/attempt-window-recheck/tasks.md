@@ -16,7 +16,8 @@ the name `test-recheck`.
     attempts are needed for `breaker.tripped`;
   - the same with a person's answer (`by: human`) and with an agent's (`by: agent`);
   - SCN-IMP-567: a second run with the same answer records no second renewal (`seed_attempts` clears at the first
-    event, so the failures after it count);
+    event, so the failures after it count); an answer that an earlier `task.unfrozen{reason: human_answer, question:
+    "Q-001, Q-002"}` of the task names (split on `", "`) is credited and renews nothing;
   - SCN-IMP-568: an answer that names no frozen file, a delegate accept with `delegate.unfreeze: false`, and a
     `named_by_task` grant renew nothing;
   - SCN-IMP-569: two renewals with `failed > 0` after the newest `unit.resumed` and a third new question: no event, a
@@ -24,7 +25,10 @@ the name `test-recheck`.
   - a renewal with `failed: 0` is recorded and does not count toward the cap;
   - `seed_attempts` keeps `attempts["green"]` across a renewal (the step key is used once), and clears
     `escalated_from["green"]`; `deadline.stops` and `deadline.last_is_stop` of the same ledger are unchanged;
-  - SCN-IMP-570: a ledger with no `task.attempts_renewed` seeds exactly as before.
+  - SCN-IMP-570: a ledger with no `task.attempts_renewed` seeds exactly as before; an unused 0.4.59 answer renews,
+    one a 0.4.59 green used (its `task.unfrozen` is in the ledger) does not;
+  - with two profiles in `roles.implementer` and `escalate_after: 2`, a renewal clears both profiles' counts and the
+    move, and the phase starts on the run's selected profile.
   Run the file and see the new tests fail.
 - [ ] 1.2 Then add `MAX_RENEWALS = 2` and `_renew_on_answers` to `src/l4/implementer/loop.py`, call it in `_run_task`
   after `resume_red` when `start == "green"` (before `origin` and `_escalate_while_due`) and after a red commit of the

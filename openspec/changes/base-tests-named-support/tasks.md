@@ -18,13 +18,14 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   - SCN-VER-313: a second red commit of task 1.2 with no event naming it, a green commit of task 1.1, or a fix unit's
     commit: reverted;
   - SCN-VER-314: an ignore file, a file red added, `test/arch/repo.test.ts` (a test module by `is_support_file`), an
-    event whose `red_sha` is another commit, an event with no `source`, and a fourth named file (the first three in
-    path order are kept, the note counts one more);
+    event whose `red_sha` is another commit, an event with no `source`, a named file whose `--numstat` counts 60
+    lines and a binary one (reverted), and a fourth named file (the first three in path order are kept, the note
+    counts one more);
   - SCN-VER-315: a Python file matching `**/tests/**` and `**/tests/helpers/**`, named and changed by red with a
     pre-existing test changed in it: `integrity.check_tests` still blocks it (`_allowance` is unchanged);
   - SCN-VER-316: the events of a 0.4.59 ledger (no new key) give the same kept reason.
   Run the file and see the new tests fail.
-- [ ] 1.2 Then add `MAX_NAMED_SUPPORT = 3` and `_named_red_change(ctx, who, path, by_sha)` to
+- [ ] 1.2 Then add `MAX_NAMED_SUPPORT = 3`, `MAX_NAMED_SUPPORT_LINES = 40` and `_named_red_change(ctx, who, path, by_sha)` to
   `src/l4/verifier/base_tests.py` and call it from `kept_files` after `_allowance`, with a per-task count for the cap
   and the note of D1. Update the `kept_files` docstring (what reads a harness change to a support file now). Do not
   change `integrity._allowance`, `_unfrozen_source` or `split_allowed`. Run the new file, then
@@ -62,7 +63,9 @@ shape the redactor knows (`"glpat-" + "A1b2C3d4E5f6G7h8I9j0"`). Requirement L4-V
   `verify.base_tests{round: 2, support_reverted: [{path: test/arch/modules.ts, tasks: [1.1, 1.2], people: false}]}`:
   the escalation's reason starts with the way-out text and holds the `same_failure` detail, cut at 300 characters for
   the way-out part, code `same_failure`); SCN-VER-321 (a `test gate failed` repeat, and a `verify.base_tests` without
-  `support_reverted`: the reason is as before). Run it and see the new tests fail.
+  `support_reverted`: the reason is as before); the reason with a unit id of 40 characters, put through the exit
+  reason's form (`escalated: <detail>. Next: l4 retry --unit <u> --reason TEXT`, cut at 300), still holds `then l4
+  retry:`. Run it and see the new tests fail.
 - [ ] 3.2 Then add `base_tests_way_out(events, round_no)` to `src/l4/verifier/fixloop.py` and use it in the
   `same_failure` branch (703-704) when the round's blocking findings hold `FAILS_TITLE` or `GONE_TITLE`. Run the file,
   then `tests/unit/verifier/test_fixloop.py` and `tests/unit/verifier/test_fixloop_escalate.py`, one at a time.

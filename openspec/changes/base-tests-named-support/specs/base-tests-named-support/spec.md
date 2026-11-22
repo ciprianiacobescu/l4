@@ -13,8 +13,9 @@ step, named by its reviewed text (<source>))`, when all of these hold: it is a r
 it is no ignore file; the verifier's support rule (`is_support_file`) calls it support at head; at least one harness
 commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the ledger
 holds a `task.unfrozen` with `reason: named_by_task`, the same unit and task, `red_sha` equal to that commit, a
-`source`, and the path in its `paths` or in a `kept` entry. A person's commit needs no cover. At most three files per
-task SHALL be kept this way, in path order. The others are reverted, and the row's note counts them. The rule SHALL
+`source`, and the path in its `paths` or in a `kept` entry. A person's commit needs no cover. `git diff --numstat` of
+the base and head SHALL count at most 40 added and deleted lines for the file, and a binary file SHALL NOT be kept. At
+most three files per task SHALL be kept this way, in path order. The others are reverted, and the row's note counts them. The rule SHALL
 apply to the run of the base's tests only: the comparison of pre-existing tests (L4-VER-030, L4-VER-031) and every
 other allowance keep their rules. A file that fails any condition SHALL be reverted as before.
 
@@ -33,9 +34,9 @@ other allowance keep their rules. A file that fails any condition SHALL be rever
 - **Then** the file is reverted and the base test's failure is a blocker, as before
 
 #### Scenario: SCN-VER-314 (−) An ignore file, an added file, a test module, an older red and a fourth file are reverted
-- **Given** a red commit of a named task that changed `.gitignore`, added `test/arch/new.ts`, and changed
-  `test/arch/repo.test.ts` and four named data files; and a `task.unfrozen{named_by_task}` whose `red_sha` is an
-  earlier red commit of a reopened task
+- **Given** a red commit of a named task that changed `.gitignore`, added `test/arch/new.ts`, changed
+  `test/arch/repo.test.ts` and four named data files, and rewrote a fifth named data file in 60 lines; and a
+  `task.unfrozen{named_by_task}` whose `red_sha` is an earlier red commit of a reopened task
 - **When** step 1 runs the base's tests
 - **Then** only the first three data files in path order stay at head, the note counts one more, and every other
   file is reverted or set aside as before
@@ -87,17 +88,19 @@ reverted support file, the detail SHALL be as before.
 ### Requirement: L4-VER-081 A repeated base-tests failure escalates with the reverted support files and the way out
 When a round escalates `same_failure` and its blocking findings hold `a pre-existing test fails on the unit's code` or
 `a pre-existing test no longer runs on the unit's code`, and the newest `verify.base_tests` of the unit up to that
-round names a reverted support file that a task changed, the escalation's text SHALL start with `a pre-existing test
-fails with the unit's support files at their base version (<path> (task <t>), ...): a fix unit cannot change them; a
-person tags that task [test-infra] when the change is intended, or fixes the code, then l4 retry`, at most 3 files and
-300 characters, followed by `; ` and the `same_failure` detail. The code SHALL stay `same_failure`. With no such entry
+round names a reverted support file that a task changed, the escalation's text SHALL start with `base versions of
+support files fail a pre-existing test; tag the task that changed one [test-infra] if its change is intended, or fix
+the code, then l4 retry: <path> (task <t>), ...`, at most 3 files and 300 characters, followed by `; ` and the
+`same_failure` detail. The way out comes before the files, so a cut of the reason at 300 characters drops files, not
+the way out. The code SHALL stay `same_failure`. With no such entry
 (a 0.4.59 event), the text SHALL be the detail alone.
 
 #### Scenario: SCN-VER-320 (+) The escalation tells the person which task to tag
 - **Given** the unit of SCN-VER-317, whose fix chore committed only its tick, and a round 2 that fails the same way
 - **When** the fix loop escalates
-- **Then** the reason starts with `a pre-existing test fails with the unit's support files at their base version
-  (test/arch/modules.ts (task 1.1, 1.2))` and holds `round 2 failed the same way as round 1`
+- **Then** the reason starts with `base versions of support files fail a pre-existing test; tag the task that changed
+  one [test-infra] if its change is intended, or fix the code, then l4 retry: test/arch/modules.ts (task 1.1, 1.2)` and
+  holds `round 2 failed the same way as round 1`
 
 #### Scenario: SCN-VER-321 (−) Another repeated failure keeps its text
 - **Given** a round that fails `test gate failed` the same way twice, and a round whose `verify.base_tests` has no

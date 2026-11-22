@@ -55,9 +55,13 @@ is read and before `_escalate_while_due` (653-660); and right after a red commit
 1. takes `unfreeze_for(wb, task, red.manifest).grants` with `reason` `human_answer` or `delegate_answer` and at least
    one path. These are the grants that open a frozen file for this green now, under every rule of L4-IMP-015 and
    L4-DLG-014. The `named_by_task` grant is the task's own text, not an answer, and renews nothing;
-2. drops each question id that an earlier `task.attempts_renewed` of the task names. The fix unit must match
-   (`event_context["fix_unit"]`). The search runs over the whole ledger, not the window, so one answer renews once,
-   whatever came between;
+2. drops each question id that is already credited: an earlier `task.attempts_renewed` of the task names it, or an
+   earlier `task.unfrozen` of the task with `reason` `human_answer`, `delegate_answer` or none (an old event) names it
+   in `question`. That field is one id for a delegate grant and a `", "`-joined list for a person's, so it is split
+   on `", "`. The fix unit must match (`event_context["fix_unit"]`). The search runs over the whole ledger, not the
+   window, so one answer renews once, whatever came between. In 0.4.60 the renewal is checked before `run_green`
+   records the first `task.unfrozen` of a new answer, so the second rule only credits an answer that an older harness
+   already used, or one a capped check let through;
 3. when ids are left: counts `n`, the green-phase failed attempts in `failures["green"]`. When `n > 0` and the task
    already has `MAX_RENEWALS = 2` renewals with `failed > 0` after the newest `RESETS` event (same fix unit), it logs a
    warning (`task <k>: no attempt renewal for <ids>: 2 renewals since the last retry, resume or restart`) and stops,
@@ -79,8 +83,10 @@ Bound: every renewal needs a question that blocks the task, an answer that a per
 (`clarifier.answer_by_agents`, L4-QMD-009) or the delegate gave, and a grant that opens a frozen file. Each question
 renews at most once per task. At most 2 renewals that clear a failure come between two `l4 retry`, `l4 resume` or
 `l4 restart`, whoever answered. The delegate also gives at most `delegate.max_answers_per_task` answers per task. So
-between two of those commands a task has at most `3 × implementer.max_task_attempts` failed green attempts: 9 at the
-default 3. A question is raised only by a step that ends blocked, which ends the task's turn in the run, so the
+between two of those commands a task's green phase has at most three windows, each bounded as L4-IMP-075 and
+L4-IMP-094 bound one. `max_task_attempts` counts per profile, so a window of a chain of profiles holds up to that many
+failures per profile that runs the phase. With one profile the bound is `3 × implementer.max_task_attempts` failed
+green attempts: 9 at the default 3. A question is raised only by a step that ends blocked, which ends the task's turn in the run, so the
 renewals of one task cannot follow one another within a run.
 
 Fail-safe: a renewal changes only how many attempts the breaker allows. The grants are those that `run_green` uses
@@ -164,7 +170,8 @@ is (`ladder._guards`). It takes every `task.tests_rechecked` with `stopped: pass
 ### D5. Upgrade
 
 A 0.4.59 ledger has neither event. `seed_attempts` then folds as before. A unit waiting on an answer when the pin moves
-renews on its next run, because no `task.attempts_renewed` names the question yet. A unit whose 0.4.59 run already used
+renews on its next run, because neither a `task.attempts_renewed` nor a `task.unfrozen` names the question yet. An
+answer that a 0.4.59 green already used is credited by its `task.unfrozen` and renews nothing. A unit whose 0.4.59 run already used
 the answer and then halted on `max_task_attempts` needs a person's `l4 retry` or `l4 resume`, which starts a new
 window anyway. A 0.4.59 verdict has no `step_flakes`, so nothing is listed. An older harness ignores both events.
 

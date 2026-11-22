@@ -24,10 +24,11 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   an older harness ignores (L4-IMP-105).
 - An answer that unfreezes a frozen file for a task's green step now gives that green a new window of attempts. This
   holds for a person's, an agent's or the delegate's answer. The window is renewed once per question, at most twice per
-  task between two `l4 retry`, `l4 resume` or `l4 restart`, and the ledger records `task.attempts_renewed`. Attempt
+  task between two `l4 retry`, `l4 resume` or `l4 restart`, and the ledger records `task.attempts_renewed`. An answer
+  that 0.4.59 already used renews nothing. Attempt
   numbers go on, and the task's own text renews nothing (L4-IMP-104).
 - Step 1 now keeps at head, for its run of the base's tests, a support file that a task's reviewed text names when
-  only that task's red commit changed it. At most three such files per task. The file is listed under `Pre-existing
+  only that task's red commit changed it. At most three such files per task, and at most 40 changed lines in each. The file is listed under `Pre-existing
   tests changed with an allowance` with the task and the text's source. Before, step 1 reverted the file, and only a
   person's `[test-infra]` tag let the unit pass. A unit in flight keeps such a file on its next round, because 0.4.59
   already recorded the task's text (L4-VER-079).
@@ -40,9 +41,9 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   failed the same way. Now the detail starts with `with the unit's test and support files at their base version
   (support files reverted: ...)`, each failing base test has a `failures` record with `gate: base-tests` and an excerpt
   (L4-VER-078), and the fix proposal, the fix chore's prompt and its questions carry the failure block (L4-VER-080).
-- A `same_failure` escalation of a round with a base-tests blocker now starts with the reverted support files, their
-  tasks and the way out: a person tags that task `[test-infra]` when the change is intended, or fixes the code, then
-  runs `l4 retry`. Before, the text named only the finding's id (L4-VER-081).
+- A `same_failure` escalation of a round with a base-tests blocker now starts with the way out, then the reverted
+  support files and their tasks: a person tags the task that changed one `[test-infra]` when its change is intended,
+  or fixes the code, then runs `l4 retry`. Before, the text named only the finding's id (L4-VER-081).
 - An unfreeze that the delegate accepted after two failed green attempts no longer leaves the task one attempt. Three
   times in two consumer units the next run had attempt 3 of 3, and once the breaker halted the unit on a second wrong
   line of the same test (L4-IMP-104).

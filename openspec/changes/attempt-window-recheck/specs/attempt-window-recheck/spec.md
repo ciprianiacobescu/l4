@@ -10,21 +10,23 @@ its test gate once more, and a test that passes there does not fail the attempt.
 When a task's green step is about to start in a run (a red commit resumed at the task's start, or a red commit made in
 the run), and before the escalation that precedes its first attempt, the harness SHALL take the grants that open a
 frozen file for that green under L4-IMP-015 and L4-DLG-014 (`reason` `human_answer` or `delegate_answer`, at least one
-path). A grant whose question no earlier `task.attempts_renewed` of the task (the same fix unit, over the whole
-ledger) names SHALL renew the window: the harness records `task.attempts_renewed{task, phase: green, questions,
+path). A grant SHALL renew the window when its question is credited nowhere yet: no earlier `task.attempts_renewed`
+of the task names it, and no earlier `task.unfrozen` of the task with `reason` `human_answer` or `delegate_answer` (or
+none, an old event) names it in `question` (the same fix unit, over the whole ledger). Then the harness records `task.attempts_renewed{task, phase: green, questions,
 failed}`, where `failed` is the count of failed green attempts it clears, and clears the green phase's failed attempts,
 their reasons and its newest move (L4-IMP-094). Attempt numbers SHALL go on. A renewal SHALL NOT be made when `failed`
 is above 0 and the task already has 2 renewals with `failed` above 0 since the newest `unit.retried`, `unit.resumed` or
 `unit.restarted`. The harness then logs a warning and records nothing. When a later run seeds the task's attempts
 (L4-IMP-075), a `task.attempts_renewed` in the window SHALL clear the green counts seeded before it. The task's own
 text (`named_by_task`) SHALL renew nothing. The deadline's stop count (L4-IMP-071) SHALL NOT change. Between two `l4
-retry`, `l4 resume` or `l4 restart` a task SHALL have at most three times `implementer.max_task_attempts` failed green
-attempts.
+retry`, `l4 resume` or `l4 restart` a task's green phase SHALL have at most three windows, each bounded as L4-IMP-075
+and L4-IMP-094 bound one: with one profile in `roles.implementer`, at most three times
+`implementer.max_task_attempts` failed green attempts.
 
 #### Scenario: SCN-IMP-566 (+) An answer that unfreezes the test gives green a full window
 - **Given** green attempts 1 and 2 of task 1.2 that failed, a green attempt 3 that raised a question, and the
   delegate's accept of the suggestion `Edit e2e/test_layout.py`, which unfreezes that file (`delegate.unfreeze: true`)
-- **When** the next run resumes the task at green with `implementer.max_task_attempts: 3`
+- **When** the next run resumes the task at green with one profile and `implementer.max_task_attempts: 3`
 - **Then** `task.attempts_renewed{task: 1.2, phase: green, questions: [Q-001], failed: 2}` is recorded before the first
   attempt, the attempt is numbered 3, and the task may fail 3 green attempts in this window before the breaker trips
 
@@ -48,9 +50,10 @@ attempts.
 
 #### Scenario: SCN-IMP-570 (+) A unit in flight from 0.4.59 renews on its next run
 - **Given** a ledger written by 0.4.59 with two failed green attempts and an accepted answer that unfreezes the test,
-  not yet used by a green attempt
-- **When** the next run on 0.4.60 resumes the task at green
-- **Then** the window is renewed once, and a ledger without the event folds as before
+  not yet used by a green attempt; and another whose 0.4.59 green attempt already recorded `task.unfrozen` for its
+  answer
+- **When** the next run on 0.4.60 resumes each task at green
+- **Then** the first window is renewed once, the second is not, and a ledger without the event folds as before
 
 ### Requirement: L4-IMP-105 A step runs its test gate once more before it fails on pre-existing tests
 When a red step would fail its attempt with `red broke existing tests`, or a green step or a fix, tests or refactor

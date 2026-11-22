@@ -3,8 +3,8 @@
 A TypeScript consumer's task 1.1 had a reviewed text that told the red step to add an edge to the module-graph data
 file `test/arch/modules.ts`. The red step did. Verification step 1 then ran the pre-existing tests with the unit's test
 and support files at their base version (L4-VER-038): it reverted five files, that one among them, so the base graph
-forbade the import the unit's code needs, and the unchanged base test `test/arch/repo.test.ts` ("the merged tree is
-clean", a `deepEqual` against `[]`) failed. Round 1 was FAIL. The fix chore found nothing to fix (every test passes at
+forbade the import the unit's code needs, and the unchanged base test `test/arch/repo.test.ts` (a `deepEqual` of the
+graph's violations against `[]`) failed. Round 1 was FAIL. The fix chore found nothing to fix (every test passes at
 head) and committed only its `tasks.md` tick. Round 2 failed the same way, and the unit escalated `same_failure` with
 the text `round 2 failed the same way as round 1: finding <id>`. A person tagged the task `[test-infra]`; the next round
 listed the file `kept at head for the run (task 1.1: [test-infra])` and passed.
@@ -36,16 +36,16 @@ What exists at 0.4.59 (verified in code):
 - **SLIPPABLE.** Step 1 keeps at head, for the run of the base's tests, a support file that exists at the base when
   every harness commit that changed it is the red commit of a task whose reviewed text names it: a
   `task.unfrozen{reason: named_by_task}` of that unit, task and red commit lists the path. At most three such files per
-  task. The file is listed under `## Pre-existing tests changed with an allowance (L4-VER-031)` with the task and the
+  task, and at most 40 changed lines in each. The file is listed under `## Pre-existing tests changed with an allowance (L4-VER-031)` with the task and the
   reviewed text's source (L4-VER-079). Only `kept_files` reads this rule. The comparison of pre-existing tests
   (L4-VER-030) and every other reader of `_allowance` are unchanged.
 - The base-tests blockers lead with the reverted support files and the tasks whose commits changed them. Each failing
   base test gets a record in the round's `failures` map under the gate `base-tests`, with the bounded, redacted excerpt
   of L4-VER-078. A fix task for `a pre-existing test fails on the unit's code` therefore carries the failure block of
   L4-IMP-102 into its proposal, its prompt and its questions (L4-VER-080).
-- A `same_failure` escalation of a round whose blockers hold a base-tests finding leads with the support files the run
-  reverted, the tasks that changed them, and the way out. The way out is a person's `[test-infra]` tag on that task
-  when the change is intended, or a fix of the code, then `l4 retry` (L4-VER-081).
+- A `same_failure` escalation of a round whose blockers hold a base-tests finding leads with the way out, then the
+  support files the run reverted and the tasks that changed them. The way out is a person's `[test-infra]` tag on that
+  task when the change is intended, or a fix of the code, then `l4 retry` (L4-VER-081).
 - The skill's spec-writing rules say: a red step may change a support file a test reads only when its task line names
   that file's path; the verifier then keeps that change for the run of the base's tests and lists it.
 

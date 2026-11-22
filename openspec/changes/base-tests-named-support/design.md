@@ -67,7 +67,10 @@ as already satisfied, and the general rule for a fix chore that changes nothing.
    and task, `red_sha == commit.sha`, a non-empty `source`, and the path in `paths` or in a `kept` entry's `path`. A
    person's commit in `who` needs no cover, as in `_allowance`. Matching `red_sha` means an event of an older red
    commit (a task reopened after a spec edit) covers nothing.
-5. At most `MAX_NAMED_SUPPORT = 3` paths per (unit, task) are kept this way, in sorted path order (the bound of
+5. `git diff --numstat <base> <head> -- <path>` counts at most `MAX_NAMED_SUPPORT_LINES = 40` added plus deleted
+   lines. A binary file (`-` counts) is not kept. A rewrite of a named file is reverted as before. The bound keeps an
+   added entry or edge and rules out a replaced file.
+6. At most `MAX_NAMED_SUPPORT = 3` paths per (unit, task) are kept this way, in sorted path order (the bound of
    `unfreeze.MAX_PATHS_PER_QUESTION`). A later one is reverted as before, and the row's note says `<n> more support
    file(s) named by task <t> reverted (at most 3 kept)`.
 
@@ -86,11 +89,27 @@ record. A task whose text does not name the path, a commit of another task, a gr
 commit all keep the file reverted.
 
 What can still pass that should not: a red step whose change to a named file goes beyond what the text asked, for
-example removing a rule instead of adding one, and so masks a regression that the base version would show. The same
-holds for a named test that red changes in place (L4-IMP-082) and for a `[test-infra]` task today. The change is
-listed with its task and source, and the judge reads its diff. This is why the requirement is slippable. Recommended:
-ship it. The alternative is a person's tag for every task whose spec asks red to update a data file that tests read,
-and the evidence shows that the person learns it only after two FAIL rounds.
+example adding a broader exemption than the one asked for, and so masks a regression that the base version would
+show. The closest precedent is stricter. When a task's text opens a support file for *green*
+(`implementer/opened.py` `check_opened`), green must keep every top-level statement of the red version unchanged and
+in order (rule 1), may not bind again a name the red version binds or one pytest reads (rule 2), and may not patch a
+symbol of a production module the unit changed (rule 3). Only a Python file can be opened that way: `named_by_task`
+keeps any other as `not a Python file: a person decides`. Red's change to a named file gets none of rules 1 and 2. The
+other checks of a red change are:
+- for a Python support file, L4-VER-037 (rule 3's patch check, on every changed support file) and the content scan
+  of L4-VER-039;
+- for a file of any language, the listing with task and source, the judge's diff, and the 40-line bound of condition 5.
+
+The evidence's file is TypeScript, so only the second group applies to it.
+
+Why that is enough here: in red, a support change is part of writing the tests, and a person approved the text that
+asks for it (an activated plan, or a spec merged to the base branch). Before this change, the revert at step 1 was the
+only check that read the change's effect on the base's tests. After it, a person's `[test-infra]` tag on the task is no
+longer needed for this case. That tag is a broader allowance: it covers every harness commit of the task, it has no
+line bound, and the person gives it only after two FAIL rounds. This is why the requirement is slippable.
+Recommended: ship it, with the bound of condition 5. If the owner wants green's rule 1 for red too, the narrower form
+is to keep only a file whose base lines all survive in order (`git diff` counts no deleted line). That form may miss
+the evidence's case, where adding an edge to an existing line of the graph changes that line.
 
 ### D2. What the blocker says (L4-VER-080)
 
@@ -106,6 +125,10 @@ the second). The current list follows (`_listed` of the ids with their first lin
 lines). At most 5 support files are named, each `(a person)` when only people's commits changed it. The lead comes
 first because a chore's detail is cut at 600 characters (`fixunit.py:448`). The detail says what the run did. It does
 not say that the test passes at head: step 1 never runs it there.
+
+Fail-safe: D2 changes text and records only. The blocker, its title, its severity and the verdict are unchanged, and
+so is the finding's id, which `failure_set` reads. A failing id with no case in R1 gets no record. The only reader
+that acts on a `base-tests` record is the failure block, which is text for the fix chore and the person.
 
 The records: `failure_records` gains a keyword `unit_gate: str = "test"`, which is the `gate` value of the unit side
 (the 200-record cap applies to that side as before). `check_base_tests` calls it with a report that holds only the
@@ -129,24 +152,35 @@ again when it is written.
 In `fixloop.py`, when `repeated_failure` gives a detail and the round's findings hold a blocking finding titled
 `FAILS_TITLE` or `GONE_TITLE`, the escalation's text is `base_tests_way_out(events, round) + "; " + detail`.
 `base_tests_way_out` reads the newest `verify.base_tests` event of the unit with `round <= result.round` and its
-`support_reverted` entries that name a task. It gives `a pre-existing test fails with the unit's support files at
-their base version (<p> (task <t>), ...): a fix unit cannot change them; a person tags that task [test-infra] when the
-change is intended, or fixes the code, then l4 retry`, at most 3 files, cut at 300 characters. It gives `""` when the
-event has no such entry (0.4.59 events have no `support_reverted`), and then the text is the detail alone, as before.
-The code stays `same_failure`, and so do the edge and the fold. The way out leads because exit reasons are cut at 300
-characters.
+`support_reverted` entries that name a task. It gives `base versions of support files fail a pre-existing test; tag
+the task that changed one [test-infra] if its change is intended, or fix the code, then l4 retry: <p> (task <t>),
+...`, at most 3 files, cut at 300 characters. It gives `""` when the event has no such entry (0.4.59 events have no
+`support_reverted`), and then the text is the detail alone, as before. The code stays `same_failure`, and so do the
+edge and the fold.
+
+Where a person reads it: `fixloop.py:767-771` puts `fix.reason` into the sticky note's escalation section
+(`notes.escalation_section`: `Round <n> ended FAIL: <reason cut at 300>`) and into `ctx.shared["escalation"]`, the
+unit's halt detail. A later run's exit reason is `escalated: <detail>. Next: l4 retry --unit <u> --reason TEXT`, cut at
+300 characters (`orchestrator.py:1755`), because `same_failure` has no way out of its own (`next_step.way_out`). The
+fixed part of the lead is about 150 characters and comes first, so the 11 characters of `escalated: ` and the
+`. Next:` tail leave room for it and the first file. A cut drops the later files, never the way out. `l4 status` shows
+the whole detail.
+
+Fail-safe: D3 changes the text only. The escalation still happens exactly when `repeated_failure` says so, with the same
+code, edge and fold, and `l4 retry` resolves it as before. A missing or old event gives the old text.
 
 The fix chore that changes nothing is not changed here (non-goal). After D1 the case of the evidence never reaches
 it. For any other base-tests failure, D2 tells the chore what the run reverted, and D3 tells the person.
 
 ### D4. Skill text
 
-`plugins/l4/skills/l4/references/spec.md`, bullet **test-support files**: add `A red step may change an existing
-support file that tests read (a data file, a fixture) only when its task line names that path in code font: the
-verifier keeps that change for the run of the base's tests and lists it. Any other change to one needs a person's
-[test-infra] tag.` If D1 is cut at integration, the sentence is instead: `A red step that changes an existing support
-file that tests read (a data file, a fixture) needs a person's [test-infra] tag on its task: without it the run of the
-base's tests reverts the file and fails.` The `testpaths.py` remedy (L4-YOLO-094) is about documentation under a test
+`plugins/l4/skills/l4/references/spec.md`, bullet **test-support files** (the file is held to 530 words by
+`tests/unit/docs/test_adoption_docs.py`, so the bullet is rewritten, not grown): `Name a test-support file a task must
+change exactly, in code font (...), in its task line or heading, on an active plan or the base branch. Its red step
+may then change it (the base-tests run keeps that); its green step only a Python file red left alone.` If D1 is cut at
+integration, the second sentence is instead `Its green step may then change a Python one red left alone; a red step
+that changes an existing support file needs a person's [test-infra] tag, or the base-tests run reverts it.` (check
+the word count again). The `testpaths.py` remedy (L4-YOLO-094) is about documentation under a test
 glob and skips code files: it is not this case and is not changed.
 
 ### D5. Upgrade
@@ -159,7 +193,7 @@ know the gate value ignore it. An older harness that reads a 0.4.60 verdict igno
 ## Risks / Trade-offs
 
 - D1 trusts the reviewed text for the whole change red made to the named file. Bound: the file is listed, the judge
-  reads it, three files at most per task, and the rule is slippable.
+  reads it, at most 40 changed lines per file and three files per task, and the rule is slippable.
 - `names_path` matches a mention that says "do not change `x`" too. This is the same rule that opens a named support
   file for green (L4-IMP-014).
 - The lead text adds about 200 characters to the detail of a blocker, which is now cut later in the chore's 600.

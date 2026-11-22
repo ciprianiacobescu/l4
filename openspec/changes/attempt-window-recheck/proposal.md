@@ -28,8 +28,9 @@ lookup happens. The cause is not known. Port contention or load is a guess.
 ## What Changes
 
 - A task's green phase gets a new attempt window once per answered question that opens a frozen file for it. When
-  green is about to start in a run, an answer grant (`reason: human_answer` or `delegate_answer`) whose question no
-  earlier renewal of the task named renews the window: `task.attempts_renewed{task, phase, questions, failed}` is
+  green is about to start in a run, an answer grant (`reason: human_answer` or `delegate_answer`) whose question is
+  credited nowhere yet (no earlier renewal names it, and no earlier `task.unfrozen` of an answer does) renews the
+  window: `task.attempts_renewed{task, phase, questions, failed}` is
   recorded, and the phase's failed-attempt counts, their reasons and the newest move of the phase are cleared. Attempt
   numbers go on. At most two renewals that clear a failure per task come between two retries, resumes or restarts by a
   person. The task's own text (`named_by_task`) renews nothing (L4-IMP-104).
