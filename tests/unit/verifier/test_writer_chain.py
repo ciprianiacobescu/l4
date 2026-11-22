@@ -23,7 +23,11 @@ ASK = ("system", [Msg("user", "write the test")], {"type": "object"})
 
 
 def reply(status: str = "ok", detail: str = "", *, run_status: str | None = None, **kw) -> StructuredResult:
-    run = RunResult(run_status, RAW, usage=kw.get("usage") or Usage()) if run_status else None  # type: ignore[arg-type]
+    run = (
+        RunResult(run_status, RAW, usage=kw.get("usage") or Usage(), limit=kw.get("limit"))  # type: ignore[arg-type]
+        if run_status
+        else None
+    )
     return StructuredResult(
         status, parsed={"code": "x"} if status == "ok" else None, detail=detail, run=run,  # type: ignore[arg-type]
         usage=kw.get("usage") or Usage(), length_stop=kw.get("length_stop", False),
@@ -123,7 +127,34 @@ def test_a_limit_cools_the_profile_and_moves_on_through_the_factory():
     )
     assert rig.chain().complete_structured(*ASK).status == "ok"
     assert rig.limited == ["first"] and rig.skip == {"first"}
-    assert rig.of("availability.judge_error") == []  # the factory records a limit (`availability.fallback`)
+    assert rig.of("availability.judge_error") == []  # a limit is `availability.limit` and `availability.fallback`
+
+
+USAGE_LIMIT = LimitSignal("fake", None, "usage_limit", None, "test", "You have hit your usage limit")
+
+
+def test_a_usage_limit_is_recorded_as_availability_limit_as_the_judges_record_it():
+    rig = Rig(
+        FakeBackend("first", reply("limit", "rate limited", run_status="rate_limited", limit=USAGE_LIMIT)),
+        FakeBackend("second", reply()),
+    )
+    assert rig.chain().complete_structured(*ASK).status == "ok"
+    assert rig.of("availability.limit") == [
+        {"tool": "fake", "kind": "usage_limit", "source": "test", "excerpt": "You have hit your usage limit"}
+    ]
+    assert rig.limited == ["first"] and rig.of("availability.judge_error") == []
+
+
+def test_a_limit_that_ends_the_chain_is_left_to_the_caller_and_keeps_its_run_for_it():
+    rig = Rig(FakeBackend("first", reply("limit", "x", run_status="rate_limited", limit=USAGE_LIMIT)))
+    result = rig.chain().complete_structured(*ASK)
+    assert result.status == "limit" and result.run is not None and result.run.limit is USAGE_LIMIT  # RoleLimit's
+    assert rig.of("availability.limit") == []  # the orchestrator records it once when it parks the unit
+
+
+def test_a_limit_that_names_no_signal_records_no_availability_limit():
+    rig = Rig(FakeBackend("first", reply("limit", "x", run_status="rate_limited")), FakeBackend("second", reply()))
+    assert rig.chain().complete_structured(*ASK).status == "ok" and rig.of("availability.limit") == []
 
 
 def test_a_limit_with_no_run_is_returned_for_the_caller():
@@ -269,6 +300,8 @@ def test_scn_ver_365_a_usage_limit_cools_the_profile_and_moves_on(run_l4, valid_
     assert run.code == 0, run.outcome
     [fallback] = [e for e in run.events("availability.fallback") if e["role"] == "verifier_agent"]
     assert (fallback["from"], fallback["to"]) == ("auditor", "second")
+    [recorded] = run.events("availability.limit")  # the chain records the limit, as the step-9 judges do
+    assert (recorded["tool"], recorded["kind"]) == ("fake", "usage_limit")
     assert [e["status"] for e in run.events("verify.audit")] == ["accepted"]
 
 
@@ -285,6 +318,19 @@ def test_scn_ver_366_with_no_profile_left_the_unit_waits_and_the_reason_names_ea
         and "second: permission:" in reason
     )
     assert errors(run) == [("auditor", "length", "4a"), ("second", "permission", "4a")]
+
+
+def test_scn_ver_366_a_chain_that_ends_on_a_usage_limit_waits_for_that_profiles_reset(
+    run_l4, valid_spec, with_verifier
+):
+    config = two_writers(with_verifier)
+    limit = LimitSignal("fake", None, "usage_limit", None, "test", "You have hit your usage limit")
+    run = run_l4([red_step(), green_step(), LENGTH, Step(status="quota", limit=limit)], **config)
+    assert run.code == 12, run.outcome
+    assert run.outcome["units"][0]["phase_after"] == "waiting_capacity"
+    reason = " ".join(str(e.get("reason", "")) for e in run.events("phase.changed"))
+    assert "no profile of roles.verifier_agent could answer" not in reason  # RoleLimit, not the summary
+    assert [e["tool"] for e in run.events("availability.limit")] == ["fake"]
 
 
 def test_scn_ver_368_a_timeout_does_not_move_to_the_next_profile(run_l4, valid_spec, with_verifier):

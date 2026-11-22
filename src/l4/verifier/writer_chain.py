@@ -107,7 +107,7 @@ class WriterChain:
                 return result
             name = self.current.profile_name
             detail = first_line(self._redact(result.detail), MAX_DETAIL)  # redacted whole, then one line, then cut
-            if kind != LIMIT:  # a limit is recorded by the factory (`availability.limit`, `availability.fallback`)
+            if kind != LIMIT:
                 self._emit(
                     "availability.judge_error", role=ROLE, profile=name, kind=kind, detail=detail, step=self._step
                 )
@@ -117,13 +117,24 @@ class WriterChain:
             try:
                 if kind == LIMIT:
                     assert result.run is not None
-                    self._move_to(self._on_limit(self.current, result.run))
+                    chosen = self._on_limit(self.current, result.run)
+                    self._record_limit(result.run)  # a limit that ends the chain is recorded by the unit's parking
+                    self._move_to(chosen)
                 else:
                     self._move_to(self._select())
             except WaitingCapacity:
                 self.current = self._backend = None
                 # its cost is recorded above: the caller must not add it to the step's own cost a second time
                 return dataclasses.replace(result, detail=self.summary(), usage=Usage())
+
+    def _record_limit(self, run: RunResult) -> None:
+        """`availability.limit` as the step-9 judges record it (`Factory.on_limit` records `availability.fallback`
+        only), so that progress shows the usage limit. A limit that ends the chain is not recorded here: the caller
+        raises `RoleLimit` with it and the orchestrator records it once when it parks the unit."""
+        if (limit := run.limit) is not None:
+            self._emit(
+                "availability.limit", tool=limit.tool, kind=limit.kind, source=limit.source, excerpt=limit.raw_excerpt
+            )
 
     def _cost(self, result: StructuredResult, profile: str) -> None:
         """`budget.cost` of a discarded call: it was metered and paid for, and the caller never sees it."""
