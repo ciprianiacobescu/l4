@@ -76,14 +76,17 @@ test writer of step 5) whose reply is `error` (a reply stopped at the output lim
 rules refused, or any other adapter error that the run's own retries did not cure) SHALL be discarded and the same call
 SHALL be asked of the next usable profile of `roles.verifier_agent` that is independent of the unit's implementers
 (`select_judge(role="verifier_agent", skip=...)`, its probes and `probe_vetoes`), in the same run, as the step-9 judges
-do (L4-VER-015, L4-VER-075). A usage limit or a lost login SHALL cool the profile down (`Factory.on_limit`, L4-AVL-003)
-and move on the same way. A discarded profile SHALL be skipped for the rest of the round, by both steps. Each discard
+do (L4-VER-015, L4-VER-075). A usage limit or a lost login SHALL cool the profile down (`Factory.on_limit`, L4-AVL-003),
+SHALL be recorded as `availability.limit` (tool, kind, source, excerpt) as the step-9 judges' limit is (once: a limit
+that ends the chain is recorded when the unit is parked), and SHALL move on the same way. A discarded profile SHALL be skipped for the rest of the round, by both steps. Each discard
 SHALL be recorded as `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` (`kind`: `length`,
 `permission` or `error`; `detail` redacted, at most 300 characters; `step`: `4a` or `5`), and the cost of a discarded
 call as `budget.cost` with that profile. A reply that is `invalid` or a `timeout` SHALL keep its handling of 0.4.59 and
 SHALL NOT move to another profile. When no profile is left, the call's result SHALL carry the detail `no profile of
-roles.verifier_agent could answer: <profile>: <kind>: <detail>; ...`, step 4a SHALL wait for capacity with it (exit 12)
-and step 5 SHALL record `writer_failed` with it, as each does today. What an audit or a generated test needs in order to
+roles.verifier_agent could answer: <profile>: <kind>: <detail>; ...`. When the chain ended on a usage limit, step 4a
+SHALL raise `RoleLimit` with that profile's limit, so that the unit waits for that reset (exit 12), and step 5 SHALL
+raise it as well; otherwise step 4a SHALL wait for capacity with the summary (exit 12) and step 5 SHALL record
+`writer_failed` with it, as each does today. What an audit or a generated test needs in order to
 count SHALL NOT change.
 
 #### Scenario: SCN-VER-362 (+) A length stop moves the audit writer's call to the next profile
@@ -109,8 +112,8 @@ count SHALL NOT change.
 #### Scenario: SCN-VER-365 (+) A usage limit cools the profile and moves on
 - **Given** the chain of SCN-VER-362 and a `first` whose run reports a usage limit
 - **When** step 4a asks for an audit test
-- **Then** a cool-down of `first` is recorded, `availability.fallback` names `first` and `second`, and `second`
-  answers the call
+- **Then** a cool-down of `first` is recorded, `availability.limit` and `availability.fallback` are recorded (the
+  second names `first` and `second`), and `second` answers the call
 
 #### Scenario: SCN-VER-366 (−) With no profile left the unit waits, and the reason names each failure
 - **Given** the chain of SCN-VER-362, a `first` whose reply stops at its output limit and a `second` whose run ends
@@ -118,6 +121,9 @@ count SHALL NOT change.
 - **When** step 4a asks for an audit test
 - **Then** the unit goes to phase `waiting_capacity` with exit 12, and the reason holds `no profile of
   roles.verifier_agent could answer: first: length:` and `second: permission:`
+- **And when** the chain instead ends on a usage limit (`first` stops at its output limit and `second` hits its usage
+  limit), step 4a raises `RoleLimit` with `second`'s limit, so the unit waits (exit 12) for that profile's reset and not
+  with the summary
 
 #### Scenario: SCN-VER-367 (+) Step 5's writer walks the chain too
 - **Given** the chain of SCN-VER-362, a UI gap, and a `first` whose reply to the UI test call is `error`

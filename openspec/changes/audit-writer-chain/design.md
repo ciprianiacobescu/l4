@@ -102,10 +102,13 @@ otherwise.
 ### D3. The writer chain (L4-VER-091)
 
 `WriterChain` (new, `src/l4/verifier/writer_chain.py`) is an `LLMBackend`. `writer_for(stem)` returns a function that
-builds one per step: `WriterChain(select, open_backend, factory, skip, failures, emit, step)`, where `select()` is
-`select_judge(services.factory, cfg, unit, implementers, role="verifier_agent", skip=skip)`, `open_backend(selected)`
-builds the `AgentJudge` of today for that profile, and `skip` and `failures` are created once per round in the hook,
-beside the judges' `skip` (`ladder.py:2093`), and shared by steps 4a and 5.
+builds one per step: `WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)`, where
+`select()` is `select_judge(services.factory, cfg, unit, implementers, role="verifier_agent", skip=skip)`,
+`open_backend(selected)` builds the `AgentJudge` of today for that profile, `on_limit(selected, run)` is `after_limit`
+(`Factory.on_limit`, which cools the profile and selects again, then `probe_vetoes`), `emit(type, **data)` is the
+workbench's, `redact(text)` the redactor's, `step` is `4a` or `5` and `role` is `audit` or `ui_tests`; `skip` and
+`failures` are created once per round in the hook, beside the judges' `skip` (`ladder.py:2093`), and shared by steps 4a
+and 5.
 
 `complete_structured(...)` asks the current profile and looks at the result:
 
@@ -121,13 +124,17 @@ beside the judges' `skip` (`ladder.py:2093`), and shared by steps 4a and 5.
   `AgentJudge._record_cost` records a call that gives no result), adds the profile to `skip`, appends `<profile>:
   <kind>: <detail cut at 120>` to `failures`, and selects again with `select()`. A new profile gets the same system
   text and messages.
-- `limit` with a run: `factory.on_limit(current, run)` cools the profile (`Factory.cool_limited`, L4-AVL-003) and
-  selects the next one with the same constraints (the independence rule and the `skip` set it reads), then
-  `probe_vetoes`, as `next_judge` does after a limit (`ladder.py:2131-2136`); the limit is recorded in `failures` too.
+- `limit` with a run: the chain records `availability.limit{tool, kind, source, excerpt}` as the step-9 judges do
+  (`Factory.on_limit` records `availability.fallback` only), then `on_limit(current, run)` cools the profile
+  (`Factory.cool_limited`, L4-AVL-003) and selects the next one with the same constraints (the independence rule and the
+  `skip` set it reads), then `probe_vetoes`, as `next_judge` does after a limit (`ladder.py:2131-2136`); the limit is
+  recorded in `failures` too.
 - When `select()` or `on_limit` raises `WaitingCapacity` (no profile is left), the chain returns the last result with
   its `detail` replaced by `no profile of roles.verifier_agent could answer: <failures joined by "; ">`. The callers
-  then do what they do today with that result: step 4a raises `RoleUnavailable` (an error) or `RoleLimit` (a limit) and
-  the unit waits for capacity; step 5 records `writer_failed` with that text (an error) or raises `RoleLimit`.
+  then do what they do today with that result: when the chain ended on a usage limit, the result is the limit's, with
+  its run, and step 4a raises `RoleLimit` with that profile's limit reason (the unit waits for that reset) and step 5
+  raises it too; when it ended on an error, step 4a raises `RoleUnavailable` with the summary (the unit waits for
+  capacity) and step 5 records `writer_failed` with that text.
 
 The three raise sites of `audit.py` need no change of their own: they already raise with `reply.detail`. The selection
 of a later profile records `availability.selected` as every selection does, so the ledger shows the walk.

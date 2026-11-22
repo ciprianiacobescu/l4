@@ -74,3 +74,13 @@ stops at its limit is `Step(status="error", length_stop=True)`; a refused tool c
   L4-VER-015 amendments. Check them against the code and tell the orchestrator where they differ; do not edit
   `docs/SPEC.md`, `CHANGELOG.md` or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 4.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 5. Review rulings
+
+- [x] 5.1 A usage limit mid-chain records `availability.limit` (once; a limit that ends the chain is recorded when the
+  unit is parked); L4-VER-091, SCN-VER-365, design D3 and change-table row 142 say so.
+- [x] 5.2 L4-VER-091 and SCN-VER-366 say what step 4a does when the chain ends on a usage limit (`RoleLimit` with that
+  profile's limit, the unit waits for that reset) and otherwise (the summary); design D3 and row 142 name the actual
+  `WriterChain` constructor (`select`, `open_backend`, `on_limit`, `skip`, `failures`, `emit`, `step`, `role`, `redact`).
+- [x] 5.3 Tests that kill the surviving mutants (SCN-VER-363 which profile step 5 asks, a probe veto after a limit, a
+  browser-only chore with no unit-test base report, a support-glob file in the step 4a scope).
