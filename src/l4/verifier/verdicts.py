@@ -29,6 +29,7 @@ from typing import Any, Literal, Protocol
 
 from l4.clarifier.actor import Actor
 from l4.config.schema import L4Config
+from l4.implementer.excerpt import MAX_CHARS, redacted_cut
 from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
@@ -49,6 +50,7 @@ from l4.state.ledger import LedgerEvent
 from l4.verifier.aggregate import CAP_ONLY
 from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
 from l4.verifier.types import (
+    MAX_CODE_CHARS,
     CriterionEvidence,
     CriterionOutcome,
     Finding,
@@ -686,13 +688,22 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
-def _ui_hold_notes(criterion: str, generated: Sequence[GeneratedOutcome]) -> str:
+def _ui_hold_notes(criterion: str, generated: Sequence[GeneratedOutcome], redact: Callable[[str], str] | None) -> str:
     """The harness notes of a UI hold's question (L4-VER-083): why the test step 5 wrote failed at the head, then that
-    test, numbered; empty when step 5 wrote no test or kept neither. Redacted and bounded where the outcome was made;
-    the question's writer redacts them again. Never in the hold's text: its hash is the hold's id."""
+    test, numbered; empty when step 5 wrote no test or kept neither. Redacted and bounded where the outcome was made,
+    and redacted again here (`redacted_cut`: whole, cut, whole again) because a round that is reused restores the copy
+    that 0.4.59 stored, which was cut before it was redacted and can end inside a private key; the question's writer
+    redacts them once more. Never in the hold's text: its hash is the hold's id."""
     done = next((g for g in generated if g.criterion == criterion), None)
     if done is None or not has_evidence(done):
         return ""
+    if redact is None:
+        raise ValueError("harness notes are redacted by the caller's redactor, and none was given")
+    done = dataclasses.replace(
+        done,
+        excerpt=redacted_cut(done.excerpt, redact, MAX_CHARS),
+        code=redacted_cut(done.code, redact, MAX_CODE_CHARS),
+    )
     lines: list[str] = []
     if done.excerpt:
         lines += [
@@ -743,6 +754,7 @@ def _hold_question(
     quoted: Sequence[Finding] = (),
     paths: Sequence[str] = (),
     generated: Sequence[GeneratedOutcome] = (),
+    redact: Callable[[str], str] | None = None,
 ) -> NewQuestion:
     judged = [
         line
@@ -795,7 +807,7 @@ def _hold_question(
             answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
         ]
     )
-    notes = _ui_hold_notes(ui, generated) if (ui := ui_hold_criterion(hold)) else ""
+    notes = _ui_hold_notes(ui, generated, redact) if (ui := ui_hold_criterion(hold)) else ""
     return NewQuestion(
         f"Hold {hold_id(hold)}: {_flat(hold, 120)}", QuestionKind.VERDICT, (), context,
         f"round {round_no}, verifier", ("accept", "reject: <reason>"), notes=notes,
@@ -875,7 +887,11 @@ def raise_verdict_questions(
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
             view = (hold_views or {}).get(hold)
-            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else (), generated))
+            batch.append(
+                _hold_question(
+                    hold, round_no, quoted, tuple(view["paths"]) if view else (), generated, redactor.redact_text
+                )
+            )
             ui = ui_hold_criterion(hold)  # step 5 finds the answer again by the criterion (L4-VER-067)
             about = (
                 {"criterion": ui, "criterion_sha256": text_sha256(by_id[ui])} if ui is not None and ui in by_id else {}

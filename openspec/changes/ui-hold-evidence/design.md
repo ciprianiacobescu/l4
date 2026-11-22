@@ -83,8 +83,8 @@ verdict. `verify.generated` in the ledger is unchanged: the excerpt and the code
 
 ### D3. The hold's question
 
-`_hold_question` (689-750) passes `notes=_ui_hold_notes(ui, generated)` for a UI hold. `_ui_hold_notes(criterion,
-generated) -> str` finds the criterion's outcome as `_ui_hold_lines` does and returns `""` when there is none or it
+`_hold_question` (689-750) passes `notes=_ui_hold_notes(ui, generated, redact)` for a UI hold, with the redactor that
+`raise_verdict_questions` has. `_ui_hold_notes(criterion, generated, redact) -> str` finds the criterion's outcome as `_ui_hold_lines` does and returns `""` when there is none or it
 has neither an excerpt nor (code and a path). Else the lines, joined by `\n`:
 
 - when `excerpt`: `Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the
@@ -100,6 +100,13 @@ has neither an excerpt nor (code and a path). Else the lines, joined by `\n`:
   their numbers stay those of the excerpt's locations, and ends with `… (cut: N more lines)`. Each of the two bounds
   can be the one that cuts: 200 lines hold at most 4,000 characters of code and 1,400 of numbers, so the 6,000 is a
   second guard for a caller that hands in more.
+
+The notes redact the outcome's copies again: `redacted_cut(done.excerpt, redact, MAX_CHARS)` and `redacted_cut(done.code,
+redact, MAX_CODE_CHARS)` (D1's helper) before the lines are made. For an outcome of this release that is a no-op (both are
+already redacted and within their bounds), but a round that is reused restores `generated[].code` from a `verdict.json`
+of 0.4.59, which cut it at 4,000 characters before it redacted: it can end inside a private-key block, which only a
+redaction of the copy itself removes to the edge. A secret value that the old cut split in the middle (its head is all
+that is left) matches no shape and cannot be found again; that part of the old flaw stays in those records.
 
 `_ui_hold_lines` adds one sentence to the Context when the notes are not empty: with an excerpt, `The harness notes
 below show the test step 5 wrote and why it failed at the head: read them to tell a wrong test from wrong code.`;

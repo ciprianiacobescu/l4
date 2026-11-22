@@ -749,7 +749,7 @@ def test_scn_ver_334_a_generated_test_cannot_forge_the_structure_of_questions_md
     assert "   8  x = 1" in notes
     from l4.verifier.verdicts import _ui_hold_notes
 
-    assert notes == _ui_hold_notes(UI_CRITERION.id, [outcome])  # the notes read back are the notes written
+    assert notes == _ui_hold_notes(UI_CRITERION.id, [outcome], Redactor({}).redact_text)  # read back as written
 
 
 def test_scn_ver_335_nothing_is_added_without_a_written_test(tmp_path):
@@ -835,3 +835,26 @@ def test_scn_ver_331_the_numbered_copy_stops_at_6000_characters_and_says_how_man
     assert len(exact) == 200 and exact[-1] == " 200  y"  # 200 lines fit: nothing is cut, no cut line
     assert numbered_code("y\n" * 201)[-1] == "… (cut: 1 more line)"
     assert numbered_code("") == [] and numbered_code("a\r\nb\n") == ["   1  a", "   2  b"]
+
+
+def test_scn_ver_353_a_half_key_block_in_a_record_that_0_4_59_wrote_is_not_in_the_question(tmp_path):
+    """0.4.59 cut the code at 4,000 characters before it redacted, so a stored copy can end inside a private key, and
+    a round that reuses it restores that copy. The notes are redacted again (whole, cut, whole) as they are built."""
+    from l4.verifier.evidence import _generated
+
+    begin = "-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"
+    stored = {  # the `generated` entry of a verdict.json of 0.4.59: no `excerpt`
+        "criterion": UI_CRITERION.id, "status": "fails_at_head", "path": UI_PATH, "attempts": 2,
+        "reason": "the test fails at the head: t::x", "artifacts": [], "tests": [],
+        "code": f"{TEST_CODE}# {begin}\n# MIIEowIBAAKCAQEA" + "q" * 60,
+    }  # fmt: skip
+    restored = _generated(stored)
+    assert restored.excerpt == "" and "MIIEow" in restored.code  # the half block is in what the round restored
+    file, _ = _ask_ui_hold(tmp_path, restored)
+    text = (tmp_path / "questions.md").read_text()
+    assert file.get("Q-001").notes_text and "MIIEow" not in text and "q" * 20 not in text
+    assert "[REDACTED:private-key]" in text and "# line 1" in text  # what came before the key stays
+    from l4.verifier.verdicts import _ui_hold_notes
+
+    with_excerpt = _failed_outcome(excerpt=f"  E   RuntimeError: {begin}\n  E   MIIEowIBAAKCAQEA" + "q" * 60)
+    assert "MIIEow" not in _ui_hold_notes(UI_CRITERION.id, [with_excerpt], Redactor({}).redact_text)
