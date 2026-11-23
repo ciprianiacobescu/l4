@@ -28,6 +28,7 @@ import logging
 
 import click
 
+from l4.actor import command_actor
 from l4.ci.detect import in_ci_job
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -100,6 +101,7 @@ def retry_unit(
     reason: str,
     signal: str | None = None,
     by: str | None = None,
+    actor: tuple[str, str | None] | None = None,
     rounds: int | None = None,
     note: bool = False,
 ) -> UnitRunResult:
@@ -132,7 +134,7 @@ def retry_unit(
     note_task, note_fix_unit = note_binding(state) if note else (None, None)
     return run_unit_in_worktree(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
-        resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
+        resume_actor=actor, resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
         note_task=note_task, note_fix_unit=note_fix_unit,
         resume_event="unit.retried", resume_trigger=_EDGE_OF.get(phase, Trigger.RESUMED), resume_what="retry",
     )  # fmt: skip
@@ -255,7 +257,9 @@ def run_retry(
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
     before = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
-    result = retry_unit(app, cfg, git, provider, ref, reason=reason, rounds=rounds, note=True)
+    result = retry_unit(
+        app, cfg, git, provider, ref, reason=reason, actor=command_actor(app.environ), rounds=rounds, note=True
+    )
     log.info("%s retried: now %s", unit, result.outcome.phase_after)
     if result.exit_code == ExitCode.OK and (stopped := stopped_plan_holding(app, cfg, git, ref.id)) is not None:
         plan_id, why = stopped  # a run would find the unit held, end with "nothing to do" and count against the plan

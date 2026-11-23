@@ -77,6 +77,9 @@ class Outcome:
     mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
     base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
     listed: list[str] = field(default_factory=list)  # signs of a test run in production code, shown to the judge
+    failures: dict[str, dict[str, str]] = field(
+        default_factory=dict
+    )  # records of the base tests that failed (L4-VER-080)
 
 
 def _human_tag(ctx: IntegrityContext, unit: str, title: str, tag: str) -> bool:

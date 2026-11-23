@@ -20,6 +20,7 @@ from typing import Any
 
 from l4.fsutil import UnsafeFile, read_regular_file
 from l4.gates.junit import TestReport
+from l4.implementer.test_locate import file_of_id
 from l4.specs.base import Criterion
 from l4.state.ledger import LedgerEvent
 from l4.verifier.e2e_trace import e2e_coverage, trace_e2e
@@ -112,8 +113,11 @@ def gap_findings(
     gaps: Iterable[Criterion],
     unproved: Mapping[str, Sequence[str]] | None = None,
     waived: Mapping[str, str] | None = None,
+    carried: Collection[str] = (),
 ) -> list[Finding]:
-    return [ui_gap_finding(c, (unproved or {}).get(c.id, ()), (waived or {}).get(c.id, "")) for c in gaps]
+    return [
+        ui_gap_finding(c, (unproved or {}).get(c.id, ()), (waived or {}).get(c.id, ""), c.id in carried) for c in gaps
+    ]
 
 
 def ui_hold_text(criterion_id: str) -> str:
@@ -170,16 +174,117 @@ def lost_notes(trace: Sequence[CriterionEvidence], outcomes: Iterable[GeneratedO
 def unclosed_holds(gaps: Iterable[Criterion], outcomes: Iterable[GeneratedOutcome]) -> list[str]:
     """A UI criterion that step 5 did not close (no writer, or the writer's test was not accepted, and not waived) is a
     hold: the unit waits for a human, who can accept it (a unit test may well be enough) and so waive the hold. A
-    `not_testable` outcome with `covered_by` is a note, not a hold (L4-VER-067)."""
+    `not_testable` outcome with `covered_by` is a note, not a hold (L4-VER-067), and so is a criterion carried from the
+    base (L4-VER-086)."""
     done = {o.criterion: o for o in outcomes}
     return [
         ui_hold_text(c.id)
         for c in gaps
         if (outcome := done.get(c.id)) is None
         or not (
-            outcome.accepted or outcome.status == "waived" or (outcome.status == "not_testable" and outcome.covered_by)
+            outcome.accepted
+            or outcome.status in ("waived", "carried")
+            or (outcome.status == "not_testable" and outcome.covered_by)
         )
     ]
+
+
+def _holders(test_id: str, paths: Collection[str]) -> set[str]:
+    """Every one of `paths` that the head of `test_id` (before its first `::`) could name: the path itself or its end,
+    the path with dots for slashes (whole or its end), and the files of the dotted Python module (the longest prefix
+    that is one, as `file_of_id` reads it, also below a directory the id does not name)."""
+    head = test_id.split("::", 1)[0]
+    if not head:
+        return set()
+    found = {
+        p for p in paths if p == head or p.endswith("/" + head) or (d := p.replace("/", ".")) == head
+        or d.endswith("." + head)
+    }  # fmt: skip
+    parts = head.split(".")
+    for n in range(len(parts), 0, -1):
+        module = "/".join(parts[:n]) + ".py"
+        hits = {p for p in paths if p == module or p.endswith("/" + module)}
+        if hits:
+            return found | hits
+    return found
+
+
+def carry_file(test_id: str, walked: str | None, paths: Collection[str]) -> str | None:
+    """The file that holds the test of `test_id` for the carry of L4-VER-086, or None when that is in any doubt. Two
+    readings of the id are taken: `walked` (the dotted module found in the work tree, which reads
+    `src.pricing.total.test.ts` as `src/pricing/total.py` when that lies beside the test) and `file_of_id` over
+    `paths`. `file_of_id` must place the id, and no other of `paths` may be a file the id could name (a module of the
+    same name under two roots). When the walk places it too, both must give the same file; when the walk finds nothing,
+    the file of `file_of_id` stands if it is not a `.py` file (a TypeScript test is no Python module, so the walk has
+    nothing to say about it). A walk that finds a file `file_of_id` does not give is the wrong-module case: refused."""
+    found = file_of_id(test_id, paths)
+    if found is None or len(_holders(test_id, paths)) != 1:
+        return None
+    if walked is None:
+        return None if found.endswith(".py") else found
+    return found if walked == found else None
+
+
+def carried_from_base(
+    gaps: Iterable[Criterion],
+    trace: Sequence[CriterionEvidence],
+    unchanged: Collection[str],
+    file_of: Callable[[str], str | None],
+    changed: Collection[str],
+    rejected: Collection[str],
+) -> dict[str, tuple[str, ...]]:
+    """criterion -> the sorted ids of its tracing tests, for each gap that step 5 carries from the base instead of
+    asking the writer (L4-VER-086). All four hold, and any doubt keeps the gap:
+    1. the criterion is in `unchanged` (the pass-to-pass rule of L4-VER-009, read from step 4's own baseline);
+    2. its evidence in `trace` is `covered` with no `held` reason; every tracing test passed with the proof
+       `pass_to_pass`, no note, within the cap and adequate; every test listed as not evidence for it is a passing
+       candidate over the cap (`capped`);
+    3. the file of every such test, listed or ignored, is found (`file_of`) and is not one of the files the unit
+       `changed` since its merge base;
+    4. the criterion is not in `rejected` (`rejected_ui_criteria`)."""
+    evidence = {e.criterion: e for e in trace}
+    out: dict[str, tuple[str, ...]] = {}
+    for c in gaps:
+        e = evidence.get(c.id)
+        if c.id not in unchanged or c.id in rejected or e is None or e.state != "covered" or e.held or not e.tests:
+            continue
+        if not all(
+            t.status == "passed" and t.proof == PASS_TO_PASS and not t.note and t.over_cap == 0 and t.adequate
+            for t in e.tests
+        ):
+            continue
+        if not {test for test, _ in e.ignored} <= {t.id for t in e.capped}:
+            continue
+        ids = sorted(t.id for t in e.tests)
+        files = [file_of(test) for test in (*ids, *sorted(test for test, _ in e.ignored))]
+        if any(f is None or f in changed for f in files):
+            continue
+        out[c.id] = tuple(ids)
+    return out
+
+
+def rejected_ui_criteria(events: Iterable[LedgerEvent], criteria: Iterable[str]) -> frozenset[str]:
+    """The criteria (among `criteria`) that a person ever rejected, consumed by a fix unit or not (L4-VER-086): a
+    `human.verdict{decision: reject}` whose target is the criterion, a UI hold that a `question.raised{kind: verdict,
+    criterion}` named (also one raised with the old text, found by its title), or the stable hold id of the criterion
+    (`hold_id(ui_hold_text(...))`) whether or not an event named it. An accept is not a reject."""
+    events = list(events)
+    ids = set(criteria)
+    targets = {hold_id(ui_hold_text(c)): c for c in ids} | {c: c for c in ids}
+    for e in events:
+        if e.type != "question.raised" or e.data.get("kind") != "verdict":
+            continue
+        target, bound = str(e.data.get("target", "")), e.data.get("criterion")
+        old = _LEGACY_HOLD_TITLE.match(str(e.data.get("title") or ""))
+        if isinstance(bound, str) and bound in ids and target.startswith("H-"):
+            targets[target] = bound
+        elif old is not None and old.group(1) == target and old.group(2) in ids:
+            targets[target] = old.group(2)
+    return frozenset(
+        targets[str(e.data["target"])]
+        for e in events
+        if e.type == "human.verdict" and e.data.get("decision") == "reject" and str(e.data.get("target")) in targets
+    )
 
 
 def ui_hold_binding(criterion: Criterion, evidence: CriterionEvidence | None, blob_of: Callable[[str], str]) -> str:

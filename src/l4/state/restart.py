@@ -45,6 +45,7 @@ from pathlib import Path
 
 import click
 
+from l4.actor import command_actor
 from l4.config.defaults import cache_root
 from l4.config.redaction import load_app_config
 from l4.config.schema import L4Config
@@ -101,6 +102,7 @@ def restart_unit(
     reason: str,
     signal: str | None = None,
     by: str | None = None,
+    actor: tuple[str, str | None] | None = None,
 ) -> RestartResult:
     """The restart of one unit, steps 1 to 6 of the module text; no run is started. `L4Exit(USAGE_ERROR)` for a refusal,
     `L4Exit(INTERNAL_ERROR, "the branch moved: run l4 restart again")` for a lost lease."""
@@ -123,7 +125,7 @@ def restart_unit(
                 ExitCode.USAGE_ERROR, f"restart: it closes the merge request, which needs a forge token: {forge}"
             )
         return _restart(app, cfg, git, provider, ref, names, config, forge, state.phase, state.iteration, reason,
-                        signal, by)  # fmt: skip
+                        signal, by, actor)  # fmt: skip
     finally:
         lease.release()
 
@@ -153,7 +155,7 @@ def _refuse_unstarted_or_merged(
 def _restart(
     app: AppContext, cfg: L4Config, git: Git, provider: SpecProvider, ref: UnitRef, names: UnitNames,
     config: tuple[tuple[str, str], ...], forge: Forge, phase: str | None, iteration: int,
-    reason: str, signal: str | None, by: str | None,
+    reason: str, signal: str | None, by: str | None, actor: tuple[str, str | None] | None = None,
 ) -> RestartResult:  # fmt: skip
     branch = names.branch
     attempts = f"{ATTEMPT_REF_PREFIX}{ref.framework.value}/{ref.name}"
@@ -196,6 +198,8 @@ def _restart(
             **run_environment(app.environ),
         )  # fmt: skip
         extra = {k: v for k, v in (("by", by), ("signal", signal)) if v}
+        if actor is not None:  # the command's own, never a label's or a push's (L4-OPS-025)
+            extra.update(actor=actor[0], marker=actor[1])
         if superseded:
             extra["superseded_questions"] = superseded
         writer.append(
@@ -367,7 +371,7 @@ def run_restart(app: AppContext, *, unit: str, reason: str, no_run: bool = False
     fetch_unit_refs(app, cfg, git, prune=False)
     refresh_refs(app, cfg, git)
     provider, ref = select_runnable(cfg, git, list(providers_for(cfg, app.repo, app.environ)), unit)
-    result = restart_unit(app, cfg, git, provider, ref, reason=reason)
+    result = restart_unit(app, cfg, git, provider, ref, reason=reason, actor=command_actor(app.environ))
     kept = f"the old work is kept at {result.attempt_ref}" if result.attempt_ref else "there was no branch to keep"
     closed = f", merge request {result.closed_pr} is closed" if result.closed_pr else ""
     click.echo(app.redactor.redact_text(f"{unit} restarted attempt {result.attempt}: {kept}{closed}"))

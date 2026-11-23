@@ -57,6 +57,7 @@ from l4.evidence.collect import (
 )
 from l4.evidence.report import evidence_json
 from l4.evidence.scope import file_kind
+from l4.evidence.testsran import file_of_test as report_file_of_test
 from l4.exitcodes import ExitCode, L4Exit
 from l4.fsutil import UnsafeFile, read_regular_file, reject_symlinks
 from l4.gates.coverage import cov_env
@@ -90,7 +91,7 @@ from l4.sandbox.select import sandbox_refusal
 from l4.security.protected import glob_match
 from l4.services import HookContext, Services, load_hooks
 from l4.specs.base import Criterion, Framework, SpecError, Task
-from l4.specs.criteria import spec_baseline
+from l4.specs.criteria import spec_baseline, unchanged_ids
 from l4.specs.feedback import FeedbackFile
 from l4.specs.followup import feedback_home
 from l4.specs.markers import MAX_TASKS_BYTES
@@ -232,12 +233,15 @@ from l4.verifier.types import (
     VerifyResult,
 )
 from l4.verifier.ui_step import (
+    carried_from_base,
+    carry_file,
     covered_by_step4,
     edited_findings,
     gap_findings,
     lost_notes,
     plan_generation,
     previously_generated,
+    rejected_ui_criteria,
     ui_hold_text,
     ui_hold_views,
     ui_waivers,
@@ -263,6 +267,7 @@ from l4.verifier.verdicts import (
     unresolved_holds,
     verdict_targets,
 )
+from l4.verifier.writer_chain import WriterChain
 
 log = logging.getLogger("l4.verify")
 
@@ -460,6 +465,29 @@ def _guards(events: Sequence[LedgerEvent]) -> list[str]:
     ]
 
 
+MAX_STEP_FLAKES = 20  # lines of `VerifyResult.step_flakes`
+
+
+def _step_flakes(events: Sequence[LedgerEvent]) -> list[str]:
+    """L4-VER-082: each test that a `task.tests_rechecked{stopped: passed}` of the unit's ledger (its fix units'
+    included) names as flaky, as `<id> (task <k> <phase> attempt <n>[, fix unit <f>])`, at most `MAX_STEP_FLAKES`
+    lines and then `(+<n> more)`. Only a re-run that passed lists anything: a failed, unusable or skipped one lists
+    nothing."""
+    found: list[str] = []
+    for e in events:
+        flaky = e.data.get("flaky")
+        if e.type != "task.tests_rechecked" or e.data.get("stopped") != "passed" or not isinstance(flaky, list):
+            continue
+        fix = e.data.get("fix_unit")
+        where = f"task {e.data.get('task')} {e.data.get('phase')} attempt {e.data.get('attempt')}"
+        if isinstance(fix, str) and fix:
+            where += f", fix unit {fix}"
+        found += [f"{test} ({where})" for test in flaky if isinstance(test, str)]
+    if len(found) > MAX_STEP_FLAKES:
+        return [*found[:MAX_STEP_FLAKES], f"(+{len(found) - MAX_STEP_FLAKES} more)"]
+    return found
+
+
 MAX_CANDIDATES_LISTED = 5
 
 
@@ -542,6 +570,7 @@ class _Run:
     recheck_notes: Callable[[], None] | None = (
         None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
     )
+    unchanged: frozenset[str] = frozenset()  # step 4: the criteria the base's archived specs hold word for word
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -722,6 +751,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
     result = VerifyResult(
         wb.ref.id, vc.round, Verdict.NEEDS_HUMAN, "", head, judge_profile=vc.judge_profile,
         implementer_profiles=list(vc.implementer_profiles), red_green=_red_green(events), guards=_guards(events),
+        step_flakes=_step_flakes(events),
         subject_sha=subject,
     )  # fmt: skip
     run = _Run(result)
@@ -744,6 +774,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         result.integrity = run_integrity(ctx)
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
+        if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
+            result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
         blocking = [f.title for f in result.integrity.findings if f.blocking]
         note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"
@@ -819,6 +851,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         # head, where the agent could have copied a delta into openspec/specs (HB-3, L4-VER-009)
         # (a Kiro follow-up's merged parent: its folder is protected); the red step reads it through the same helper
         archived = spec_baseline(wb.git, wb.ref.framework, wb.provider, base_sha)
+        run.unchanged = unchanged_ids(criteria, archived)  # step 5 reads the one baseline step 4 traced with
         browser = run.e2e.report if run.e2e is not None else None
         # the e2e tests of earlier generations stand (ledger, unchanged file); any other e2e test needs a red proof
         generated, edited = previously_generated(events, wb.worktree, browser)
@@ -1152,14 +1185,39 @@ def _evidence_tests(e: CriterionEvidence | None) -> tuple[str, ...]:
     return tuple(t.id for t in e.tests if t.status == "passed" and t.adequate) if e is not None else ()
 
 
-def _no_python(vc: VerifyContext, base_sha: str, head: str) -> bool:
-    """The unit changed files outside the harness, spec and documentation paths and none of them is a `.py` file
-    (tests included: a Python project's unit that only adds a test still audits). A unit that changed nothing there
-    is not judged non-Python."""
+NOT_PYTHON_NOTE = "audit sampling writes pytest tests only; changed code is not python"
+MAX_NAMED_FILES = 5
+
+
+def _audit_scope_note(vc: VerifyContext, base_sha: str, head: str, report: TestReport | None) -> str:
+    """Why step 4a does not run for this unit, else "" (L4-VER-089). The unit's changed files outside the harness, spec
+    and documentation paths decide: none is no reason to skip (a unit that changed nothing there is not judged
+    non-Python); no `.py` file is `NOT_PYTHON_NOTE`; Python code (a `.py` file that is neither a test nor test support,
+    the files the writer is shown) audits. A unit whose changed `.py` files are all tests or test support audits only
+    when step 3's unit-gate report holds a test of a Python file of the tree (the unit gate runs Python tests, so a
+    pytest audit file can be collected) or left no report (the rule of 0.4.59); a Python browser test of a TypeScript
+    unit is no reason to write a pytest audit."""
     wb = vc.wb
     unit_rel = wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix()
     files = changed_unit_files(wb.git, base_sha, head, wb.cfg, unit_rel)
-    return bool(files) and not any(p.endswith(".py") for p, _ in files)
+    if not files:
+        return ""
+    python = sorted(p for p, _ in files if p.endswith(".py"))
+    if not python:
+        return NOT_PYTHON_NOTE
+    tdd = wb.cfg.tdd
+    tests = [p for p in python if any(glob_match(g, p) for g in (*tdd.test_globs, *tdd.test_support_globs))]
+    if len(tests) < len(python) or report is None:
+        return ""
+    tree = frozenset(
+        p for p in wb.git.run("ls-tree", "-r", "--name-only", head, check=False).stdout.splitlines()
+        if p.endswith(".py")
+    )  # fmt: skip
+    if any(report_file_of_test(test_id, tree) for test_id in report.tests):
+        return ""
+    more = f" and {len(tests) - MAX_NAMED_FILES} more" if len(tests) > MAX_NAMED_FILES else ""
+    shown = ", ".join(tests[:MAX_NAMED_FILES]) + more
+    return f"{NOT_PYTHON_NOTE} (the changed Python files are tests or test support: {shown})"
 
 
 def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str) -> None:
@@ -1172,8 +1230,8 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
         else "verifier.audit_sample_ratio is 0" if ratio <= 0
         else ""
     )  # fmt: skip
-    if not why and _no_python(vc, base_sha, result.head_sha):
-        why = "audit sampling writes pytest tests only; changed code is not python"
+    if not why:
+        why = _audit_scope_note(vc, base_sha, result.head_sha, run.report)
     if why:
         run.records["4a"] = StepRecord("4a", "audit sampling", "not_run", note=why)
         return
@@ -1189,6 +1247,7 @@ def _audit_step(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], bas
         out = run_audit(
             wb, vc.audit_writer(), {c.id: c for c in criteria}, chosen, skipped, base_sha=base_sha,
             head=result.head_sha, round_no=vc.round, timeout_s=vc.judge_timeout_s, emit=wb.emit, support=support,
+            report=run.report,
         )  # fmt: skip
         result.audit = out.records
         result.findings.extend(out.findings)
@@ -1227,18 +1286,37 @@ def _ui_diff(wb: Workbench, base_sha: str, head: str, ui: Sequence[str]) -> str:
     return raw.decode("utf-8", errors="replace")[:MAX_DIFF_CHARS]
 
 
-def _test_blobs(
-    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
-) -> Callable[[str], str]:
-    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
-    hold's accept is bound to (`ui_step.ui_hold_binding`). A Python module is found in the work tree; any other id
-    (`src/a.test.ts::name`, `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's
-    changed files first when several match. A test whose file is not found keeps its id."""
+def _test_files(
+    wb: Workbench, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> dict[str, str | None]:
+    """Test id -> the file that holds it, for the tests step 4 traced to the criteria (and the ones it listed as not
+    evidence). A Python module is found in the work tree; any other id (`src/a.test.ts::name`,
+    `src.a.test.ts::name`) by `test_locate.file_of_id` over the tree's files, the unit's changed files first when
+    several match. None: the file is not found."""
     ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
     files = {i: file_of_test(wb, i) for i in ids}
     if any(f is None for f in files.values()):
         tree = worktree_files(wb)  # once
         files = {i: f or file_of_id(i, tree, changed) for i, f in files.items()}
+    return files
+
+
+def _carry_files(wb: Workbench, trace: Sequence[CriterionEvidence]) -> dict[str, str | None]:
+    """Test id -> the file that holds it, for the carry of L4-VER-086, or None when that is in any doubt (`ui_step.
+    carry_file`: the dotted-module walk and `file_of_id` over the tree must agree, and no other file could be it).
+    `_test_files` is not used: it takes the walk's file whenever there is one, and `src.pricing.total.test.ts` walks to
+    `src/pricing/total.py` where that lies beside the test."""
+    ids = {t.id for e in trace for t in e.tests} | {t for e in trace for t, _ in e.ignored}
+    tree = worktree_files(wb) if ids else []  # once
+    return {i: carry_file(i, file_of_test(wb, i), tree) for i in ids}
+
+
+def _test_blobs(
+    wb: Workbench, head: str, trace: Sequence[CriterionEvidence], changed: Collection[str] = ()
+) -> Callable[[str], str]:
+    """Test id -> the head blob of the file that holds it, for the tests step 4 traced to the criteria: what a UI
+    hold's accept is bound to (`ui_step.ui_hold_binding`). A test whose file is not found keeps its id."""
+    files = _test_files(wb, trace, changed)
     blobs = blob_ids(wb.git, head, sorted({f for f in files.values() if f}))
     return lambda test: (
         f"{files[test]}\t{blobs.get(files[test] or '', 'missing')}" if files.get(test) else f"{test}\tunmapped"
@@ -1281,7 +1359,15 @@ def _generate_step(
         return
     blob_of = _test_blobs(wb, result.head_sha, result.trace, changed)
     waived = ui_waivers(events, plan.gaps, result.trace, blob_of)
-    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived))
+    # a criterion the unit did not change, whose tests are the base's and pass, is carried (L4-VER-086): no writer, no
+    # hold. A waived one stays waived. Every condition that cannot be checked leaves the gap as it was.
+    files = _carry_files(wb, result.trace)
+    open_gaps = [c for c in plan.gaps if c.id not in waived]
+    carried = carried_from_base(
+        open_gaps, result.trace, run.unchanged, files.get, changed,
+        rejected_ui_criteria(events, [c.id for c in open_gaps]),
+    )  # fmt: skip
+    result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived, carried))
     for criterion in plan.gaps:
         if criterion.id in waived:
             wb.emit("verify.generated", criterion=criterion.id, status="waived", by=waived[criterion.id], attempts=0)
@@ -1290,9 +1376,25 @@ def _generate_step(
                     criterion.id, "waived", reason=f"waived by {waived[criterion.id]}", by=waived[criterion.id]
                 )
             )
-    gaps = [c for c in plan.gaps if c.id not in waived]
+        elif criterion.id in carried:
+            tests = list(carried[criterion.id])
+            wb.emit("verify.generated", criterion=criterion.id, status="carried", covered_by=tests, attempts=0)
+            result.generated.append(
+                GeneratedOutcome(
+                    criterion.id,
+                    "carried",
+                    reason="carried from the base (L4-VER-086)",
+                    covered_by=carried[criterion.id],
+                )
+            )
+    gaps = [c for c in open_gaps if c.id not in carried]
     if not gaps:
-        note = f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"
+        note = ", ".join(
+            [
+                *([f"{len(waived)} UI criteria waived by an accepted answer (L4-VER-067)"] if waived else []),
+                *([f"{len(carried)} carried from the base (L4-VER-086)"] if carried else []),
+            ]
+        )
         _record_step(vc, run, StepRecord("5", "ui test generation", "ok", note=note))
         return
 
@@ -1302,7 +1404,9 @@ def _generate_step(
 
     if vc.ui_writer is None:
         hold_all(unclosed_holds(gaps, []))
-        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note="roles.verifier_agent is empty")
+        why = "roles.verifier_agent is empty"
+        why += f"; {len(carried)} carried from the base (L4-VER-086)" if carried else ""
+        run.records["5"] = StepRecord("5", "ui test generation", "not_run", note=why)
         return
 
     def recheck() -> None:
@@ -1333,6 +1437,8 @@ def _generate_step(
         note = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
         if noted := sum(bool(o.covered_by) for o in out.outcomes):
             note += f"; {noted} not_testable covered by step 4: notes, no hold (L4-VER-067)"
+        if carried:
+            note += f"; {len(carried)} carried from the base (L4-VER-086)"
         if out.suite_files or out.suite_skipped:
             note += f"; e2e support files shown to the writer: {len(out.suite_files)}"
             note += f" (+{len(out.suite_skipped)} not shown)" if out.suite_skipped else ""
@@ -2145,13 +2251,21 @@ def verify_hook(ctx: HookContext) -> Trigger:
         vc.seat = seat_of(current)
         return backend(current, bench(current)), current.profile_name
 
-    def writer_for(stem: str) -> Callable[[], LLMBackend]:
+    writer_skip: set[str] = set()  # `verifier_agent` profiles that could not answer a call in this round (L4-VER-091)
+    writer_failures: list[str] = []  # `<profile>: <kind>: <detail>` of each, for the reason a unit waits with
+
+    def writer_for(stem: str, step: str, role: str) -> Callable[[], LLMBackend]:
         """The `verifier_agent` role, selected when it is needed (the audit sample is drawn, a UI criterion is a gap):
         the first usable profile of the chain that is independent of the implementers (C1); none is
-        `WaitingCapacity` (`no independent verifier`)."""
+        `WaitingCapacity` (`no independent verifier`). A call that a profile cannot answer is asked of the next one
+        (`WriterChain`, L4-VER-091), and the failed profile is skipped by both steps for the rest of the round."""
 
-        def open_writer() -> LLMBackend:
-            writer = select_judge(services.factory, cfg, services.ref.id, implementers, role="verifier_agent")
+        def select() -> Selected:
+            return select_judge(
+                services.factory, cfg, services.ref.id, implementers, role="verifier_agent", skip=writer_skip
+            )
+
+        def open_backend(writer: Selected) -> LLMBackend:
             by_writer = dataclasses.replace(wb, selected=writer)
             return AgentJudge(
                 writer.impl,
@@ -2162,6 +2276,19 @@ def verify_hook(ctx: HookContext) -> Trigger:
                 role="verifier_agent",
                 profile=writer.profile_name,
             )
+
+        def after_limit(limited: Selected, run: RunResult) -> Selected:
+            chosen = services.factory.on_limit(limited, run)  # cools the profile and selects again
+            if probe_vetoes(cfg, implementers, services.factory, chosen):  # D14: its own probe contradicts it
+                writer_skip.add(chosen.profile_name)
+                chosen = select()
+            return chosen
+
+        def open_writer() -> LLMBackend:
+            return WriterChain(
+                select, open_backend, after_limit, writer_skip, writer_failures, wb.emit, step, role,
+                wb.redactor.redact_text,
+            )  # fmt: skip
 
         return open_writer
 
@@ -2176,8 +2303,8 @@ def verify_hook(ctx: HookContext) -> Trigger:
     vc = VerifyContext(
         wb, _NoJudge() if resume else backend(selected, wb), selected.profile_name, implementers, round_no,
         JUDGE_TIMEOUT_S, seat=seat_of(selected), next_judge=None if resume else next_judge,
-        audit_writer=writer_for("verify-audit") if cfg.roles.verifier_agent else None,
-        ui_writer=writer_for("verify-ui") if cfg.roles.verifier_agent else None,
+        audit_writer=writer_for("verify-audit", "4a", "audit") if cfg.roles.verifier_agent else None,
+        ui_writer=writer_for("verify-ui", "5", "ui_tests") if cfg.roles.verifier_agent else None,
         s1=s1 if cfg.verifier.s1.enabled and has_system_one_profile(cfg) else None,
         shadow=ShadowWiring(s1.cache_file, services.app.repo / cfg.observability.log_dir / "system-one.jsonl",
                             dict(services.app.environ)) if cfg.verifier.s1.enabled and cfg.verifier.s1.shadow else None,

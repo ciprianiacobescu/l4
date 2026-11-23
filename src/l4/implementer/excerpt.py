@@ -67,6 +67,13 @@ def _cut_at_line(text: str, limit: int) -> str:
     return kept
 
 
+def redacted_cut(text: str, redact: Callable[[str], str], limit: int) -> str:
+    """`text` redacted whole (a private-key block that is only half there removed to the edge), cut at the last line end
+    before `limit` characters (one line longer than `limit` at `limit`), and redacted again: a cut made after the
+    redaction can only drop text, never uncover a secret that the cut had split (L4-VER-083)."""
+    return _redact_keys(redact, _cut_at_line(_redact_keys(redact, text), limit))
+
+
 def _test_lines(body: str) -> list[str]:
     """The `E` lines (at most 6), the `>` line of the deepest frame in a repository file with its location, and the
     last `path:line: ErrorName` line, in the order pytest prints them."""

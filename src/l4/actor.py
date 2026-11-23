@@ -1,6 +1,7 @@
 """Who is asking: a person, or an agent (`l4 yolo accept`, `l4 questions`). The harness cannot know who types a
 command: these markers keep honest agents from deciding for a person; they are not a security boundary."""
 
+import sys
 from collections.abc import Mapping
 
 AGENT_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "AI_AGENT", "CODEX_SANDBOX", "L4_RESULT_PATH")
@@ -13,3 +14,15 @@ def actor(environ: Mapping[str, str], stdin_tty: bool) -> tuple[str, str | None]
         if environ.get(marker):
             return "agent", marker
     return ("person", None) if stdin_tty else ("agent", None)
+
+
+def _stdin_tty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):  # no stdin, or a closed one: nobody types here
+        return False
+
+
+def command_actor(environ: Mapping[str, str]) -> tuple[str, str | None]:
+    """`actor` for the command running now: the terminal is the process's stdin (L4-OPS-025)."""
+    return actor(environ, _stdin_tty())

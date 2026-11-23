@@ -189,9 +189,10 @@ class AuditRecord:
 
 GenStatus = Literal[
     "accepted", "not_testable", "non_discriminating", "fails_at_head", "uncollectable", "base_error", "base_unservable",
-    "lint_failed", "writer_failed", "waived",
+    "lint_failed", "writer_failed", "waived", "carried",
 ]  # fmt: skip
 RunOutcome = Literal["pass", "fail", "error"]  # the new test at the merge base / at the head
+MAX_CODE_CHARS = 4_000  # the copy of a generated test that is kept as evidence (L4-VER-083)
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,7 @@ class GeneratedOutcome:
     path: str | None = None  # repository-relative; set for every status that wrote a file
     attempts: int = 0
     reason: str = ""
-    code: str = ""  # the last test written: the evidence for a test that fails at the head
+    code: str = ""  # the last test written, redacted whole then cut at MAX_CODE_CHARS: the evidence (L4-VER-083)
     artifacts: tuple[str, ...] = ()  # traces and screenshots of the head run that failed
     cost_usd: float = 0.0
     model: str | None = None
@@ -217,6 +218,8 @@ class GeneratedOutcome:
     covered_by: tuple[
         str, ...
     ] = ()  # not_testable: the step-4 tests that cover the criterion; a note, no hold (L4-VER-067)
+    excerpt: str = ""  # fails_at_head (the attempt that wrote `code`): why the head run failed, redacted (L4-VER-083)
+    code_lines: int = 0  # the lines of the whole `code` test, redacted, before the cut; 0: unknown (L4-VER-083)
 
     @property
     def accepted(self) -> bool:
@@ -339,6 +342,9 @@ class VerifyResult:
     failures_dropped: int = 0  # `test`-gate failure records left out of `failures` (the cap)
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
+    step_flakes: list[str] = field(
+        default_factory=list
+    )  # pre-existing tests that passed on a step's re-run (L4-VER-082)
     feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)
     feedback_outcomes: list[FeedbackOutcome] = field(default_factory=list)  # the judge check of L4-FBK-007; not stored
     integrity: IntegrityReport | None = None

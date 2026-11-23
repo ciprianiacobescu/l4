@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
-from l4.yolo.accept import force_line
+from l4.yolo.accept import force_line, kind_text
 from l4.yolo.findings import carried, finding_id
 from l4.yolo.model import Plan, PlanEvent, PlanState
 
@@ -107,6 +107,25 @@ def _flat(text: str, limit: int = 120) -> str:
     return " ".join(text.split())[:limit]
 
 
+def _who(by: object, actor: object, marker: object) -> str:
+    kind = kind_text(actor, marker)
+    return f"{by} ({kind})" if kind else f"{by}"
+
+
+def _who_lines(state: PlanState, events: Sequence[PlanEvent]) -> list[str]:
+    """Who activated the plan and, for a cancelled one, who cancelled it (L4-YOLO-102); an event that recorded no
+    actor is shown with no kind."""
+    lines = []
+    if state.activated_by:
+        lines.append(f"- Activated by: {_who(state.activated_by, state.activated_actor, state.activated_marker)}")
+    if state.status == "cancelled":
+        cancelled = next((e for e in reversed(events) if e.type == "plan.cancelled"), None)
+        if cancelled is not None and cancelled.data.get("by"):
+            data = cancelled.data
+            lines.append(f"- Cancelled by: {_who(data['by'], data.get('actor'), data.get('marker'))}")
+    return lines
+
+
 def render_report(
     *,
     repository: str,
@@ -127,6 +146,7 @@ def render_report(
         f"- Repository: {repository}",
         f"- Target: {plan.target} at {target_revision or 'an unknown revision'}",
         f"- Merge: {plan.merge}",
+        *_who_lines(state, events),
         f"- {promotion_sentence(plan)}",
         f"- Written: {generated_at}",
     ]

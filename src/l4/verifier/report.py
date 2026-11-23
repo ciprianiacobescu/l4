@@ -11,18 +11,21 @@ tasks (verifier 1.16).
 import contextlib
 import dataclasses
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from l4.buildinfo import harness_commit
 from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
+from l4.implementer.excerpt import MAX_CHARS, redacted_cut
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
+from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
 from l4.verifier.judge import parts_text
 from l4.verifier.traceability import OVER_CAP_LABEL
 from l4.verifier.types import (
+    MAX_CODE_CHARS,
     REPLY_OUTCOMES,
     CriterionEvidence,
     CriterionOutcome,
@@ -62,7 +65,6 @@ def _traceability_line(result: VerifyResult) -> str:
 
 
 SNAPSHOT_LINK = ".l4-out/e2e/page.html"  # `gates.e2e.SNAPSHOT_RELPATH`: the page the head app served, a CI artefact
-MAX_CODE_CHARS = 4_000
 
 
 def _generated_for(result: VerifyResult, criterion: str) -> GeneratedOutcome | None:
@@ -118,13 +120,37 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         reason = reason or g.reason
         if g.covered_by:  # L4-VER-067: the writer's answer and step 4's, both visible
             shown = ", ".join(g.covered_by[:3]) + (f" (+{len(g.covered_by) - 3} more)" if len(g.covered_by) > 3 else "")
-            reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
+            if g.status == "carried":  # L4-VER-086: no writer ran; the base's own tests are the evidence
+                reason = (
+                    f"carried from the base: {shown} (the scenario and these tests are the base's, and they pass); "
+                    "a note, not a hold (L4-VER-086)"
+                )
+            else:
+                reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
         cells = [
             g.criterion, g.status, g.path or "-", g.base or "-", g.head or "-", g.attempts, reason or "-",
             ", ".join(g.artifacts) or "-",
         ]  # fmt: skip
         rows.append(f"| {' | '.join(_cell(c) for c in cells)} |")
     return rows
+
+
+def _unaccepted_blocks(result: VerifyResult) -> list[str]:
+    """One list item per generated test that was written and not accepted (L4-VER-083): the failure at the head and the
+    numbered code, as one block indented by six spaces. Redacted and scrubbed with the whole file."""
+    lines: list[str] = []
+    for g in result.generated:
+        if not has_evidence(g):
+            continue
+        where = f": `{_flat(g.path)}`" if g.path else ""
+        lines += [f"- {_flat(g.criterion)} ({g.status} after {g.attempts} attempt(s)){where}", ""]
+        if g.excerpt:
+            lines += ["      Failure at the head:", *(f"        {line}".rstrip() for line in g.excerpt.splitlines())]
+        if g.code and g.path:
+            lines += [f"      The test (at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):"]
+            lines += [f"      {line}".rstrip() for line in numbered_code(g.code, g.code_lines)]
+        lines.append("")
+    return lines[:-1]
 
 
 def _s1_rows(result: VerifyResult) -> list[str]:
@@ -295,6 +321,8 @@ def render_verification_md(result: VerifyResult) -> str:
         lines += [""] + render_evidence_json(result.evidence)
     if result.generated:
         lines += ["", "## Generated UI tests", ""] + _generated_rows(result)
+        if any(has_evidence(g) for g in result.generated):
+            lines += ["", "## Generated UI tests that were not accepted", ""] + _unaccepted_blocks(result)
     if result.s1:
         lines += ["", "## S1 (recorded for calibration, never decides)", ""] + _s1_rows(result)
     if result.audit:
@@ -346,6 +374,9 @@ def render_verification_md(result: VerifyResult) -> str:
         ]
     if result.guards:
         lines += ["", "## Guard events", ""] + [f"- {_flat(g, 300)}" for g in result.guards]
+    if result.step_flakes:  # L4-VER-082: not a finding
+        lines += ["", "## Pre-existing tests that passed on a task step's re-run (L4-IMP-105)", ""]
+        lines += [f"- {_flat(f, 300)}" for f in result.step_flakes]
     return "\n".join(lines) + "\n"
 
 
@@ -354,9 +385,13 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     data = dataclasses.asdict(g)
     data["tests"], data["artifacts"] = list(g.tests), list(g.artifacts)
     data["covered_by"] = list(g.covered_by)
-    data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]
+    data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]  # a copy `generate` already bounded and redacted
     if not data["code"]:
         del data["code"]
+    if not data["code_lines"] or "code" not in data:  # the count is written beside the code, when it is known
+        del data["code_lines"]
+    if not data["excerpt"]:
+        del data["excerpt"]
     return data
 
 
@@ -392,6 +427,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "e2e_tests": list(result.e2e_tests),
         "red_green": dict(result.red_green),
         "guards": list(result.guards),
+        "step_flakes": list(result.step_flakes),
         "prompt_sha256": result.prompt_sha256,
         "template": result.prompt_template,
         "harness_commit": harness_commit(),
@@ -411,6 +447,17 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
     }
 
 
+def _redacted_again(g: GeneratedOutcome, redact: Callable[[str], str]) -> GeneratedOutcome:
+    """The test's code and its failure redacted again where the round's files are written (L4-VER-083): a reused round
+    restores the copy that 0.4.59 stored, which was cut before it was redacted and can end inside a private key, and
+    the shared redactor removes a key only when both of its markers are there. Whole, cut at the bounds, whole again."""
+    if not (g.code or g.excerpt):
+        return g
+    return dataclasses.replace(
+        g, code=redacted_cut(g.code, redact, MAX_CODE_CHARS), excerpt=redacted_cut(g.excerpt, redact, MAX_CHARS)
+    )
+
+
 def write_round_evidence(unit_dir: Path, round_no: int, result: VerifyResult, redactor: Redactor) -> list[Path]:
     """Writes the files (a fourth, `evidence.json`, when the round collected evidence) and returns their
     paths. A symlinked `.l4`, `evidence` or round directory raises
@@ -422,6 +469,7 @@ def write_round_evidence(unit_dir: Path, round_no: int, result: VerifyResult, re
             result = dataclasses.replace(result, feedback=feedback_lines(read_ledger(unit_dir).events, round_no))
     target = unit_dir / ".l4" / "evidence" / round_dir
     target.mkdir(parents=True, exist_ok=True)
+    result = dataclasses.replace(result, generated=[_redacted_again(g, redactor.redact_text) for g in result.generated])
     scrub = redactor.scrub_for_commit  # the forge host is `<forge>` in what is committed (L4-OBS-002)
     markdown = scrub(redactor.redact_text(render_verification_md(result))).encode("utf-8")
     machine = scrub(json.dumps(redactor.redact_obj(verdict_json(result)), indent=2, ensure_ascii=False) + "\n")

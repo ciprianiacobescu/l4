@@ -339,7 +339,7 @@ def build_prompt(
     if material.previous:  # the question is asked again after a reply that was discarded: say why, right after it
         parts.append(_previous_part(material.previous, redact, "# Your previous reply"))
     parts += _specification(
-        material, f"{question.title}\n{question.context}", budget_tokens=budget_tokens, redact=redact
+        material, f"{question.title}\n{question.context_without_notes}", budget_tokens=budget_tokens, redact=redact
     )
     parts.append(_answers_part(material.answered, redact))
     if (v := material.verdict) is not None:
@@ -377,7 +377,7 @@ def build_batch_prompt(
     Redaction and the digest are `build_prompt`'s."""
     first = items[0][1]
     ids = [question.id for question, _ in items]
-    keys_text = "\n".join(f"{question.title}\n{question.context}" for question, _ in items)
+    keys_text = "\n".join(f"{question.title}\n{question.context_without_notes}" for question, _ in items)
     parts = _specification(first, keys_text, budget_tokens=budget_tokens, redact=redact)
     parts.append(_answers_part([a for a in first.answered if a.id not in ids], redact))
     if first.gate_excerpt:

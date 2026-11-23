@@ -10,7 +10,7 @@ from typing import Any
 
 import click
 
-from l4 import __version__, cancel
+from l4 import __version__, cancel, cli_pin
 from l4.commands import STUBS, dispatch
 from l4.config.defaults import DEFAULT_REDACT_ENV, RUNNER_SECRET_ENV
 from l4.context import AppContext
@@ -26,7 +26,7 @@ def redactor_for(environ: Mapping[str, str]) -> Redactor:
     return Redactor.from_env((*DEFAULT_REDACT_ENV, *RUNNER_SECRET_ENV), environ)
 
 
-_COMMON_KEYS = ("config_path", "repo", "log_format", "verbose", "quiet")
+_COMMON_KEYS = ("config_path", "repo", "log_format", "verbose", "quiet", "allow_older_cli")
 
 
 def _common() -> list[click.Parameter]:
@@ -39,6 +39,8 @@ def _common() -> list[click.Parameter]:
                      show_default=True, help="Console log format (stderr)."),
         click.Option(["-v", "verbose"], count=True, help="More output (repeatable)."),
         click.Option(["-q", "quiet"], count=True, help="Less output (repeatable)."),
+        click.Option(["--allow-older-cli", "allow_older_cli"], is_flag=True,
+                     help="Run a command that writes although this l4 is older than the version the repository pins."),
     ]  # fmt: skip
 
 
@@ -553,6 +555,7 @@ def _make_command(name: str, help_text: str, params: list[click.Parameter]) -> c
             options["repo"] = slug
 
         def call():
+            cli_pin.check(name, options, app, allow_older=bool(kwargs.get("allow_older_cli")))
             return dispatch(name, app, **options)
 
         guard = cancel.handlers() if name in _CANCELLABLE else contextlib.nullcontext()

@@ -20,6 +20,7 @@ M1: verifier 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic
 import dataclasses
 import hashlib
 import re
+import sys
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from pathlib import Path
 from l4.fsutil import UnsafeFile, unlink_inside
 from l4.gates.e2e import E2eRun, ServerNotReady, run_e2e
 from l4.gates.junit import TestReport
+from l4.implementer.excerpt import failure_excerpt, redacted_cut
 from l4.implementer.tdd import RoleLimit
 from l4.implementer.workbench import Workbench
 from l4.llm.agent_judge import LLMBackend
@@ -35,10 +37,11 @@ from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.conventions import e2e_support_files
 from l4.verifier.e2e_trace import e2e_coverage
+from l4.verifier.hold_evidence import count_lines
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
 from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, runner_support, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
-from l4.verifier.types import Finding, GeneratedOutcome, GenStatus, RunOutcome, Severity
+from l4.verifier.types import MAX_CODE_CHARS, Finding, GeneratedOutcome, GenStatus, RunOutcome, Severity
 
 MAX_ATTEMPTS = 2  # the first try and one retry
 MAX_DIFF_CHARS = 30_000
@@ -67,12 +70,19 @@ class UiGeneration:
         return sum(o.cost_usd for o in self.outcomes)
 
 
-def ui_gap_finding(criterion: Criterion, unproved: Sequence[str] = (), waived_by: str = "") -> Finding:
+def ui_gap_finding(
+    criterion: Criterion, unproved: Sequence[str] = (), waived_by: str = "", carried: bool = False
+) -> Finding:
     """The deterministic finding for a UI criterion that no PROVED e2e test traces. When an accepted generated test
     closes it in a PASS round it becomes the lesson of `memory.curate.LESSON_RULES` (same title). `unproved`: e2e tests
     that trace it but have no red, audit or generated record (one the implementer wrote): the finding says so.
-    `waived_by`: the answered question that waived step 5 for it (L4-VER-067): the finding stays, with no generation."""
-    then = f"waived by {waived_by}, step 5 generates none." if waived_by else "step 5 generates one."
+    `waived_by`: the answered question that waived step 5 for it (L4-VER-067): the finding stays, with no generation.
+    `carried`: step 5 carried it from the base (L4-VER-086): the finding stays and says so."""
+    then = "step 5 generates one."
+    if waived_by:
+        then = f"waived by {waived_by}, step 5 generates none."
+    elif carried:
+        then = "it is unchanged on the base and its base tests pass, so step 5 generates none (L4-VER-086)."
     if unproved:
         shown = ", ".join(unproved[:3]) + (f" (+{len(unproved) - 3} more)" if len(unproved) > 3 else "")
         detail = (
@@ -114,6 +124,7 @@ class _Verdict:
     head: RunOutcome | None = None
     tests: tuple[str, ...] = ()
     support: str = ""
+    excerpt: str = ""  # fails_at_head: why the head run failed (L4-VER-083); no other status has one
 
 
 def _outcome(statuses: Collection[str]) -> RunOutcome:
@@ -215,9 +226,13 @@ def _discriminates(wb: Workbench, base: Path, criterion: Criterion, support: Sup
         artifacts = tuple(
             failure_artifacts(wb.worktree, at_head.report, directory=artifact_dir(wb.cfg.gates.e2e.command))
         )
+        shown = failure_excerpt(
+            at_head.report, failing, worktree=wb.worktree, tmp_root=wb.unit_cache / "gate-tmp",
+            redact=wb.redactor.redact_text,
+        )  # fmt: skip
         return _Verdict(
             "fails_at_head", f"the test fails at the head: {', '.join(failing[:3])}", artifacts, "fail",
-            _outcome(found.values()), support=how,
+            _outcome(found.values()), support=how, excerpt=shown,
         )  # fmt: skip
     return _Verdict("accepted", base="fail", head="pass", tests=tuple(sorted(found)), support=how)
 
@@ -246,12 +261,17 @@ def generate_ui_test(
     ]
     retry_reason: str | None = None
     cost, model, sha, last = 0.0, None, "", _Verdict("writer_failed", "no reply")
-    code, digest = "", ""
+    code, digest, kept_excerpt = "", "", ""
 
     def outcome(attempts: int, verdict: _Verdict) -> GeneratedOutcome:
+        # the evidence copy of the last test written: redacted whole, cut at a line end, redacted again (L4-VER-083);
+        # the raw code is what the trees hold and what is hashed
+        shown = redacted_cut(code, wb.redactor.redact_text, MAX_CODE_CHARS)
+        whole = redacted_cut(code, wb.redactor.redact_text, sys.maxsize)  # the lines of the test, not of its copy
         return GeneratedOutcome(
-            criterion.id, verdict.status, rel if code else None, attempts, verdict.reason, code, verdict.artifacts,
+            criterion.id, verdict.status, rel if code else None, attempts, verdict.reason, shown, verdict.artifacts,
             cost, model, sha, verdict.base, verdict.head, verdict.tests, digest, verdict.support,
+            excerpt=kept_excerpt, code_lines=count_lines(whole),
         )  # fmt: skip
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -271,7 +291,7 @@ def generate_ui_test(
             retry_reason = _short(reply.detail) or "the reply was not a usable test"
             last = _Verdict("writer_failed", retry_reason)
             continue
-        code = reply.test.code
+        code, kept_excerpt = reply.test.code, ""
         written = []
         try:
             for tree in (wb.worktree, base):
@@ -291,9 +311,12 @@ def generate_ui_test(
             # they are hashed and committed, whatever a test did to its own file
             target = write_test_file(wb.worktree, rel, code, overwrite=True)
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        kept_excerpt = last.excerpt  # the failure of the attempt that wrote the code kept (L4-VER-083)
         if last.status in ("accepted", "uncollectable", "base_unservable"):  # done, or no use trying again
             return outcome(attempt, last)
         retry_reason = last.reason
+        if last.status == "fails_at_head" and last.excerpt:  # L4-VER-084: the second attempt is not written blind
+            retry_reason = f"{last.reason}\nWhy it failed at the head:\n{last.excerpt}"
     return outcome(MAX_ATTEMPTS, last)
 
 

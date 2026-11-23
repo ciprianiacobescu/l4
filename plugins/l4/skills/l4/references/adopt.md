@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.59 && l4 skills install   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.60 && l4 skills install   # or @<sha>
 l4 --version
 ```
 
@@ -34,9 +34,9 @@ commit it for the team, `--agent NAME` for one agent); run it again after an upg
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.59 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.60 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.59
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.60
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -45,7 +45,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.59`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.60`; that line
   is the only pin. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex characters).
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -79,7 +79,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.59`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.60`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -175,10 +175,12 @@ implementer:
 - `roles.plan_judges` is the chain of the plan readiness review. Leave it out and the review asks `roles.judges`; list
   it to put other judges, or another first judge, on the plan review without reordering the judges of your units. A
   list there replaces `judges` for the review only, and a judge of `judges` that you want in the review goes in it too.
-  The review moves a subject to the next judge when one fails, and keeps what it answered.
+  The review moves a subject to the next judge when one fails, and keeps what it answered. Never cut `roles.judges`
+  to one judge for a review: put the review's judge in `roles.plan_judges`. `l4 doctor` (CFG-013) warns when a judge
+  chain has one profile.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.59`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.60`) before you
   edit the config: the schema is strict.
 
 ## 4c. A polyglot repository
@@ -303,6 +305,11 @@ l4 upgrade --harness-ref v0.5.0
 
 Run it with the `l4` of the target version. It re-renders the workflow (and refreshes the copied action in copy mode)
 and prints the diff. Then commit and push.
+
+Move every local `l4` with the pin. From 0.4.60 a command that writes (retry, resume, restart, questions, accept,
+activate, go, ...) is refused outside CI when the local `l4` is older than the pin, and names the install;
+`--allow-older-cli` runs it anyway with a warning. An agent does not pass that flag on its own: it reports the refusal
+to the person.
 
 ## Self-hosted runners and GitLab
 

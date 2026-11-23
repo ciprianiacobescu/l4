@@ -150,6 +150,8 @@ def fold_plan(plan_id: str, events: Iterable[PlanEvent]) -> PlanState:
             for base_unit, refs in (data.get("attempt_base") or {}).items():  # R13: the first record of a unit stands
                 state.attempt_base.setdefault(str(base_unit), int(_number(refs)))
             state.activated_by = _text(data.get("by"))
+            state.activated_actor = _text(data.get("actor"))
+            state.activated_marker = _text(data.get("marker"))
             state.activated_accepted = {  # frozen for the unit run (D7, D8); a re-activation replaces
                 str(k): dict(v) for k, v in (data.get("accepted") or {}).items() if isinstance(v, dict)
             }

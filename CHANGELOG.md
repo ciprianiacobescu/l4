@@ -6,6 +6,95 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## 0.4.60 (2026-11-23)
+
+### Added
+- `l4 doctor` CFG-013 warns when `roles.judges` names one profile: unit verification then has no fallback judge when that judge fails. A consumer cut `roles.judges` to one judge for a plan review three times, because before 0.4.59 the review had no fallback after a judge error; each time a person had to put the unit judges back before the activation, and once a unit outside the plan went `waiting_capacity` because its single judge failed its hello. Since 0.4.59 the review walks its chain, and a judge for plan reviews only belongs in `roles.plan_judges`, which unit verification never reads; the warning says so when `roles.plan_judges` is empty. It also warns when `roles.plan_judges` names one profile, since the review does not fall back to `roles.judges`. A fresh `l4 init` writes one judge, so it warns too. A warning does not change doctor's exit code (L4-YOLO-103).
+- `plan.activated`, `plan.resumed` and `plan.cancelled` record who acted and how: `actor` (`person` or `agent`), `marker` (the agent marker found, or none) and `harness_version`, as `l4 yolo waive` already records the actor. Before, an activation recorded only the git email, and that an agent session acting for the owner made it showed only in the free-text reason. `l4 yolo status` shows `activated by <by> (person)`, `(agent: <marker>)` or `(agent: no terminal)` and the latest person's resume, `--json` has `activated_actor`, and the plan report says who activated and who cancelled. `l4 retry`, `l4 resume` and `l4 restart` record `actor` and `marker` in their unit events. An older event shows no kind, and nothing is refused for it: `l4 yolo activate` still lets an agent activate, as before (L4-YOLO-102, L4-OPS-025).
+- `verification.md` has a new section, `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)`, and
+  `verdict.json` a new key, `step_flakes`. They list each test that failed once in a red, green or chore step and
+  passed when the step ran its test gate again. The section is not a finding and does not change the verdict
+  (L4-VER-082).
+- A UI hold's question now shows the test step 5 wrote and why it failed at the head. Before, the question gave the
+  status and the ids of the failing tests only, and the generated file is removed after the run, so the delegate and
+  people could not tell a wrong test from wrong code: in a consumer's units the generated browser test failed on its own
+  wrong premise (a session put where the app does not read it, a route without the app's prefix, a session mock without
+  a user) at least four times, and each cost a round. Now the question's `### Harness notes` hold the head run's failure
+  (the retry prompt's excerpt: at most 40 lines and 3,000 characters) and the test's code (each line numbered: at most 200
+  lines and 6,000 characters, and a longer copy ends with a line that says how many lines were cut), both redacted before
+  they are cut and again after. `verification.md` has a new section, `## Generated
+  UI tests that were not accepted`, with the same, and `verdict.json` keeps the excerpt as `generated[].excerpt`. The
+  hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again. The delegate reads the
+  notes with the Context, but picks the sections of the specification it shows by the title and the Context alone, as
+  before (L4-VER-083).
+
+### Changed
+- The readiness review shows each plan entry with `id` first, then `depends_on`, then the other keys, for a unit, a batch and each part of a batch. Before, the keys were sorted, so a batch entry printed each unit's `depends_on` list before its `id` and right after the previous unit's id. On a ten-unit plan one free judge raised the same false BLOCKING finding in two reviews in a row ("two units list themselves in depends_on"; none does), and a second judge found nothing in the same material. The readiness prompt version is now 5. **Upgrade cost:** a plan reviewed under 0.4.59 and not yet activated shows `review: stale (the review prompt changed)`, its activation is refused until the next CI run has judged every subject again (no answer of 0.4.59 is reused, and the cost is charged to the plan), and an acceptance made on the old review no longer holds and must be given again (its rounds are kept, so it can be given at once). A force acceptance still holds. An active plan is not stopped, not reviewed again and shows no change. A plan stopped with `unit_rejected` whose review is stale is told to run `l4 yolo review <plan> --local` (CI does not review such a plan). Move your local `l4` with the pin: an `l4` of 0.4.60 calls a 0.4.59 review stale while a CI still pinned to 0.4.59 calls it current (L4-YOLO-101).
+- Outside a CI job, a command that records an event or pushes a commit (`l4 retry`, `l4 resume`, `l4 restart`, `l4 run`, `l4 verify`, `l4 archive`, `l4 questions accept|answer`, `l4 yolo review --local`, `--worktree --record`, `l4 yolo accept`, `waive`, `activate`, `resume`, `go`, `l4 plan --sweep`) now exits 2, before it reads or writes anything, when the running `l4` is older than the harness the repository pins. Twice a person's `l4 retry` ran with an `l4` of 0.4.54 against a repository pinned to 0.4.59, and nothing warned. The pin is `harness.version` in `.l4/config.yaml` (vendored, fetched) or the `# vX.Y.Z` comment of the setup action's `uses:` line (action), read at `origin/<base>` as last fetched, else in the working tree, with no fetch. The refusal names the pinned install (`.l4/bin/l4` when the repository has it). `--allow-older-cli`, a new option of every command, runs the command anyway with a warning on stderr. A stop or a withdrawal (`l4 yolo cancel`, `--withdraw`) and a command that writes only a local file (`l4 feedback …`, `l4 yolo draft`, `--no-push`) only warn. A pin with no version (a copy of the setup action, a commit with no tag), an `l4` of the pinned version, and every CI job are unchanged. An `l4` newer than the pin only warns on stderr for the same commands, since CI runs the pin's rules and a newer `l4` is how a person moves the pin. An `l4` older than this release has no such check: move your local `l4` with the pin (L4-OPS-026).
+- A test chore whose step wrote a browser test (a Python test under the e2e directory) now runs one build and one e2e run after its test gate passed, when `gates.e2e` is configured; a test chore without one costs nothing more. `task.tests_added` gains `e2e_tests`, the added ids of the e2e report; `tests` keeps the ids of the unit gate's report. A test chore that retakes a feedback item is ticked as already done only when its step kept no test file; one that kept a test file of which no gate counted a test now fails with the reason below instead of being ticked (L4-IMP-108).
+- `no tests added` of a test chore now goes on with what each gate found: the test gate, then the e2e gate (not configured, no browser test written, the run skipped and why, or the browser tests its report did not show passing). The red step's `no tests added` is unchanged (L4-IMP-109).
+- A test chore's technical question gets a harness note of its own: a new test file and new tests appended to a test file of the unit's red steps are kept, any other existing test is put back, and a missing check can go into a new test file. Before, it got the fix chore's note, which says that a test cannot be changed at all. A test chore that retakes a feedback item is told that the test files of the earlier take stay as they are (L4-IMP-111).
+- Step 4a (audit sampling) no longer runs because of a changed Python test file alone. A unit whose changed Python files are all tests or test support audits only when step 3's unit-gate report holds Python tests, so a Python project's unit that changes only tests still audits; otherwise the step is `not_run` and its note names those files. A unit that changed other Python code audits as before (L4-VER-089).
+- A call of `roles.verifier_agent` (the audit writer of step 4a, the UI test writer of step 5) that ends `error` or with a usage limit is now asked of the next independent profile of the chain in the same run; the failed profile is skipped for the rest of the round (a limit also cools it down). The ledger records each discard as `availability.judge_error` with `role: verifier_agent`, `kind` (`length`, `permission` or `error`) and `step`. Step 5 now tries the next profile before it records `writer_failed` (L4-VER-091).
+- A step that would fail an attempt only because one to five pre-existing tests failed now runs its test gate once
+  more, as `test-recheck`, on the same tree. This covers `red broke existing tests` and `green broke existing tests`,
+  in red, green and a fix, tests or refactor chore. A test that passes in that run does not fail the attempt; one that
+  fails again still does, and the reason then ends with `; failed again on a re-run (L4-IMP-105): <ids>`. The re-run
+  costs one more gate run. It starts only when the soft deadline leaves room for it. It never covers a test in a file
+  the unit changed, a hung test or a test missing from the report. The ledger records `task.tests_rechecked`, an event
+  an older harness ignores (L4-IMP-105).
+- An answer that unfreezes a frozen file for a task's green step now gives that green a new window of attempts. This
+  holds for a person's, an agent's or the delegate's answer. The window is renewed once per question, at most twice per
+  task between two `l4 retry`, `l4 resume` or `l4 restart`, and the ledger records `task.attempts_renewed`. An answer
+  that 0.4.59 already used renews nothing. Attempt
+  numbers go on, and the task's own text renews nothing (L4-IMP-104).
+- Step 1 now keeps at head, for its run of the base's tests, a support file that a task's reviewed text names when
+  only that task's red commit changed it. At most three such files per task, and at most 40 changed lines in each. The file is listed under `Pre-existing
+  tests changed with an allowance` with the task and the text's source. Before, step 1 reverted the file, and only a
+  person's `[test-infra]` tag let the unit pass. A unit in flight keeps such a file on its next round, because 0.4.59
+  already recorded the task's text (L4-VER-079).
+- When the test step 5 wrote fails at the head, the writer's second attempt is told why, not only which tests failed: its
+  retry reason holds the same excerpt. A second test is still kept only when it fails at the merge base and passes at
+  the head (L4-VER-084).
+- A UI criterion that a unit did not change is carried from the base instead of becoming a UI hold: its scenario is word
+  for word the base spec's (L4-VER-009), every test that traces it is a passing `pass_to_pass` test in a file the unit
+  did not change, and nobody ever rejected it or its UI hold. Step 5 cannot make a test that fails at the merge base for
+  behaviour the base already has, so such a criterion always ended as a hold; a follow-up that changed one web file
+  raised holds for its merged parent's criteria that only the owner could answer. A carried criterion is listed
+  (`verify.generated` with `status: carried`, its row of the generated UI tests table, step 5's note, its minor gap
+  finding) and still needs the judge's pass. A test whose file is in doubt keeps the hold: the file of every test must be
+  found by the path reading of its id, the dotted-module reading must give the same file or find no module for a
+  file that is not Python, and no other file may fit (a TypeScript test beside a Python module of its stem, one module
+  name under two roots, two TypeScript files that could hold it). A scenario restated under `MODIFIED` with any word changed is a new criterion, as before (L4-VER-086).
+
+### Fixed
+- A test chore now counts the browser tests it writes. In a TypeScript consumer whose browser tests are Python under `e2e/`, a person's feedback item asked for one browser test; the test chore failed `no tests added` three times, because only the Node unit gate's new tests were counted, and passed on its fifth attempt only with a Node meta-test that reads the browser test's file. A browser test of the step now counts when the e2e report shows it passed; one that fails refuses the attempt with its failure text, as in green; one the report does not show does not count and is noted (L4-IMP-108).
+- The discrimination runs of a test chore that cites a criterion get the unit gate's tests only, the only tests they can run, and a chore whose only new tests are browser tests is held with a question that says why the runs cannot decide; the per-test cap reads each test from the report that holds it (L4-IMP-110).
+- A unit no longer waits for capacity because one verifier-agent profile refused a tool call in its tool-less call or stopped at its output limit while another profile of the chain could answer. A consumer parked two units for about an hour and a half that way, and the retry chose the same profile again. Only when no profile is left does step 4a wait, with a reason that names each profile and why (L4-VER-091).
+- Step 4a no longer asks the writer for a pytest audit test of a TypeScript unit because a changed file was a Python browser test (the test was then rejected: the unit gate does not collect it), and the audit file goes next to the unit's own Python tests only when step 3's report shows them there; otherwise the audit first checks that the test command collects it (L4-VER-089, L4-VER-090).
+- A base-tests blocker now says which support files the run reverted and which tasks changed them, and its failing
+  tests reach the fix task with their failure text. In a TypeScript consumer an unchanged base test failed only because
+  step 1 reverted a module-graph data file that task 1.1's text had told red to change. The blocker named the test and
+  the first line of its message. The fix chore found nothing to fix at head and committed only its tick, and round 2
+  failed the same way. Now the detail starts with `with the unit's test and support files at their base version
+  (support files reverted: ...)`, each failing base test has a `failures` record with `gate: base-tests` and an excerpt
+  (L4-VER-078), and the fix proposal, the fix chore's prompt and its questions carry the failure block (L4-VER-080).
+- A `same_failure` escalation of a round with a base-tests blocker now starts with the way out, then the reverted
+  support files and their tasks: a person tags the task that changed one `[test-infra]` when its change is intended,
+  or fixes the code, then runs `l4 retry`. Before, the text named only the finding's id (L4-VER-081).
+- An unfreeze that the delegate accepted after two failed green attempts no longer leaves the task one attempt. Three
+  times in two consumer units the next run had attempt 3 of 3, and once the breaker halted the unit on a second wrong
+  line of the same test (L4-IMP-104).
+- A reviewer who rejects a criterion and its UI hold in the same round now gets one fix task for that behaviour, with
+  both reasons, both questions consumed, and one new scenario when the two scenarios are the same text. Before, the fix
+  unit had two tasks (the second one "already satisfied") and two criteria with the same scenario, which the next round
+  asked about again. A UI hold rejected alone with a `WHEN … THEN …` now gets its scenario under the criterion's
+  requirement, named after the criterion's scenario, instead of a requirement named after the hold (L4-VER-085).
+- `verdict.json` redacted a generated test's code after cutting it at 4,000 characters, so a secret that the cut split
+  could stay in part. The code is now redacted whole, then cut at a line end, then redacted again, and a question's
+  notes, `verification.md` and `verdict.json` redact it and the failure once more when they are built or written, so a round of 0.4.59 that is reused no longer shows a
+  private-key block that the old cut left half there (L4-VER-083).
+
 ## 0.4.59 (2026-11-19)
 
 ### Added
