@@ -105,7 +105,9 @@ The notes redact the outcome's copies again: `redacted_cut(done.excerpt, redact,
 redact, MAX_CODE_CHARS)` (D1's helper) before the lines are made. For an outcome of this release that is a no-op (both are
 already redacted and within their bounds), but a round that is reused restores `generated[].code` from a `verdict.json`
 of 0.4.59, which cut it at 4,000 characters before it redacted: it can end inside a private-key block, which only a
-redaction of the copy itself removes to the edge. A secret value that the old cut split in the middle (its head is all
+redaction of the copy itself removes to the edge. `write_round_evidence` does the same for `verification.md` and `verdict.json` (`report._redacted_again`, on a copy of
+the result): the code and the excerpt of every generated outcome are redacted again before the files are rendered. A
+secret value that the old cut split in the middle (its head is all
 that is left) matches no shape and cannot be found again; that part of the old flaw stays in those records.
 
 The numbered code, its bounds and the test of whether an outcome has anything to show live in

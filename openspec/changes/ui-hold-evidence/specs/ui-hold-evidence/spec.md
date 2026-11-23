@@ -33,7 +33,7 @@ one sentence that the harness notes show the test (and why it failed at the head
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
 table, with one list item per such outcome (criterion, status, attempts, path) and its failure and code as one block
 indented by six spaces. With no written test (no attempt gave code, or `waived`) nothing SHALL be added. Every piece
-SHALL pass the redactor again where it is written. The notes SHALL be redacted again when they are built (the code and the excerpt whole, cut at their bounds, whole again), so that a copy a reused round restores from a `verdict.json` of 0.4.59, which was cut before it was redacted, shows no private-key block that its cut left half there; a secret that the cut split and that no shape matches is not recoverable from such a copy.
+SHALL pass the redactor again where it is written. The notes SHALL be redacted again when they are built, and so SHALL `verification.md` and `verdict.json` when a round writes them (the code and the excerpt whole, cut at their bounds, whole again), so that a copy a reused round restores from a `verdict.json` of 0.4.59, which was cut before it was redacted, shows no private-key block that its cut left half there; a secret that the cut split and that no shape matches is not recoverable from such a copy.
 
 #### Scenario: SCN-VER-331 (+) The hold's question shows the generated test and its failure at the head
 - **Given** a UI criterion whose generated test `e2e/test_l4_c_<hex>.py` fails at the head with the body lines
@@ -161,9 +161,9 @@ exist and what each answer settles SHALL be unchanged.
 #### Scenario: SCN-VER-353 (−) A half private key in a record that 0.4.59 wrote is not shown
 - **Given** a `verdict.json` of 0.4.59 whose generated test's code ends inside a private key (its begin marker and
   some of the body, no end marker) because its cut came before its redaction, restored by a reused round
-- **When** the round raises the criterion's UI hold question
-- **Then** the question's notes hold the code before the key marker, `[REDACTED:private-key]` in its place and no
-  line of the key's body
+- **When** the round raises the criterion's UI hold question and writes `verification.md` and `verdict.json`
+- **Then** the question's notes, `verification.md` and `verdict.json` hold the code before the key marker,
+  `[REDACTED:private-key]` in its place and no line of the key's body
 
 #### Scenario: SCN-VER-354 (−) The harness notes pick no section of the specification the delegate reads
 - **Given** a UI hold's question whose Context names `per_account` and whose harness notes hold a test that names

@@ -212,6 +212,28 @@ def test_a_secret_in_the_code_or_the_failure_is_in_no_file_of_the_round(tmp_path
         assert all(TOKEN[i : i + 8] not in text for i in range(len(TOKEN) - 7)), name
 
 
+def test_a_half_key_block_in_a_record_that_0_4_59_wrote_is_in_no_file_of_the_round(tmp_path):  # SCN-VER-353
+    """0.4.59 cut a generated test's code before it redacted it, so a stored copy can end inside a private key, and
+    the shared redactor needs both markers. A reused round restores that copy: it is redacted again, whole, cut and
+    whole again, where `verification.md` and `verdict.json` are written, so 0.4.60 does not write the half key again."""
+    from l4.verifier.evidence import _generated
+
+    begin = "-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"
+    stored = {  # the `generated` entry of a verdict.json of 0.4.59: no `excerpt`
+        "criterion": "C-a", "status": "fails_at_head", "path": "e2e/test_l4_c_a.py", "attempts": 2, "reason": "r",
+        "artifacts": [], "tests": [], "code": f"x = 1\n# {begin}\n# MIIEowIBAAKCAQEA" + "q" * 60,
+    }  # fmt: skip
+    restored = _generated(stored)
+    assert "MIIEow" in render_verification_md(result(generated=[restored]))  # the shared redactor is not applied yet
+    write_round_evidence(tmp_path, 1, result(generated=[restored]), Redactor({}))
+    for name in ("verification.md", ".l4/evidence/round-1/verification.md", ".l4/evidence/round-1/verdict.json"):
+        text = (tmp_path / name).read_text()
+        assert "MIIEow" not in text and "q" * 20 not in text, name
+        assert "x = 1" in text and "[REDACTED:private-key]" in text, name
+    body = json.loads((tmp_path / ".l4/evidence/round-1/verdict.json").read_text())
+    assert body["generated"][0]["code"].startswith("x = 1\n# [REDACTED:private-key]")
+
+
 def test_the_row_of_a_carried_outcome_says_it_is_carried_from_the_base_and_not_step_4_cover():  # SCN-VER-343
     many = ("tests.a::t1", "tests.a::t2", "tests.a::t3", "tests.a::t4")
     carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=many)

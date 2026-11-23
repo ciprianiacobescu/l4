@@ -45,7 +45,7 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   requirement, named after the criterion's scenario, instead of a requirement named after the hold (L4-VER-085).
 - `verdict.json` redacted a generated test's code after cutting it at 4,000 characters, so a secret that the cut split
   could stay in part. The code is now redacted whole, then cut at a line end, then redacted again, and a question's
-  notes redact it and the failure once more when they are built, so a round of 0.4.59 that is reused no longer shows a
+  notes, `verification.md` and `verdict.json` redact it and the failure once more when they are built or written, so a round of 0.4.59 that is reused no longer shows a
   private-key block that the old cut left half there (L4-VER-083).
 
 ## 0.4.59 (2026-11-19)

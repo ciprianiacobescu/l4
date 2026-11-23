@@ -102,7 +102,8 @@ parts so that no test file holds a key marker as one string.
   (SCN-VER-352; 4,000 empty lines and 2,000 one-character lines in `test_hold_verdicts.py`, the same in
   `test_report_m15.py`, the bound itself in `numbered_code`'s own test).
 - [x] 6.2 `_ui_hold_notes(criterion, generated, redact)` redacts the code and the excerpt again with `redacted_cut`, for a
-  record of 0.4.59 that a reused round restores (SCN-VER-353).
+  record of 0.4.59 that a reused round restores (SCN-VER-353); so does `report.write_round_evidence` for
+  `verification.md` and `verdict.json` (`_redacted_again`).
 - [x] 6.3 A configured secret in the head failure is not in `GeneratedOutcome.excerpt` (`test_generate.py`), and
   `test_excerpt.py` fails on its own when `redacted_cut` cuts before it redacts (SCN-VER-332).
 - [x] 6.4 The delegate's selection key is the title and the Context without the harness notes

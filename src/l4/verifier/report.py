@@ -11,13 +11,14 @@ tasks (verifier 1.16).
 import contextlib
 import dataclasses
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from l4.buildinfo import harness_commit
 from l4.evidence.report import render_evidence_json
 from l4.fsutil import atomic_write_bytes, reject_symlinks
+from l4.implementer.excerpt import MAX_CHARS, redacted_cut
 from l4.redact import Redactor
 from l4.state.ledger import LedgerCorrupt, LedgerEvent, read_ledger
 from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
@@ -440,6 +441,17 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
     }
 
 
+def _redacted_again(g: GeneratedOutcome, redact: Callable[[str], str]) -> GeneratedOutcome:
+    """The test's code and its failure redacted again where the round's files are written (L4-VER-083): a reused round
+    restores the copy that 0.4.59 stored, which was cut before it was redacted and can end inside a private key, and
+    the shared redactor removes a key only when both of its markers are there. Whole, cut at the bounds, whole again."""
+    if not (g.code or g.excerpt):
+        return g
+    return dataclasses.replace(
+        g, code=redacted_cut(g.code, redact, MAX_CODE_CHARS), excerpt=redacted_cut(g.excerpt, redact, MAX_CHARS)
+    )
+
+
 def write_round_evidence(unit_dir: Path, round_no: int, result: VerifyResult, redactor: Redactor) -> list[Path]:
     """Writes the files (a fourth, `evidence.json`, when the round collected evidence) and returns their
     paths. A symlinked `.l4`, `evidence` or round directory raises
@@ -451,6 +463,7 @@ def write_round_evidence(unit_dir: Path, round_no: int, result: VerifyResult, re
             result = dataclasses.replace(result, feedback=feedback_lines(read_ledger(unit_dir).events, round_no))
     target = unit_dir / ".l4" / "evidence" / round_dir
     target.mkdir(parents=True, exist_ok=True)
+    result = dataclasses.replace(result, generated=[_redacted_again(g, redactor.redact_text) for g in result.generated])
     scrub = redactor.scrub_for_commit  # the forge host is `<forge>` in what is committed (L4-OBS-002)
     markdown = scrub(redactor.redact_text(render_verification_md(result))).encode("utf-8")
     machine = scrub(json.dumps(redactor.redact_obj(verdict_json(result)), indent=2, ensure_ascii=False) + "\n")
