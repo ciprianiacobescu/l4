@@ -5899,7 +5899,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; a gate whose run failed only on one to five pre-existing tests (not a red test of the unit, in a file at head that `base..head` does not change) is run again as a whole, at most `flaky_repeats` runs in all: a test that passes in one of them is the minor finding `a pre-existing test is flaky in the <gate> gate`, one that never passes keeps the blocker (L4-VER-076); a failure of a new test, or of a test in a file the unit changed, causes no repeat; the repeat starts from the tree run 1 started from, ends on the same failure as run 1 or when the deadline is short |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
-| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. A UI criterion whose accept is in force is **waived**: the writer is not called, no hold is raised and `verify.generated` says `waived` (L4-VER-067). A UI criterion that step 4 covers with a discriminating test and for which the agent returns `not_testable` is a **note** in the generated UI tests table, not a hold (`covered_by`, L4-VER-067). The UI test writer is shown the e2e suite's `e2e/conftest.py` and helper modules as they are at the merge base, bounded (L4-VER-077). Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
+| 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. A UI criterion whose accept is in force is **waived**: the writer is not called, no hold is raised and `verify.generated` says `waived` (L4-VER-067). A UI criterion that step 4 covers with a discriminating test and for which the agent returns `not_testable` is a **note** in the generated UI tests table, not a hold (`covered_by`, L4-VER-067). The UI test writer is shown the e2e suite's `e2e/conftest.py` and helper modules as they are at the merge base, bounded (L4-VER-077). A generated test that is not accepted is kept as a bounded copy redacted before its cut, with the redacted failure of its head run, for the hold's question and `verification.md`, and the writer's retry after a failure at the head gets that failure (L4-VER-083, L4-VER-084). A UI criterion unchanged on the base whose only tracing tests are passing `pass_to_pass` tests in files the unit did not change is **carried from the base**: no writer call and no hold, listed in the generated UI tests table (L4-VER-086). Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
 | 6 | quality (opt-in) | `gates.extra` entries such as diff coverage or mutation testing on changed files |
 | 7 | contracts / security (opt-in) | `gates.extra` entries such as schemathesis, property tests, `semgrep --baseline-commit <base>` |
 | 8 | S1 judge | per criterion one `noul` over a compact evidence state (criterion text, tracing tests with status, most relevant excerpt) kept within the engine's state budget (§3.2, measured with the S1 tokenizer): the true/false question "Does this evidence show that the criterion is satisfied?" (`p`) **and** a 4-way `choice` over `implemented | contradicted | not_implemented | unrelated` (the choice's probabilities are recorded under `evidence`). Both are **recorded only**: no `p` changes a verdict or a finding (`decisions.criterion.accept` is reserved for a later calibrated gate; nothing reads it today). The step is `unavailable` when the server is missing, down or answers unusably (for `engine: ollama` also: the host is older than 0.35.0, the model is not pulled, or the request would exceed the 64 KiB body limit: `unavailable: input too large`, never cut), and aggregation goes on (SCN-VER-24); it is `not_run` when `verifier.s1.enabled` is off, `roles.s1_judge` is empty, or it holds no `backend: system-one` profile (an adapter profile there serves only the clarifier's `llm_boolean` stand-in, L4-CLR-002) |
@@ -6148,7 +6148,9 @@ a fix unit consumed. A criterion whose own verdict in force is a reject SHALL NO
 failing tracing test of the criterion suspends the waiver for that round only (no `human.void` is written for a hold's
 accept); the criterion is waived again once the test passes. An accept of a hold written before this change carries no
 binding: it survives a change of the criterion's text or tracing files and ends only by a reject, a void or a failing tracing
-test. Only `accept` waives; a rejected hold keeps the path of L4-VER-013, and a delegate's accept waives as any accept does.
+test. Only `accept` waives; a rejected hold keeps the path of L4-VER-013 (its finding cites the criterion, L4-VER-085),
+and a delegate's accept waives as any accept does. The hold's question also shows, in its harness notes, the test step 5
+wrote and why it failed at the head (L4-VER-083); they are not part of the hold's text, so its id and binding stay.
 Residual risk (named, accepted): an accept given on `fails_at_head` survives later UI rework that does not touch the tracing
 tests. [V, a consumer's unit raised the UI hold of one criterion three times in five rounds, once per generator status, and
 each was a question for a person and a run]
@@ -6170,19 +6172,20 @@ stored outcome with no `covered_by` (written before this change) is restored wit
 discriminating traces the criterion (only `pass_to_pass` tests, only red records that no run proved, a failing tracing
 test, a failed audit test, or no tracing test), for every other outcome of the writer (`writer_failed`, `uncollectable`,
 `fails_at_head`, `non_discriminating`, `base_error`, `base_unservable`, `lint_failed`), covered or not, and when no
-writer is configured. A note SHALL NOT pass the criterion: it still needs an adequate passing test and the judge's pass
-(L4-VER-003), so a covering test that the judge calls inadequate leaves the criterion `needs_human`, asked through its
-own verdict question. When step 9 rejects every covering test of a note while another test that passes and is adequate
-(a `pass_to_pass` test, or a red record that no run proved) still traces the criterion, so that aggregation would pass
-it with no one asked, a fresh round SHALL raise the criterion's UI hold right after the judge step, with its hold view,
-into the round's holds (stored in `verdict.json`, so a reused round keeps it); with no such test the criterion is
-`needs_human` on its own and no hold is raised. Which criteria are UI-facing (L4-VER-014), which UI criteria are gaps,
-and the waiver above SHALL be unchanged. Residual risk (named, accepted): a criterion that a browser could check, which
-the writer wrongly calls `not_testable` and a unit test covers, is no longer asked about as a UI hold; the judge's
-adequacy review of that unit test is what stands before a PASS. [V, a consumer run: a unit that changed one web file had
-ten criteria, all UI-facing; the writer returned `not_testable` for the eight that step 4 covered with red-then-green
-tests (traceability 8/10, the writer's reasons "pure functions" and "no browser-observable behavior"), and the round
-raised ten UI holds, twelve verdict questions in all]
+writer is configured, except a criterion carried from the base, which raises none (L4-VER-086). A note SHALL NOT pass
+the criterion: it still needs an adequate passing test and the judge's pass (L4-VER-003), so a covering test that the
+judge calls inadequate leaves the criterion `needs_human`, asked through its own verdict question. When step 9 rejects
+every covering test of a note while another test that passes and is adequate (a `pass_to_pass` test, or a red record
+that no run proved) still traces the criterion, so that aggregation would pass it with no one asked, a fresh round SHALL
+raise the criterion's UI hold right after the judge step, with its hold view, into the round's holds (stored in
+`verdict.json`, so a reused round keeps it); with no such test the criterion is `needs_human` on its own and no hold is
+raised. Which criteria are UI-facing (L4-VER-014), which UI criteria are gaps, and the waiver above SHALL be unchanged.
+Residual risk (named, accepted): a criterion that a browser could check, which the writer wrongly calls `not_testable`
+and a unit test covers, is no longer asked about as a UI hold; the judge's adequacy review of that unit test is what
+stands before a PASS. [V, a consumer run: a unit that changed one web file had ten criteria, all UI-facing; the writer
+returned `not_testable` for the eight that step 4 covered with red-then-green tests (traceability 8/10, the writer's
+reasons "pure functions" and "no browser-observable behavior"), and the round raised ten UI holds, twelve verdict
+questions in all]
 
 **L4-VER-068 The judge is told which named tests red changed.** The judge's prompt SHALL have a data block `## Named tests changed
 in place`, beside the owner changes and in the user text only (`judge@13` and its system text do not change), that lists once
@@ -6226,6 +6229,104 @@ not know the key (`repairs`, the fix unit's grouping, the fix chore's e2e duty) 
 grows by at most 24,000 characters of excerpt (2 x 20 x 600; the keys, ids and JSON around them are not counted). [V, a consumer unit's browser test failed at step 3 with `assert 1508 == 1500`; the
 verdict kept the first line of each failing test's message, but the fix task and the question made from it carried
 only the test's id, and the implementer of the fix chore reported that it could not reproduce the failure.]
+
+**L4-VER-083 A UI hold shows the test step 5 wrote and why it failed at the head.** When step 5 ends a UI criterion with
+a test that the writer wrote and that was not accepted, its outcome SHALL keep a bounded copy of the last test written:
+the whole code redacted (a private-key block with one marker removed to the edge, as for L4-VER-078), then cut at the
+last line end before 4,000 characters (a single longer line at 4,000), then redacted again. When that test failed at the
+head (`fails_at_head`), the outcome SHALL also keep an excerpt of the head run's failure of the file's failing tests, as
+the retry prompt shows a failure (L4-IMP-064: per test its `E` lines, the deepest repository frame and its location, the
+last location; at most 8 lines per test, 8 tests, 40 lines and 3,000 characters; paths relative to the worktree and the
+gate's tmp root shown as `<tmp>`; the body redacted whole before a line is dropped and the result redacted again). The
+excerpt SHALL be that of the attempt that wrote the kept code (an attempt that gives no code, a writer error, an invalid
+reply or `not_testable`, leaves the code and the excerpt of the attempt before it); the file written to the trees, its
+hash and its removal SHALL be unchanged. `verdict.json` SHALL store the copy as `generated[].code`, as before but
+redacted before the cut, and the excerpt as `generated[].excerpt` when it is not empty; a reused round SHALL keep both,
+and a record without `excerpt` SHALL restore with none. The hold's verdict question (L4-VER-067) SHALL carry them in its
+`### Harness notes` subsection (L4-IMP-102): the excerpt under `Harness note: why the test step 5 wrote failed at the
+head (redacted; paths relative to the repository):`, each line after four spaces; then the code under `Harness note: the
+last test step 5 wrote, <path> (step 5 ended <status>; not committed, the file is removed after the run; at most 200
+lines and 6,000 characters):`, each line as four spaces, its number right-aligned in four columns, two spaces and the
+line, so that no line of the code is structure in `questions.md`. The numbered code SHALL be bounded by its lines and by
+its own length, not only by the 4,000 characters of the raw copy (4,000 empty lines are 4,000 numbered lines): at most 200
+lines and 6,000 characters with their line ends, the numbers included and before the indent of the container; a longer
+copy SHALL keep its first lines (their numbers are those of the excerpt's locations) and end with one line `… (cut: N
+more lines)`, which the 6,000 counts. They SHALL NOT be in the hold's text, its title or its Context, so the
+hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL say in one sentence that the
+harness notes show the test (and why it failed at the head, when there is an excerpt). The delegate reads the notes with
+the Context, but the sections of the specification it is shown are picked by the title and the Context alone, so text
+that a test printed or a model wrote steers none of them and the selection is that of 0.4.59 for the same question; it
+cannot cite the generated test, which is not in the tree, and cites what the test's premise is about in the repository. `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the
+generated UI tests table, one list item per such outcome (criterion, status, attempts, path) with its failure and its
+numbered code as one block indented by six spaces. With no written test (no attempt gave code, or `waived`) nothing
+SHALL be added. Every piece SHALL pass the redactor again where it is written. The notes SHALL be redacted again when they are built, and so SHALL `verification.md` and `verdict.json` when a round writes them (the code and the excerpt whole, cut at their bounds, whole again), so that a copy a reused round restores from a `verdict.json` of 0.4.59, which was cut before it was redacted, shows no private-key block that its cut left half there; a secret that the cut split and that no shape matches is not recoverable from such a copy. A hold's question grows by at most about
+10,500 characters and a `verdict.json` by at most 3,000 characters per test that fails at the head. [V, a TypeScript web
+consumer, four units: the delegate and a person could not tell, round after round, whether the generated browser test or
+the product was wrong, because the question held the test's ids only and the file was not in the tree; in at least four
+cases in three units the test had failed on its own wrong premise (a session put into the browser's storage while the
+app reads it from an API call, a route without the app's prefix, a session mock without a user or a CSRF token), and
+each cost a person's or the delegate's round]
+
+**L4-VER-084 The writer's retry after a failure at the head carries the failure.** When step 5 asks the writer again
+after an attempt that ended `fails_at_head`, the retry reason SHALL be that attempt's reason, then the line `Why it
+failed at the head:` and the excerpt of L4-VER-083, in the prompt's retry reason data block, which is redacted with the
+whole prompt. Any other status SHALL keep its retry reason. The writer's template and its version (`testwriter@7`)
+SHALL be unchanged, and a test of the second attempt SHALL be accepted only as before: it fails at the merge base and
+passes at the head. A test that fails at the head only because a wait for an element timed out SHALL stay
+`fails_at_head`: it is a hold either way, and a timeout is also how a missing behaviour fails. Residual risk (named,
+accepted): a writer that reads why its test failed can write one that asserts less; the judge's adequacy review of an
+accepted generated test stands before a PASS. [V, the evidence of L4-VER-083: the second attempt was told the ids of
+the failing tests only]
+
+**L4-VER-085 A rejected UI hold is fixed under its criterion.** A rejected UI hold's finding (L4-VER-013) SHALL cite
+the hold's criterion, whether it is deterministic (its reason ends with a `WHEN … THEN …`) or the human's; its id,
+title, detail, severity and source SHALL be unchanged. The fix unit's planner (L4-VER-006) SHALL then: when the
+criterion's own reject is in force in the same round, join the hold's finding to the criterion's task, one task that
+lists both findings, holds both decisions (the criterion's first), consumes both questions, and pins each distinct
+scenario once (the same text after whitespace is folded is one scenario; different texts are all kept, in that task;
+no other matching), the hold's finding not counting as citing the criterion for the rule that gives a failing
+criterion no finding cites its own `Criterion … fails` finding; when the criterion has no reject in force and the
+hold's reason ends with a `WHEN … THEN …`, make a task that cites the criterion, with the scenario under the
+criterion's requirement (`<requirement> — regression <n>`) and named after the criterion's scenario (with ` (2)` and on
+when that name is taken), never under `Rejected hold: … — finding H-…`; when the criterion has no reject in force and
+the hold's reason has no `WHEN … THEN …`, list it as not converted, as before. A criterion that is not among the
+family's criteria SHALL leave the hold as before. The round's verdict, which rejects exist and what each answer settles
+SHALL be unchanged. A Kiro fix unit gets one `2.n` item where it got two. [V, a consumer, two units: a reviewer rejected
+a criterion and its UI hold in the same round with near-identical reasons; the fix unit got two tasks for one behaviour,
+the second "already satisfied", and two new criteria with the same scenario text, which the next round asked about
+again]
+
+**L4-VER-086 A UI criterion that the unit did not change is carried from the base.** Before step 5 asks the writer
+about a UI criterion with a gap, and after the waiver of L4-VER-067, the criterion SHALL be *carried from the base*
+when all of these hold: it is unchanged on the base by the pass-to-pass rule of L4-VER-009, read from the same baseline
+step 4 traced with (the archived specs read from git at the unit base, or a Kiro follow-up's merged parent: its id
+with the same text after `normalise`; no other matching); its evidence in the round's trace as step 5 starts is
+`covered` with no `held` reason, every test that traces it passed, has the proof `pass_to_pass`, carries no label of an
+unproven record, is within the per-test cap and is adequate, and every test listed as not evidence for it is a passing
+candidate over the cap; the file of every such test, listed or not, is found in the work tree by `file_of_id`
+over the tree's files, no other file of the tree could be the one the id names, it is not among the files the unit
+changed since its merge base, and the dotted Python module reading of the id agrees: it gives the same file, or it
+finds no module and the file is not a `.py` file (a TypeScript test); and no `human.verdict` with the decision `reject` targets the criterion or
+one of its UI holds in the unit's ledger, consumed or not. A carried criterion SHALL get no writer call and no hold. It
+SHALL record `verify.generated{criterion, status: carried, covered_by: [<its tracing tests>], attempts: 0}` and the
+outcome in `verdict.json`; its row of the generated UI tests table SHALL say `carried from the base: <ids> (the
+scenario and these tests are the base's, and they pass); a note, not a hold (L4-VER-086)`; step 5's note SHALL count
+the carried criteria; its minor gap finding SHALL stay and say that the criterion is unchanged on the base and step 5
+generates none; no fix unit SHALL be made for that finding; and when every gap is waived or carried nothing SHALL be
+checked out. A carry SHALL NOT pass the criterion: it still needs an adequate passing tracing test and the judge's
+pass (L4-VER-003). A carry SHALL write no answer and waive nothing for a later round. A reused round SHALL keep the
+stored outcome and decide nothing again. When a condition cannot be checked (the baseline, a test's file, the changed
+files), the criterion SHALL stay a gap as before. Why it is safe: for a criterion whose behaviour is in the base, a
+faithful browser test passes at the merge base, so step 5 can only end it as a hold (`non_discriminating` before the
+head is run, `not_testable` with no note since `pass_to_pass` is no cover, or a wrong test), and the hold asks a person
+to accept on a merge-base run that cannot show a break at the head. Residual risk (named, accepted): a unit that breaks
+the browser side of a scenario it did not change, while the base's unit tests of that scenario still pass and the judge
+passes it, is no longer asked about as a UI hold. A scenario restated under a `MODIFIED` requirement with any word
+changed is a new criterion and is not carried. [V, a TypeScript web consumer: a feedback follow-up that changed one web
+file made every criterion of its family UI-facing, and three of its merged parent's criteria, word for word the base's
+and traced by the parent's passing `pass_to_pass` unit tests, became UI holds that only the owner could answer; in
+another unit a scenario restated word for word under a `MODIFIED` requirement raised a UI hold that the delegate
+accepted because the scenario was unchanged]
 
 **L4-VER-089 Audit sampling audits Python code, not the Python tests of another language's unit.** Step 4a SHALL decide
 from the unit's changed files outside the exempt paths (`changed_unit_files`). Its *Python code* is a changed `.py` file
@@ -6993,7 +7094,7 @@ findings on the same criterion); a `new tests failed` or `new tests errored` fin
 findings with the human's decisions first ("Decided by human in Q-NNN: <reason>"), so a length cut on a long finding
 never drops a decision and leaves the implementer an open question it must not decide. A decision is kept whole up to 1,200 characters (the finding's own detail is what is cut). A test chore (a rejected coverage hold) whose task begins with a decision that calls the code wrong must add tests that assert the decision: a failing test is not kept and is reported `blocked` with a technical question naming the test and the decision, and tests that all pass against that code get one retry reason naming the decision (attempt 1 only). A finding with `spec_gap: true` produces, before
 its task, an **ADDED** regression requirement with a scenario when L4-VER-059 gives it one (OpenSpec: `## ADDED Requirements` →
-`### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). The parent requirement is the cited criterion's, else the parent's only one. When a person rejected a finding that cites no criterion with a `WHEN … THEN …` and the parent has several requirements, the scenario SHALL go under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, as a feedback item's does (L4-FBK-004): the person's scenario is never dropped. A judge's spec-gap suggestion that no person asked for gets no such requirement. Fix units
+`### Requirement: <parent requirement> — regression <n>`; Kiro: a new `2.n` acceptance criterion in `bugfix.md`, or a `3.n` when the scenario says `SHALL CONTINUE TO`). The parent requirement is the cited criterion's, else the parent's only one; a rejected UI hold cites its criterion, and joins the criterion's task when the criterion's own reject is in force in the same round (L4-VER-085). When a person rejected a finding that cites no criterion with a `WHEN … THEN …` and the parent has several requirements, the scenario SHALL go under an ADDED requirement of its own, `<finding title> — finding <id>`, in the parent's first capability by name, as a feedback item's does (L4-FBK-004): the person's scenario is never dropped. A judge's spec-gap suggestion that no person asked for gets no such requirement. Fix units
 never use MODIFIED/REMOVED/RENAMED deltas (the parent's requirements are not in the base specs until the parent is
 archived, L4-OSP-006). The task of a rejected **coverage** hold is a test chore (`test_chores` in `.l4/fix.json`): its prompt
 says to add tests that run the changed code the hold names; its step may add test files and append new tests to the unit's
@@ -7328,7 +7429,7 @@ conflicts impossible). Every event has `{ts, run_id, unit, seq, type, …}`. Eve
 `judge.length_split` (`{round, profile, criteria, into, depth, cause, part, parts}`: a step-9 judge's reply stopped at its output limit or its call timed out (`cause`), and the prompt's criteria were split in two for the same judge, L4-VER-071),
 `verify.carried` (`{round, criterion, from_round, from_head}`: a round whose judge gave no verdict kept an earlier round's pass of an unchanged criterion, L4-VER-072), `verify.not_carried` (`{round, from_round, reason, paths}`: once, when no criterion could be carried),
 `gate.result`, `gate.reused` (`{name: "baseline", from: "test", task, source_sha, tree}`: a task's baseline that took the report of the green gate run of `source_sha` instead of running the gate, because the tree tested is the same up to the unit's ledger, `tasks.md` and held files, L4-IMP-088), `guard.violation|guard.test_tamper|guard.agent_commit|guard.secret` (`guard.test_tamper{phase: "red", rule: "pre-existing test", action: "rejected", tests, why}` when a red attempt changed a test that existed before it, L4-IMP-048), `verify.base_tests{round, base_sha, base_source, reverted, passed_at_base, still_passing, failing, not_run, collection_errors, flaky, allowed}` (step 1's run of the base's tests, L4-VER-038), `verify.gate_repeat{round, gate, runs, flaky, failing, stopped}` (step 3's repeats of a test or e2e gate whose only failures were pre-existing tests, L4-VER-076), `question.raised|question.answered|
-question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067; `status: not_testable` with `covered_by`, the tests by which step 4 covers the criterion, when the outcome is a note and raises no hold, L4-VER-067), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
+question.status_inferred|question.override` (`question.raised` carries the question's `title`), `clarifier.result`, `verify.step|verify.verdict|verify.error`, `verify.generated` (step 5's record of a UI criterion; `status: waived` with `by`, the answered question, `attempts: 0` and no writer call, when an accept of the criterion or of its UI hold is in force, L4-VER-067; `status: not_testable` with `covered_by`, the tests by which step 4 covers the criterion, when the outcome is a note and raises no hold, L4-VER-067; `status: carried` with `covered_by`, the criterion's tracing tests, and `attempts: 0` and no writer call, when the criterion is carried from the base, L4-VER-086), `base.merged|base.conflict` (verifier step 0: the base merged into the unit
 branch `{base, base_sha, merge_sha, behind, resolved, frozen_touched}`, or a source conflict `{base, base_sha, files, resolved}`),
 `fix.spawned` (`feedback_only: true` for a feedback fix unit, L4-VER-007),
 `feedback.taken` (`{id, kind, sha256, round, fix_unit}`) | `feedback.addressed` (`{id, round, sha, evidence}`) |
@@ -10034,8 +10135,10 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
 | 135 | `readiness-entry-and-actor` | the readiness review's `plan entry` block shows every object `id` first, then `depends_on`, then the other keys sorted (a unit, a batch and each part of a batch), so a judge no longer reads a unit's prerequisites as the previous unit's; the readiness prompt version is 5, so a review of 0.4.59 is stale before the activation (status, activation refusal, one full review in CI; acceptances bound to the old material no longer hold, rounds are kept, a force acceptance holds) and an active plan is neither stopped nor reviewed again (L4-YOLO-101); `plan.activated`, `plan.resumed` and `plan.cancelled` record `actor`, `marker` and `harness_version`, `l4 yolo status` and the plan report show the kind, an older event shows none, and nothing is refused for it (L4-YOLO-102); `l4 retry`, `l4 resume` and `l4 restart` record the actor in their unit events (L4-OPS-025); doctor CFG-013 warns about a judge chain of one profile and says a review-only judge belongs in `roles.plan_judges` (L4-YOLO-103); outside CI a command that writes is refused (exit 2, before it reads anything) when the running `l4` is older than the repository's pin (`harness.version`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as last fetched), unless `--allow-older-cli`; a stop and a local-only write warn (L4-OPS-026); the runbook, the skill and the CHANGELOG say so (L4-YOLO-104; L4-YOLO-025, L4-YOLO-098, SCN-YOLO-56, SCN-YOLO-276 amended; `openspec/changes/readiness-entry-and-actor/`) | a ten-unit plan whose judge raised a false `depends_on` finding twice; a consumer that cut `roles.judges` to one judge for a review; a retry run with an older local `l4`; the unit tests (`test_yolo_readiness_entry_order`, `test_yolo_prompt_upgrade`, `test_yolo_plan_actor`, `test_checks_cfg_013`, `test_cli_pin`, `test_readiness_entry_and_actor_docs`) |
 | 136 | `base-tests-named-support` | a support file whose change a task's reviewed text asked of the red step stays at head when step 1 runs the base's tests, and a base-tests blocker says what the run reverted. `l4.verifier.base_tests._named_red_change` (new, read by `kept_files` only, after `_allowance`): a regular file at the base and at head, no ignore file, support by `is_support_file`, no test of the base's report belonging to it (a file under `__tests__/` or `test/` that holds tests is reverted; with no base report nothing stays), every harness commit that changed it an `L4-TDD: red` commit whose task has a `task.unfrozen{reason: named_by_task}` of the same unit, task and `red_sha` with a `source` and the path in `paths` or `kept`; at most 40 changed lines (`--numstat`, no binary) and 3 files per task (`MAX_NAMED_SUPPORT`); listed `kept at head for the run (task <t>: changed by its red step, named by its reviewed text (<source>))`; `_allowance`, `_unfrozen_source`, `split_allowed` and `check_tests` are unchanged (slippable). `check_base_tests`: `support_reverted` (`{path, tasks, people}`, 20) in `verify.base_tests`, the blockers' detail leads with `with the unit's test and support files at their base version (support files reverted: ...)`, and each blocked failing test gets a `failures` record with `gate: base-tests` and an excerpt (`failure_records(..., unit_gate=)`, `Outcome.failures`, copied by `ladder.integrity()`); `failures.BASE_FAILS_TITLE` and its branch in `shown_failure_ids` give the fix task its failure block (L4-IMP-102). `fixloop.base_tests_way_out`: a `same_failure` escalation of a round with a base-tests blocker leads with `base versions of support files fail a pre-existing test; tag the task that changed one [test-infra] if its change is intended, or fix the code, then l4 retry:` and then the reverted support files and their tasks (300 characters, the way out before the files). The skill's spec rules say a red step may change an existing support file only when its task line names it. A TypeScript consumer's task text told red to add an edge to `test/arch/modules.ts`; step 1 reverted it, an unchanged base test failed twice, the fix chore committed only its tick, and the unit escalated `same_failure` until a person tagged the task `[test-infra]` (L4-VER-079, L4-VER-080, L4-VER-081, L4-VER-038, L4-VER-069, L4-IMP-102, SCN-VER-312..321, 324..328; `openspec/changes/base-tests-named-support/`). Limits: a file red added, an ignore file, a test module, a task without a reviewed text and an already-satisfied task are not covered; red's whole change to a named file is trusted, listed and in the judge's diff; a fix chore that changes nothing still commits its tick | the unit tests (`test_base_tests_named_support`, `test_base_tests`, `test_integrity`, `test_failures_block`, `test_failures_map`, `test_fix_failure_excerpt`, `test_fixloop_escalation`) |
+| 137 | `ui-hold-evidence` | whoever answers a UI hold sees the test step 5 wrote and why it failed at the head, the writer's retry sees that failure too, and one rejected behaviour is one fix task. `l4.verifier.generate`: `_Verdict.excerpt`, set in the `fails_at_head` branch of `_discriminates` from the head run's report with `l4.implementer.excerpt.failure_excerpt` (the retry prompt's excerpt: 8 lines per test, 8 tests, 40 lines, 3,000 characters, redacted before and after the cut, `tmp_root` the gate's); `GeneratedOutcome.excerpt` (new, last field; the excerpt of the attempt that wrote the kept code) and `GeneratedOutcome.code` as a copy redacted whole, cut at a line end before 4,000 characters and redacted again (the file written to the trees stays the raw code); `generate_ui_test`'s retry reason after `fails_at_head` adds `Why it failed at the head:` and the excerpt (data, no template change). `report._generated_json` keeps `excerpt` when set, and `code` is now redacted before its cut (and `verdicts._ui_hold_notes(criterion, generated, redact)` and `report._redacted_again`, called by `write_round_evidence`, redact both again with `redacted_cut` when they build the notes and write the round's files, for a record of 0.4.59 that a reused round restores); `hold_evidence.numbered_code` bounds the numbered copy to 200 lines and 6,000 characters (a longer copy ends with `… (cut: N more lines)`); `render_verification_md` adds `## Generated UI tests that were not accepted` (an item per outcome, the failure and the numbered code indented by six spaces). `verdicts._ui_hold_notes` (new): the hold's question gets the excerpt (four spaces) and the code (four spaces, the line number in four columns, two spaces) in its `### Harness notes` subsection (`NewQuestion.notes`), never in the hold's text, title or Context, so the hold's id, binding and `question.raised` stay; `_ui_hold_lines` adds one sentence that points at them. `verdicts._hold_finding` gives a rejected UI hold's finding its criterion (`is_ui_hold_finding`); `fixunit._candidates` leaves such a finding out of `cited`, sorts it after the criterion's own finding, skips it as before when its criterion has no reject in force and it gives no scenario, and names its scenario after the criterion's scenario. In a TypeScript web consumer the delegate and a person could not tell whether a generated browser test or the product was wrong, and in at least four cases in three units the test had failed on its own wrong premise; in two units a criterion and its UI hold rejected in one round gave two tasks and two criteria with the same scenario text (L4-VER-083..085, L4-VER-067, L4-VER-006, L4-IMP-102, SCN-VER-331..342, 350 and 352..354; `openspec/changes/ui-hold-evidence/`). Decided against: a timeout at the head as a writer failure (it removes no hold and a timeout is how a missing behaviour fails too). Limits: the writer is not shown an existing e2e test of the same page (a follow-up: one base test module, `testwriter@8`); only a test that failed at the head gets an excerpt; two different scenarios from one reviewer stay two criteria, in one task | the unit tests (`test_excerpt`, `test_generate`, `test_report_m15`, `test_resume`, `test_hold_verdicts`, `test_fixunit`, `test_kiro_fix_unit`, `test_ladder_hold_fix`, `test_ui_flow`) |
 | 138 | `test-chore-browser-tests` | a test chore counts the browser tests it writes, says what each gate found when it added none, checks each new test against the report that holds it, and tells its agent and its questions what it may change. `l4.implementer.tdd.run_single` (kind `tests`): the step's browser tests are `task_browser_tests(wb, base, None)` limited to the files `review_test_chore` kept; after the test gate and `green_failures`, when `gates.e2e` is configured and `_runnable_browser_tests(..., "single", ...)` leaves some, `_chore_browser_tests` (new, the shape of `_task_e2e_reason`, with `freeze_phase=None`) runs `gates.build` and `run_e2e(name="e2e-test-chore")`; `_task_e2e_run` returns `TaskE2e` (reason, excerpt, passed, unseen, report) and `_task_e2e_reason` keeps its pair; the refusals are those of L4-IMP-101; a browser test counts when one of its ids passed and none failed, an unseen one is `e2e.task_tests_unseen{phase: "single"}` and does not count; `added_unit` and `added_e2e` together feed `no tests added` and `decision_calling_code_wrong`, and `_already_done` (a retake) applies only when the review kept no test file; `over_cap_text` reads each id from its own report; `_discriminating_tests` gets `added_unit` only, and a browser-only chore of a cited criterion is held with no run (`BROWSER_ONLY`); `task.tests_added` keeps `tests` for unit-gate ids and gains `e2e_tests`; `_no_tests_text` (new) names each gate. `PromptContext.retake_tests` and two blocks for the `single_tests` role in `prompt.py` (no template change); `loop.chore_question_note(unit, kind)`, whose test-chore note keeps the fix chore's first sentence. A TypeScript consumer's test chore for one requested Python browser test failed `no tests added` three times because the Node unit gate does not run `e2e/`, passed only with a Node meta-test, and its fix unit's test chore could not edit the earlier take's browser test (L4-IMP-108..111, L4-VER-006, SCN-IMP-586..600; `openspec/changes/test-chore-browser-tests/`). Limits: the e2e suite runs whole; the phase-`single` deadline cap does not grow; where the e2e run is skipped (`-m`/`-k`, a directory shared with the unit gate) a browser test still cannot count; a test chore still cannot edit the test files an earlier take added (a new test file can hold the missing check); a browser-only chore of a cited criterion still needs an answer | the unit tests (`test_test_chore_browser`, `test_single_phase`, `test_prompt`, `test_loop`) |
 | 140 | `attempt-window-recheck` | an answer that unfreezes a file for a task's green renews its attempts once, and a step runs its test gate once more before it fails on a few pre-existing tests. `l4.implementer.loop._renew_on_answers` (new): before a task's first green attempt in a run (a resumed red commit, before the start escalation; or a red commit of the run), the grants of `unfreeze_for` with `reason` `human_answer` or `delegate_answer` and a path, whose question no earlier `task.attempts_renewed` of the task names, record `task.attempts_renewed{task, phase, questions, failed}` and clear the green failures, reasons and `escalated_from`; a question is credited once, by a renewal or by an earlier answer `task.unfrozen` that names it; attempt numbers go on; at most 2 renewals with `failed > 0` per task after the newest retry, resume or restart (`MAX_RENEWALS`), so at most three green windows between two of them (3 x `max_task_attempts` failed attempts with one profile); `seed_attempts` clears at the event; `deadline.window` is unchanged. `l4.implementer.recheck` (new): `recheck_candidates` (1 to 5 regressed ids, failed or errored, no time-out marker, in a file neither the branch nor the step changed: `gate_repeat.untouched`, factored out of `pre_existing`), the `test-recheck` run after `tree_reset` and `gate_repeat.short_of_time` (now public), the step's guard after it, the merged report (each flaky test's case from the re-run) judged again and handed on (`keep_tested` too), `task.tests_rechecked`; `RedVerdict.regressed` and the branch of `green_failures`; red, green and the fix, tests and refactor chores, not the repair chore. `VerifyResult.step_flakes` from the ledger, the section `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)` of `verification.md` and `verdict.json`'s `step_flakes`, kept by a reused round; no finding. Three times in two consumer units an accepted unfreeze left one green attempt, and three attempts in two units were lost to pre-existing tests of an e2e stack helper that failed once (L4-IMP-104, L4-IMP-105, L4-VER-082, L4-IMP-075, SCN-IMP-566..576, SCN-VER-322..323; `openspec/changes/attempt-window-recheck/`). Limits: an answer that opens nothing renews nothing; the gate runs whole; the re-run needs room before the soft deadline (`deadline.cap_s` is unchanged); a step that made a test flaky can pass its attempt, and is listed | the unit tests (`test_attempt_renewal`, `test_recheck`, `test_step_recheck`, `test_report_step_flakes`, `test_loop`, `test_gate_repeat`, `test_tdd_green`, `test_tdd_red`) |
+| 141 | `ui-carry-unchanged` | a UI criterion that the unit did not change, whose tracing tests are the base's and pass, is carried from the base instead of a step-5 gap that can only end as a hold (SLIPPABLE: it loosens L4-VER-067 for that case). `l4.verifier.ui_step.carried_from_base(gaps, trace, unchanged, file_of, changed, rejected)` (new, pure): a criterion unchanged on the base (`_Run.unchanged`, the `unchanged_ids` of step 4's baseline), `covered` with no `held` reason, every tracing test passed with `pass_to_pass`, no note, within the cap and adequate, every ignored test a passing over-cap candidate, every test file found (`ladder._carry_files`: `carry_file` over the work tree) and not among the unit's changed files; `rejected_ui_criteria(events, criteria)` (new): a criterion among `criteria` that a reviewer ever rejected, or one of its UI holds, is never carried; `carry_file(test_id, walked, paths)` (new, pure): the file of a test for the carry, found only when `file_of_id` places the id, no other file of the tree could be it, and the dotted-module walk agrees or finds no module for a file that is not `.py`. `ladder._generate_step` carries after the waiver and before the gap findings and the writer (also with no writer), records `verify.generated{status: carried, covered_by, attempts: 0}`, keeps the outcome (`GenStatus` `carried`), counts it in step 5's note and checks nothing out when every gap is waived or carried; `ui_gap_finding(carried=True)`, `unclosed_holds` and the fix planner's closed set treat it as closed (`lost_notes` is unchanged: taking `carried` would bring the hold back after step 9); `report._generated_rows` writes `carried from the base: <ids> …; a note, not a hold (L4-VER-086)`. A carry passes nothing: the judge's pass and an adequate test are still needed. A consumer's feedback follow-up that changed one web file raised UI holds for three of its merged parent's criteria that were word for word the base's and traced by passing `pass_to_pass` tests, which only the owner could answer (L4-VER-086, L4-VER-067, L4-VER-009, SCN-VER-343..349 and SCN-VER-351; `openspec/changes/ui-carry-unchanged/`). Not done: fuzzy matching of a restated scenario (a scenario with any changed word stays a new criterion); a pass-to-pass browser check of a carried criterion. Residual risk: a break of the browser side of an unchanged scenario that its base unit tests and the judge miss is no longer asked about | the unit tests (`test_ui_step`, `test_ui_flow`, `test_report_m15`, `test_resume`, `test_fixunit`) |
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
@@ -16606,6 +16709,180 @@ scenario is a spec defect (§26).
 - **When** step 1 runs the base's tests
 - **Then** every such file is reverted: the rule reads the exact path, a regular file at both revisions and the reason
   `named_by_task`
+
+#### SCN-VER-331 (+) The hold's question shows the generated test and its failure at the head · L4-VER-083, L4-VER-067
+- **Given** a UI criterion whose generated test `e2e/test_l4_c_<hex>.py` fails at the head with the body lines
+  `>       expect(page.get_by_role("heading", name="Orders")).to_be_visible()` and `E       AssertionError: Locator
+  expected to be visible` at line 19 of the file
+- **When** the round raises the criterion's UI hold question
+- **Then** its `### Harness notes` subsection holds both lines with the file's path relative to the repository, and the
+  code with that line numbered `19`; the hold's text, the question's title and the target's `text_sha256` are those
+  of 0.4.59; and the Context says that the harness notes show the test and why it failed at the head
+
+#### SCN-VER-332 (−) A secret in the generated test or its failure is not shown · L4-VER-083, L4-OBS-002
+- **Given** a generated test that holds a token-shaped value (`glpat-` followed by 20 letters and digits) that starts
+  ten characters before its 4,000th character, and a failure whose message holds another one
+- **When** the round writes `verdict.json` and `verification.md` and raises the hold's question
+- **Then** no part of either token of 8 characters or more is in any of the three files
+
+#### SCN-VER-333 (+) The report and the verdict keep the evidence, and a reused round shows it again · L4-VER-083, L4-VER-067
+- **Given** the round of SCN-VER-331
+- **When** it writes `verification.md` and `verdict.json`, and a later round reuses it
+- **Then** `verification.md` has `## Generated UI tests that were not accepted` with an item for the criterion and the
+  failure and the numbered code indented by six spaces under it; `verdict.json` holds `generated[].excerpt` and the
+  bounded `generated[].code`; the reused round's outcome has both; and a `verdict.json` written by 0.4.59 restores with
+  no excerpt and its stored code
+
+#### SCN-VER-334 (−) A generated test cannot forge the structure of `questions.md` · L4-VER-083, L4-IMP-102
+- **Given** a generated test that fails at the head and whose lines hold `## Q-900: x`, `### Answer`, `---`, a code
+  fence, `| a | b |`, `- **Status:** answered` and `<!-- write below this line -->`
+- **When** its hold's question is raised and the file is read back
+- **Then** the question has its usual subsections only, no line of the code is backslash-escaped, the answer is empty,
+  and the notes read back are the notes written
+
+#### SCN-VER-335 (−) Nothing is added without a written test · L4-VER-083, L4-VER-067
+- **Given** UI holds whose step 5 ended `not_testable` on its first reply, `writer_failed` before any code, and an older
+  outcome with no code and no excerpt
+- **When** their questions are raised and the report is written
+- **Then** no question has a `### Harness notes` subsection, their Context is that of 0.4.59, and the report has no
+  `## Generated UI tests that were not accepted` section
+
+#### SCN-VER-336 (+) The second attempt reads why the first test failed at the head · L4-VER-084
+- **Given** a first attempt whose test fails at the head with `E       AssertionError: Locator expected to be visible`
+- **When** the writer is asked again
+- **Then** the retry reason block of its prompt holds `the test fails at the head:` with the test's id, `Why it failed
+  at the head:` and that line
+
+#### SCN-VER-337 (−) Other statuses keep their retry reason, and acceptance is unchanged · L4-VER-084
+- **Given** a first attempt that passes at the merge base (`non_discriminating`), and a second attempt whose test
+  passes at the merge base after a `fails_at_head` first attempt
+- **When** step 5 runs them
+- **Then** the first retry reason is `the test passes at the merge base: it does not need the new behaviour` alone, and
+  the second outcome is `non_discriminating`, not accepted
+
+#### SCN-VER-338 (+) A criterion and its UI hold rejected in one round are one fix task · L4-VER-085, L4-VER-006
+- **Given** a FAIL round in which a reviewer rejected criterion C (Q-004) and C's UI hold (Q-005), each reason ending
+  with the same `WHEN … THEN …` sentence
+- **When** the fix unit is planned
+- **Then** it has one task for C that lists the criterion's finding and the hold's finding, holds both decisions with
+  Q-004's first, consumes Q-004 and Q-005, and its delta has one new scenario under `<C's requirement> — regression 1`
+
+#### SCN-VER-339 (+) Two different scenarios stay in the one task · L4-VER-085, L4-VER-006
+- **Given** the round of SCN-VER-338, where Q-005's sentence differs from Q-004's by one word
+- **When** the fix unit is planned
+- **Then** it has one task for C with both scenarios under `<C's requirement> — regression 1`, and both questions are
+  consumed
+
+#### SCN-VER-340 (+) A UI hold rejected alone is fixed under its criterion's requirement · L4-VER-085, L4-VER-006
+- **Given** a parent with two requirements and a FAIL round in which only C's UI hold was rejected, with a `WHEN …
+  THEN …` sentence
+- **When** the fix unit is planned
+- **Then** its task cites C, the scenario is under `<C's requirement> — regression 1` and named after C's scenario, and
+  no requirement is titled `Rejected hold: … — finding H-…`
+
+#### SCN-VER-341 (−) A UI hold rejected alone without a scenario is still not converted · L4-VER-085, L4-VER-006
+- **Given** a FAIL round in which only C's UI hold was rejected, with a reason and no `WHEN … THEN …`
+- **When** the fix unit is planned
+- **Then** the hold's finding cites C, it is listed as not converted, its question is not consumed, and the round goes
+  on as in 0.4.59
+
+#### SCN-VER-342 (−) The round's verdict and findings are unchanged, also for a round 0.4.59 asked · L4-VER-085, L4-VER-013
+- **Given** the round of SCN-VER-338, and a NEEDS_HUMAN round written by 0.4.59 that asked about C and C's UI hold,
+  whose two questions are answered with the rejects of SCN-VER-338 after the upgrade, so that the next round reuses it
+- **When** both rounds are aggregated and planned
+- **Then** both verdicts are FAIL, the hold's finding keeps its id, title, severity and source and cites C, and each
+  fix unit has the one task of SCN-VER-338
+
+#### SCN-VER-343 (+) An unchanged UI criterion with the base's passing tests is carried · L4-VER-086, L4-VER-067
+- **Given** a unit that changed a web file, and its UI criterion C whose scenario the archived specs at the base hold
+  word for word, traced only by `tests/test_rules.py::test_c`, which passed with the proof `pass_to_pass` and whose file
+  the unit did not change, with no end-to-end test
+- **When** step 5 runs
+- **Then** the writer is not asked about C, `verify.generated` records `status: carried` with `covered_by:
+  [tests/test_rules.py::test_c]`, the generated UI tests table says `carried from the base`, no hold is raised for C,
+  its minor gap finding says it is unchanged on the base, and nothing is checked out when C was the only gap; with a
+  second gap that goes to the writer, only that gap is written for, and no UI hold is raised for C after the judge
+  step either
+
+#### SCN-VER-344 (−) A scenario with a changed word is not carried · L4-VER-086, L4-VER-009
+- **Given** the unit of SCN-VER-343, where C's scenario text differs from the base's by two words
+- **When** step 5 runs
+- **Then** C is a gap as before: its test is not `pass_to_pass` evidence, the writer is asked, and an outcome that is
+  not accepted raises C's UI hold
+
+#### SCN-VER-345 (−) A test the unit added or changed keeps the hold · L4-VER-086, L4-VER-067
+- **Given** the unit of SCN-VER-343, where the unit also added a test of C to a new file, or changed
+  `tests/test_rules.py`
+- **When** step 5 runs
+- **Then** C is not carried, and step 5 asks the writer and holds C as before
+
+#### SCN-VER-346 (−) Any other proof, a failing or skipped test, or a file not found keeps the hold · L4-VER-086, L4-VER-067
+- **Given** four variants of SCN-VER-343: a second tracing test of C with a red proof; `test_c` failing at the head;
+  a skipped tracing test of C; and a tracing test whose file is not found
+- **When** step 5 runs
+- **Then** none of them carries C; each follows the path of 0.4.59 (a note of L4-VER-067 only where its own rule holds,
+  else the writer and the hold)
+
+#### SCN-VER-347 (−) A reject is never passed by · L4-VER-086, L4-VER-013
+- **Given** the unit of SCN-VER-343, whose ledger holds a reviewer's reject of C's UI hold from an earlier round, in
+  force or consumed by a fix unit
+- **When** step 5 runs
+- **Then** C is not carried, its UI hold is raised when step 5 does not close it, and a reject in force turns it into
+  the finding of L4-VER-013
+
+#### SCN-VER-348 (−) A carry does not pass the criterion · L4-VER-086, L4-VER-003
+- **Given** the carried criterion of SCN-VER-343, and a judge that calls `test_c` inadequate for C
+- **When** the round is aggregated
+- **Then** C is `needs_human` and asked through its own verdict question, and no UI hold is raised for it
+
+#### SCN-VER-349 (+) A reused round keeps the carry, and a hold asked before the upgrade is superseded · L4-VER-086, L4-VER-067
+- **Given** the round of SCN-VER-343, reused by the next round, and a unit whose earlier round (0.4.59) asked C's UI
+  hold, left open, before a fresh round under this harness carries C
+- **When** the rounds end
+- **Then** the reused round restores `status: carried`, asks no writer and raises no hold; the fresh round supersedes
+  the open question by its round and asks nothing about C's hold
+
+#### SCN-VER-350 (+) A later attempt that gives no code keeps the first test and its failure together · L4-VER-083
+- **Given** a first attempt whose test fails at the head with `E       AssertionError: Locator expected to be visible`,
+  and a second attempt whose reply is a writer error
+- **When** step 5 ends the criterion and the round raises its UI hold question
+- **Then** the outcome is `writer_failed` and keeps the first test's code and its excerpt; the `### Harness notes` hold
+  the failure and the first test's code, and the code's heading says that step 5 ended `writer_failed`
+
+#### SCN-VER-351 (−) A test whose file is in doubt keeps the hold · L4-VER-086, L4-VER-067
+- **Given** the unit of SCN-VER-343 with the work tree `src/pricing/total.py` and `src/pricing/total.test.ts`, and C
+  traced only by `src.pricing.total.test.ts::x`, a passing `pass_to_pass` test whose file the unit changed; or C traced
+  by `tests.test_a::x` where both `tests/test_a.py` and `pkg/tests/test_a.py` are in the tree and the second is the one
+  the unit changed; or C traced only by `src.pricing.total.test.ts::x` with a second `.test.ts` that could hold it
+- **When** step 5 runs
+- **Then** C is not carried: the module walk reads the first id as `src/pricing/total.py`, which the unit did not
+  change, and the other reading names the changed test file, so the two disagree; the second id could be either module;
+  the third could be either `.test.ts`; step 5 asks the writer and holds C as before. A changed `.test.ts` is refused
+  like any changed file. Carried as in SCN-VER-343 are the plain case (`tests/test_a.py` read as the same file by both
+  readings with no other file of that name) and a criterion traced only by one unchanged `.test.ts` that no Python
+  module of its stem accompanies, whose module walk finds nothing
+
+#### SCN-VER-352 (−) The numbered code of a hold is bounded by its lines and its own length · L4-VER-083
+- **Given** a generated test that is not accepted whose code is 4,000 empty lines, and another of 2,000 lines of one
+  character
+- **When** the round raises the criterion's UI hold question and writes `verification.md`
+- **Then** each shows its first 200 lines numbered `1` to `200` and, after them, `… (cut: 3800 more lines)` and `…
+  (cut: 1800 more lines)`; the numbered lines and the cut line are at most 6,000 characters before the container's
+  indent, and the code's heading says `at most 200 lines and 6,000 characters`
+
+#### SCN-VER-353 (−) A half private key in a record that 0.4.59 wrote is not shown · L4-VER-083
+- **Given** a `verdict.json` of 0.4.59 whose generated test's code ends inside a private key (its begin marker and
+  some of the body, no end marker) because its cut came before its redaction, restored by a reused round
+- **When** the round raises the criterion's UI hold question and writes `verification.md` and `verdict.json`
+- **Then** the question's notes, `verification.md` and `verdict.json` hold the code before the key marker,
+  `[REDACTED:private-key]` in its place and no line of the key's body
+
+#### SCN-VER-354 (−) The harness notes pick no section of the specification the delegate reads · L4-VER-083
+- **Given** a UI hold's question whose Context names `per_account` and whose harness notes hold a test that names
+  `half_even`, and a design with a section for each name and a budget that holds one of them
+- **When** the delegate's prompt is built, alone or in a batch
+- **Then** the section of `per_account` is shown and that of `half_even` is cut, as for the same question without the
+  notes; the notes are still in the question's data block, after the Context
 
 #### SCN-VER-356 (−) A TypeScript unit with a changed Python browser test does not audit · L4-VER-089, L4-VER-002
 - **Given** a unit that changes `web/src/layout.ts` and `e2e/test_layout.py`, and a unit-gate report of Node test ids

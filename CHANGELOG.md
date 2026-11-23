@@ -15,6 +15,18 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   `verdict.json` a new key, `step_flakes`. They list each test that failed once in a red, green or chore step and
   passed when the step ran its test gate again. The section is not a finding and does not change the verdict
   (L4-VER-082).
+- A UI hold's question now shows the test step 5 wrote and why it failed at the head. Before, the question gave the
+  status and the ids of the failing tests only, and the generated file is removed after the run, so the delegate and
+  people could not tell a wrong test from wrong code: in a consumer's units the generated browser test failed on its own
+  wrong premise (a session put where the app does not read it, a route without the app's prefix, a session mock without
+  a user) at least four times, and each cost a round. Now the question's `### Harness notes` hold the head run's failure
+  (the retry prompt's excerpt: at most 40 lines and 3,000 characters) and the test's code (each line numbered: at most 200
+  lines and 6,000 characters, and a longer copy ends with a line that says how many lines were cut), both redacted before
+  they are cut and again after. `verification.md` has a new section, `## Generated
+  UI tests that were not accepted`, with the same, and `verdict.json` keeps the excerpt as `generated[].excerpt`. The
+  hold's text, its id and what its accept is bound to are unchanged, so no answer is asked again. The delegate reads the
+  notes with the Context, but picks the sections of the specification it shows by the title and the Context alone, as
+  before (L4-VER-083).
 
 ### Changed
 - The readiness review shows each plan entry with `id` first, then `depends_on`, then the other keys, for a unit, a batch and each part of a batch. Before, the keys were sorted, so a batch entry printed each unit's `depends_on` list before its `id` and right after the previous unit's id. On a ten-unit plan one free judge raised the same false BLOCKING finding in two reviews in a row ("two units list themselves in depends_on"; none does), and a second judge found nothing in the same material. The readiness prompt version is now 5. **Upgrade cost:** a plan reviewed under 0.4.59 and not yet activated shows `review: stale (the review prompt changed)`, its activation is refused until the next CI run has judged every subject again (no answer of 0.4.59 is reused, and the cost is charged to the plan), and an acceptance made on the old review no longer holds and must be given again (its rounds are kept, so it can be given at once). A force acceptance still holds. An active plan is not stopped, not reviewed again and shows no change. A plan stopped with `unit_rejected` whose review is stale is told to run `l4 yolo review <plan> --local` (CI does not review such a plan). Move your local `l4` with the pin: an `l4` of 0.4.60 calls a 0.4.59 review stale while a CI still pinned to 0.4.59 calls it current (L4-YOLO-101).
@@ -41,6 +53,19 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   tests changed with an allowance` with the task and the text's source. Before, step 1 reverted the file, and only a
   person's `[test-infra]` tag let the unit pass. A unit in flight keeps such a file on its next round, because 0.4.59
   already recorded the task's text (L4-VER-079).
+- When the test step 5 wrote fails at the head, the writer's second attempt is told why, not only which tests failed: its
+  retry reason holds the same excerpt. A second test is still kept only when it fails at the merge base and passes at
+  the head (L4-VER-084).
+- A UI criterion that a unit did not change is carried from the base instead of becoming a UI hold: its scenario is word
+  for word the base spec's (L4-VER-009), every test that traces it is a passing `pass_to_pass` test in a file the unit
+  did not change, and nobody ever rejected it or its UI hold. Step 5 cannot make a test that fails at the merge base for
+  behaviour the base already has, so such a criterion always ended as a hold; a follow-up that changed one web file
+  raised holds for its merged parent's criteria that only the owner could answer. A carried criterion is listed
+  (`verify.generated` with `status: carried`, its row of the generated UI tests table, step 5's note, its minor gap
+  finding) and still needs the judge's pass. A test whose file is in doubt keeps the hold: the file of every test must be
+  found by the path reading of its id, the dotted-module reading must give the same file or find no module for a
+  file that is not Python, and no other file may fit (a TypeScript test beside a Python module of its stem, one module
+  name under two roots, two TypeScript files that could hold it). A scenario restated under `MODIFIED` with any word changed is a new criterion, as before (L4-VER-086).
 
 ### Fixed
 - A test chore now counts the browser tests it writes. In a TypeScript consumer whose browser tests are Python under `e2e/`, a person's feedback item asked for one browser test; the test chore failed `no tests added` three times, because only the Node unit gate's new tests were counted, and passed on its fifth attempt only with a Node meta-test that reads the browser test's file. A browser test of the step now counts when the e2e report shows it passed; one that fails refuses the attempt with its failure text, as in green; one the report does not show does not count and is noted (L4-IMP-108).
@@ -60,6 +85,15 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 - An unfreeze that the delegate accepted after two failed green attempts no longer leaves the task one attempt. Three
   times in two consumer units the next run had attempt 3 of 3, and once the breaker halted the unit on a second wrong
   line of the same test (L4-IMP-104).
+- A reviewer who rejects a criterion and its UI hold in the same round now gets one fix task for that behaviour, with
+  both reasons, both questions consumed, and one new scenario when the two scenarios are the same text. Before, the fix
+  unit had two tasks (the second one "already satisfied") and two criteria with the same scenario, which the next round
+  asked about again. A UI hold rejected alone with a `WHEN … THEN …` now gets its scenario under the criterion's
+  requirement, named after the criterion's scenario, instead of a requirement named after the hold (L4-VER-085).
+- `verdict.json` redacted a generated test's code after cutting it at 4,000 characters, so a secret that the cut split
+  could stay in part. The code is now redacted whole, then cut at a line end, then redacted again, and a question's
+  notes, `verification.md` and `verdict.json` redact it and the failure once more when they are built or written, so a round of 0.4.59 that is reused no longer shows a
+  private-key block that the old cut left half there (L4-VER-083).
 
 ## 0.4.59 (2026-11-19)
 

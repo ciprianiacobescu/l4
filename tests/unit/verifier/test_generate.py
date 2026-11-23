@@ -315,3 +315,95 @@ def test_a_generated_test_that_rewrites_its_own_file_is_committed_as_the_harness
     text = (bench.wb.worktree / done.path).read_text()
     assert "# fo" "rged" not in text and "def test_shows_four_items" in text
     assert done.sha256 == hashlib.sha256(text.encode()).hexdigest()
+
+
+EXCERPT_LINE = "E       assert '9 items' in "  # pytest's own rewrite of the assertion of WRONG
+TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
+
+
+def test_a_failure_at_the_head_keeps_the_excerpt_and_a_bounded_copy_of_the_code(web, monkeypatch):  # SCN-VER-331
+    bench, _ = web
+    written = []
+    import l4.verifier.generate as generate
+
+    real = generate.write_test_file
+
+    def spy(tree, rel, text, **kw):
+        written.append(text)
+        return real(tree, rel, text, **kw)
+
+    monkeypatch.setattr(generate, "write_test_file", spy)
+    long = WRONG + "\n\n# " + "padding " * 700 + "\n" + "# tail line\n"  # over 4,000 characters
+    done = run_one(web, Writer(code(long), code(long)))
+    assert done.status == "fails_at_head"
+    assert EXCERPT_LINE in done.excerpt and str(bench.wb.worktree) not in done.excerpt
+    assert "e2e/test_l4_c_de7f2d3f.py" in done.excerpt  # the location line, relative to the repository
+    assert len(done.excerpt.splitlines()) <= 40 and len(done.excerpt) <= 3000
+    assert 0 < len(done.code) <= 4000 and long.startswith(done.code) and done.code != long
+    assert written and all(text == long for text in written)  # the file written to the trees is the raw code
+
+
+def test_a_secret_in_the_code_that_straddles_the_cut_is_in_no_part_of_the_copy(web):  # SCN-VER-332
+    # a first line of its own: the token starts before the 4,000th character and ends after it
+    long = "# " + "p" * 3983 + " " + TOKEN + "\n" + WRONG
+    done = run_one(web, Writer(code(long), code(long)))
+    assert done.status == "fails_at_head"
+    assert done.code.startswith("# ppp") and len(done.code) == 4000  # cut inside the line: no line end to cut at
+    assert all(TOKEN[i : i + 8] not in done.code for i in range(len(TOKEN) - 7))
+
+
+def test_a_configured_secret_in_the_failure_is_not_in_the_excerpt_the_outcome_keeps(web):  # SCN-VER-332
+    from l4.redact import Redactor
+
+    bench, _ = web
+    secret = "hunter2-" + "k9x7q2m4"  # a configured value: no token shape matches it, only the redactor's own table
+    bench.wb.redactor = Redactor({"E2E_PASSWORD": secret})
+    wrong = READ + f"\n\n\ndef test_shows_nine_items():\n    assert '9 items' in page(), 'signed in as {secret}'\n"
+    done = run_one(web, Writer(code(wrong), code(wrong)))
+    assert done.status == "fails_at_head" and EXCERPT_LINE in done.excerpt and "signed in as" in done.excerpt
+    assert secret not in done.excerpt and "[REDACTED" in done.excerpt  # redacted where step 5 builds the excerpt
+    assert secret not in done.code and secret not in done.reason
+
+
+def test_the_excerpt_belongs_to_the_attempt_that_wrote_the_kept_code(web):  # SCN-VER-350
+    bench, _ = web
+    bench.wb.cfg.gates.lint = ["sh -c '! grep -q LINTME e2e/test_l4_c_de7f2d3f.py'"]
+    linted = GOOD + "# LINTME\n"
+    done = run_one(web, Writer(code(WRONG), code(linted)))
+    assert done.status == "lint_failed" and done.code == linted and done.excerpt == ""
+    done = run_one(web, Writer(code(WRONG), StructuredResult("timeout", None, detail="no answer")))
+    assert done.status == "writer_failed" and done.attempts == 2
+    assert done.code == WRONG and EXCERPT_LINE in done.excerpt and done.path == test_path("e2e", CID)
+    done = run_one(web, Writer(code(WRONG), StructuredResult("schema_invalid", None, detail="x"), code(WRONG)))
+    assert done.attempts == 2 and done.code == WRONG  # MAX_ATTEMPTS is 2: the invalid reply kept the first test
+    assert done.status == "writer_failed" and EXCERPT_LINE in done.excerpt
+
+
+def test_a_test_that_did_not_fail_at_the_head_has_no_excerpt(web):
+    done = run_one(web, Writer(code(VACUOUS), code(VACUOUS)))
+    assert done.status == "non_discriminating" and done.excerpt == "" and done.code == VACUOUS
+    done = run_one(web, Writer(code(GOOD)))
+    assert done.accepted and done.excerpt == ""
+
+
+def test_scn_ver_336_the_second_attempt_reads_why_the_first_test_failed_at_the_head(web):
+    writer = Writer(code(WRONG), code(GOOD))
+    done = run_one(web, writer)
+    assert done.accepted and done.attempts == 2
+    first, second = writer.prompts
+    assert "the test fails at the head:" not in first and "Why it failed at the head:" not in first
+    assert "the test fails at the head:" in second and "e2e.test_l4_c_de7f2d3f::test_shows_nine_items" in second
+    assert "Why it failed at the head:" in second and EXCERPT_LINE in second
+    block = second[second.index('source="retry reason"') :]  # inside the retry reason data block
+    assert block.index("Why it failed at the head:") < block.index(EXCERPT_LINE) < block.index("</l4:data>")
+    assert str(web[0].wb.worktree) not in second  # paths relative to the repository
+
+
+def test_scn_ver_337_other_statuses_keep_their_retry_reason_and_acceptance_is_unchanged(web):
+    writer = Writer(code(VACUOUS), code(GOOD))
+    run_one(web, writer)
+    assert "the test passes at the merge base: it does not need the new behaviour" in writer.prompts[1]
+    assert "Why it failed at the head:" not in writer.prompts[1]
+    done = run_one(web, Writer(code(WRONG), code(VACUOUS)))
+    assert done.status == "non_discriminating" and not done.accepted and done.attempts == 2
+    assert done.excerpt == ""  # the kept test is the second one, which passed at the merge base

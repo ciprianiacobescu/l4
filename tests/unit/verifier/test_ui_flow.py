@@ -465,3 +465,339 @@ def test_the_verdict_records_the_excerpt_of_a_module_the_e2e_gate_could_not_coll
     assert records, verdict["failures"]
     [excerpt] = [r["excerpt"] for r in records.values()]
     assert "no_such_module_for_the_excerpt" in excerpt and len(excerpt.splitlines()) <= 8 and len(excerpt) <= 600
+
+
+def test_scn_ver_342_a_round_that_asked_a_ui_hold_before_the_upgrade_is_fixed_under_its_criterion(
+    run_l4, valid_spec, web_repo, tdd_repo, raw
+):
+    """The reject of a UI hold, answered after the round was written, settles through `_hold_finding` when the round
+    is reused: the verdict is FAIL, the finding keeps the hold's id and now cites the criterion, and the fix unit's
+    scenario is under the criterion's requirement, never under `Rejected hold: ... — finding H-...`."""
+    import json
+
+    from ..orchestrator.conftest import edit_questions_on_origin
+
+    noted = Step(structured={"criterion": UNKNOWN, "not_testable": "it is about a refused code"})
+    first = run_l4([red_step(), web_green(), no_test(KNOWN), noted, JUDGE], **web_repo)
+    assert first.code == 11 and len(first.events("question.raised")) == 1
+    answer = "reject: the badge is missing. WHEN the cart shows a coupon THEN it names the code SAVE10"
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer=answer)
+    second = run_l4([], **web_repo)  # the stored NEEDS_HUMAN round is reused: no writer, no judge
+    assert second.code == 10, second.outcome
+    assert [e["verdict"] for e in second.events("verify.verdict")] == ["NEEDS_HUMAN", "FAIL"]
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    [hold] = [f for f in body["findings"] if f["id"].startswith("H-")]
+    assert hold["criterion"] == KNOWN and hold["source"] == "deterministic"
+    assert hold["title"].startswith("Rejected hold")
+    [spawned] = second.events("fix.spawned")
+    assert hold["id"] in spawned["findings"] and spawned["consumed"] == ["Q-001"]
+    delta = second.pushed(f"{UNIT_DIR}-fix-1/specs/pricing/spec.md")
+    assert "### Requirement: Discount codes \N{EM DASH} regression 1" in delta and "#### Scenario: Known code" in delta
+    assert "finding H-" not in delta and "Rejected hold" not in delta
+    tasks = second.pushed(f"{UNIT_DIR}-fix-1/tasks.md")
+    assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold["id"] in tasks
+
+
+# -- ui-carry-unchanged (L4-VER-086): an unchanged UI criterion with the base's passing tests is carried
+
+BASE_SPEC = (
+    "# pricing Specification\n\n## Purpose\nDiscount codes for the pytdd pricing module.\n\n## Requirements\n\n"
+    "### Requirement: Discount codes\nThe `apply_discount(amount, code)` function SHALL return `amount` reduced by "
+    "the percentage of a known code, rounded to two decimals, and SHALL raise `ValueError` for a code that is not in "
+    "the table. The table holds `SAVE10` (10 %).\n\n"
+    '#### Scenario: Known code\n- **WHEN** `apply_discount(50.0, "SAVE10")` is called\n'
+    "- **THEN** it returns `45.0`\n\n"
+    '#### Scenario: Unknown code\n- **WHEN** `apply_discount(50.0, "NOPE")` is called\n'
+    "- **THEN** it raises `ValueError`\n"
+)  # the unit's two scenarios, word for word: the archived specs at the base hold them
+BASE_OF = {KNOWN: "tests.test_base::test_known_old", UNKNOWN: "tests.test_base::test_unknown_old"}
+WRITER_PROMPT = "Write the e2e test for criterion"
+
+
+@pytest.fixture
+def carry_repo(web_repo, tdd_repo, raw, monkeypatch):
+    """The base holds the archived spec with both scenarios, and the criteria in `carry_of` are traced only by a
+    passing base test (the proof `pass_to_pass`) in `tests/test_base.py`, a file the unit does not change."""
+    from l4.verifier import ladder
+    from l4.verifier.types import TracingTest
+
+    spec = tdd_repo.repo / "openspec/specs/pricing/spec.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(BASE_SPEC)
+    raw(tdd_repo.repo, "add", "-A")
+    raw(tdd_repo.repo, "commit", "-q", "-m", "the archived pricing spec")
+    raw(tdd_repo.repo, "push", "-q", "origin", "main")
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    # `file` holds the base tests (their ids are its dotted module's, unless `ids` names others); `tree` is the work
+    # tree the ids are looked up in (FAKE: the unit's own tree is the web fixture's), `walk` what the dotted-module
+    # walk of `file_of_test` finds for them (None: `file`; "": no module)
+    state = {"carry": (KNOWN,), "file": "tests/test_base.py", "proof": "pass_to_pass", "ids": None, "tree": None,
+             "walk": None}  # fmt: skip
+    real_trace, real_file = ladder.trace_criteria, ladder.file_of_test
+
+    def ids() -> dict[str, str]:
+        module = state["file"].removesuffix(".py").replace("/", ".")
+        return state["ids"] or {c: t.replace("tests.test_base", module) for c, t in BASE_OF.items()}
+
+    def base_tests(*args, **kwargs):
+        def only_base_test(e):
+            test = TracingTest(ids()[e.criterion], "passed", state["proof"])
+            return dataclasses.replace(e, state="covered", tests=(test,), ignored=(), capped=())
+
+        return [only_base_test(e) if e.criterion in state["carry"] else e for e in real_trace(*args, **kwargs)]
+
+    monkeypatch.setattr(ladder, "trace_criteria", base_tests)
+
+    def file_of(wb, test):
+        if test not in ids().values():
+            return real_file(wb, test)
+        return state["file"] if state["walk"] is None else (state["walk"] or None)  # "": the walk finds no module
+
+    monkeypatch.setattr(ladder, "file_of_test", file_of)
+    real_tree = ladder.worktree_files
+    monkeypatch.setattr(
+        ladder, "worktree_files", lambda wb: state["tree"] or [state["file"], *real_tree(wb)]
+    )  # FAKE tree: the base tests' file next to the real files
+    return state
+
+
+def writer_requests(run) -> list[str]:
+    return [r.prompt for r in run.adapter.requests if WRITER_PROMPT in r.prompt]
+
+
+def test_scn_ver_343_an_unchanged_criterion_is_carried_and_only_the_other_gap_goes_to_the_writer(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    import json
+
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    [asked] = writer_requests(run)
+    assert UNKNOWN in asked and KNOWN not in asked  # only the other gap is written for
+    made = {e["criterion"]: e for e in run.events("verify.generated")}
+    assert made[KNOWN]["status"] == "carried" and made[KNOWN]["covered_by"] == [BASE_OF[KNOWN]]
+    assert made[KNOWN]["attempts"] == 0 and made[UNKNOWN]["status"] == "accepted"
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {KNOWN} | carried"))
+    assert "carried from the base" in row and BASE_OF[KNOWN] in row
+    assert f"UI criterion {KNOWN} has no end-to-end test" not in text and "## Needs a human" not in text
+    gap = next(line for line in text.splitlines() if "No end-to-end test traces criterion" in line and KNOWN in line)
+    assert "unchanged on the base" in gap
+    body = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    assert not [h for h in body["holds"] if KNOWN in h]
+    assert steps_of(run)["5"] == "ok" and run.events("question.raised") == []
+
+
+def test_scn_ver_343_with_every_gap_carried_nothing_is_checked_out_and_no_writer_is_needed(
+    run_l4, valid_spec, web_repo, carry_repo, monkeypatch
+):
+    from l4.verifier import ladder
+
+    carry_repo["carry"] = (KNOWN, UNKNOWN)
+
+    def never(*args, **kwargs):
+        raise AssertionError("the writer step ran although every gap was carried")
+
+    monkeypatch.setattr(ladder, "generate_ui_tests", never)
+    real = ladder.VerifyContext
+    # no writer is opened (the config refuses an empty `roles.verifier_agent`): the carry needs none
+    monkeypatch.setattr(ladder, "VerifyContext", lambda *args, **kw: real(*args, **{**kw, "ui_writer": None}))
+    run = run_l4([red_step(), web_green(), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert writer_requests(run) == []
+    made = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
+    assert made == {KNOWN: "carried", UNKNOWN: "carried"}
+    assert "2 carried from the base (L4-VER-086)" in run.pushed(f"{UNIT_DIR}/verification.md")  # step 5's note
+
+
+def test_scn_ver_345_a_test_file_the_unit_changed_keeps_the_writer_and_the_hold(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    carry_repo["file"] = "tests/test_discount.py"  # the unit's own test file: changed since the merge base
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    made = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
+    assert made == {KNOWN: "accepted", UNKNOWN: "uncollectable"}  # nothing carried
+    assert len(writer_requests(run)) == 2
+
+
+def test_scn_ver_346_a_red_proof_keeps_the_writer(run_l4, valid_spec, web_repo, carry_repo):
+    carry_repo["proof"] = "red_assertion"
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    assert "carried" not in {e["status"] for e in run.events("verify.generated")}
+
+
+@pytest.mark.parametrize(
+    ("tree", "walk", "known"),
+    [
+        # a Python module of the test's stem beside it: the module walk reads the test id as that module
+        (["src/pricing/total.py", "src/pricing/total.test.ts"], "src/pricing/total.py", "src.pricing.total.test.ts::x"),
+        # a module of the same name under two roots: which of the two ran is not known
+        (["tests/test_a.py", "pkg/tests/test_a.py"], "tests/test_a.py", "tests.test_a::x"),
+        # a test that is not Python, with two files that could hold it
+        (["src/pricing/total.test.ts", "lib/src/pricing/total.test.ts"], "", "src.pricing.total.test.ts::x"),
+    ],
+    ids=["same-stem-module", "two-roots", "two-typescript-files"],
+)
+def test_scn_ver_351_a_test_whose_file_is_in_doubt_keeps_the_writer_and_the_hold(
+    run_l4, valid_spec, web_repo, carry_repo, tree, walk, known
+):
+    carry_repo.update(tree=tree, walk=walk, ids={KNOWN: known, UNKNOWN: known.replace("::x", "::y")}, file=tree[0])
+    run = run_l4(
+        [red_step(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    made = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
+    assert made == {KNOWN: "accepted", UNKNOWN: "uncollectable"}  # nothing carried
+    assert len(writer_requests(run)) == 2
+
+
+def test_scn_ver_351_the_plain_case_is_carried_with_its_file_found_by_both_readings(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    carry_repo.update(tree=["tests/test_base.py", "tests/test_other.py", "src/pricing/total.py"])
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"
+
+
+def test_scn_ver_351_a_typescript_only_criterion_is_carried_when_the_walk_finds_no_module(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    ids = {KNOWN: "src.pricing.total.test.ts::x", UNKNOWN: "src.pricing.total.test.ts::y"}
+    carry_repo.update(tree=["src/pricing/total.test.ts", "src/pricing/total.ts"], walk="", ids=ids)
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"
+
+
+def test_scn_ver_348_a_carry_does_not_pass_the_criterion_the_judge_calls_inadequate(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    inadequate = Step(
+        structured=judge_reply(
+            [KNOWN, UNKNOWN],
+            test_adequacy=[
+                {"test": BASE_OF[KNOWN], "criterion": KNOWN, "adequate": False, "reason": "it does not open the page"}
+            ],
+        )
+    )
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), inadequate], **web_repo)
+    assert run.code == 11, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {KNOWN} |") and "needs_human" in line)
+    assert "uncovered" in row
+    asked = run.events("question.raised")
+    assert len(asked) == 1 and asked[0].get("criterion", KNOWN) == KNOWN and "UI criterion" not in asked[0]["title"]
+    assert f"UI criterion {KNOWN} has no end-to-end test" not in text
+
+
+def answer_on_origin(tdd_repo, raw, answers: dict[str, str]) -> None:
+    """What a person does with several questions: one clone, each question answered, one push."""
+    from l4.specs.questions import QuestionsFile, QuestionStatus
+
+    from ..orchestrator.conftest import BRANCH
+
+    clone = tdd_repo.repo.parent / "human-several"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    path = clone / UNIT_DIR / "questions.md"
+    file = QuestionsFile.load(path)
+    assert file is not None
+    for qid, answer in answers.items():
+        file = file.set_status(qid, QuestionStatus("answered"))
+        body = file.get(qid).answer.body  # type: ignore[union-attr]
+        file = QuestionsFile.parse(file.data[: body.end] + answer.encode() + b"\n" + file.data[body.end :])
+    file.save(path)
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", "answer " + ", ".join(answers))
+    raw(clone, "push", "-q", "origin", BRANCH)
+
+
+def test_scn_ver_347_a_reject_in_the_ledger_is_never_passed_by_a_carry(
+    run_l4, valid_spec, web_repo, carry_repo, tdd_repo, raw
+):
+    from ..orchestrator.conftest import BRANCH
+
+    carry_repo["carry"] = ()  # round 1: nothing is carried; the writer fails for KNOWN, so its UI hold is asked
+    first = run_l4(
+        [red_step(), web_green(), no_test(KNOWN), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo
+    )
+    assert first.code == 11, first.outcome
+    [asked] = first.events("question.raised")
+    assert asked["criterion"] == KNOWN
+    answer_on_origin(tdd_repo, raw, {"Q-001": "reject: the badge is missing. WHEN the cart opens THEN it shows SAVE10"})
+    clone = tdd_repo.repo.parent / "human-several"  # the person also touches the app: the round is not reused
+    (clone / "app.py").write_text((clone / "app.py").read_text() + "\n# touched\n")
+    raw(clone, "commit", "-q", "-am", "touch the app")
+    raw(clone, "push", "-q", "origin", BRANCH)
+    carry_repo["carry"] = (KNOWN,)  # round 2 would carry it, but the reject stands
+    second = run_l4([no_test(KNOWN), JUDGE], **web_repo)
+    assert second.code == 10, second.outcome  # the rejected hold is a finding of a FAIL round: the fix unit is written
+    assert "carried" not in {e["status"] for e in second.events("verify.generated")}
+    assert len(writer_requests(second)) == 1 and KNOWN in writer_requests(second)[0]  # the writer was asked again
+    assert [e["verdict"] for e in second.events("verify.verdict")] == ["NEEDS_HUMAN", "FAIL"]
+
+
+def test_scn_ver_349_a_reused_round_keeps_the_carry_and_asks_nobody_again(
+    run_l4, valid_spec, web_repo, carry_repo, tdd_repo, raw
+):
+    import json
+
+    from ..orchestrator.conftest import edit_questions_on_origin
+
+    first = run_l4([red_step(), web_green(), no_test(UNKNOWN), JUDGE], **web_repo)  # KNOWN carried, UNKNOWN held
+    assert first.code == 11, first.outcome
+    [asked] = first.events("question.raised")
+    assert asked["criterion"] == UNKNOWN
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
+    second = run_l4([], **web_repo)  # the stored round is reused: no writer, no judge
+    assert second.code == 0, second.outcome
+    assert second.adapter.requests == [] and len(second.events("question.raised")) == 1
+    carried = [e for e in second.events("verify.generated") if e["status"] == "carried"]
+    assert [e["criterion"] for e in carried] == [KNOWN]  # recorded once, by round 1
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    made = {g["criterion"]: g for g in body["generated"]}
+    assert made[KNOWN]["status"] == "carried" and made[KNOWN]["covered_by"] == [BASE_OF[KNOWN]]
+    assert not any(KNOWN in hold for hold in body["holds"])
+    text = second.pushed(f"{UNIT_DIR}/verification.md")
+    assert "reused (round 1)" in text and "carried from the base" in text
+
+
+def test_scn_ver_342_a_criterion_and_its_ui_hold_rejected_after_a_needs_human_round_are_one_task(
+    run_l4, valid_spec, web_repo, tdd_repo, raw
+):
+    """The round that asked both questions is reused once they are answered, so the rejects settle through this
+    harness's `_hold_finding`: FAIL, the hold's finding cites the criterion, and the fix unit has one task."""
+    import json
+
+    skipped = Step(structured=judge_reply([UNKNOWN]))  # a criterion the judge skipped is `needs_human`
+    first = run_l4(
+        [red_step(), web_green(), no_test(KNOWN), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), skipped], **web_repo
+    )
+    assert first.code == 11, first.outcome
+    asked = {e["target"]: e["id"] for e in first.events("question.raised")}
+    hold = next(t for t in asked if t.startswith("H-"))
+    assert set(asked) == {KNOWN, hold}
+    then = "WHEN the cart opens THEN it shows SAVE10"
+    answer_on_origin(
+        tdd_repo, raw,
+        {asked[KNOWN]: f"reject: the badge is missing. {then}", asked[hold]: f"reject: same. {then}"},
+    )  # fmt: skip
+    second = run_l4([], **web_repo)
+    assert second.code == 10, second.outcome
+    assert [e["verdict"] for e in second.events("verify.verdict")] == ["NEEDS_HUMAN", "FAIL"]
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    [finding] = [f for f in body["findings"] if f["id"] == hold]
+    assert finding["criterion"] == KNOWN and finding["severity"] == "major"
+    [spawned] = second.events("fix.spawned")
+    assert sorted(spawned["consumed"]) == sorted(asked.values())
+    tasks = second.pushed(f"{UNIT_DIR}-fix-1/tasks.md")
+    assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold in tasks
+    delta = second.pushed(f"{UNIT_DIR}-fix-1/specs/pricing/spec.md")
+    assert delta.count("#### Scenario:") == 1 and "finding H-" not in delta  # the same text is pinned once

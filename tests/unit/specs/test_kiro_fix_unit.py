@@ -395,3 +395,33 @@ def test_design_md_holds_the_failure_block_as_an_indented_block_and_tasks_md_is_
     assert [h for h in design.splitlines() if h == "## Heading"] == []  # indented: no section
     assert (fix.path / "tasks.md").read_bytes() == (plain.path / "tasks.md").read_bytes()
     assert provider_of(repo).validate(fix, strict=True).valid
+
+
+def test_a_criterion_and_its_ui_hold_rejected_together_give_one_scenario_item_and_one_task(parent):  # SCN-VER-338
+    from l4.verifier.fixunit import plan_fix_unit
+    from l4.verifier.types import CriterionOutcome, HumanVerdict, Verdict, VerifyResult
+    from l4.verifier.ui_step import ui_hold_text
+    from l4.verifier.verdicts import hold_id, settle_holds
+
+    repo, ref = parent
+    family = kiro_criteria(ref.path)
+    cid = family[1].id
+    hold = ui_hold_text(cid)
+    then = "WHEN the user submits a wrong password THEN the page shows an error"
+    rejects = [
+        HumanVerdict("Q-004", cid, "reject", "human", f"no error shows. {then}", "x"),
+        HumanVerdict("Q-005", hold_id(hold), "reject", "human", f"same. {then}", "x"),
+    ]
+    findings = settle_holds([], [hold], {v.target: v for v in rejects})
+    result = VerifyResult("kiro:login", 2, Verdict.FAIL, "b", "h", findings=findings)
+    result.criteria = [CriterionOutcome(cid, "Req 1.2", "fail", None, "disputed, rejected")]
+    plan = plan_fix_unit(family, result, rejects, ordinal=1, fix_minor=False)
+    assert len(plan.groups) == 1 and plan.consumed == ["Q-004", "Q-005"]
+    fix = provider_of(repo).create_fix_unit(ref, 1, plan.groups, plan.delta)
+    folder = repo / ".kiro" / "specs" / "login-fix-1"
+    bugfix = (folder / "bugfix.md").read_text()
+    items = [line for line in bugfix.splitlines() if line.startswith("2.")]
+    assert len(items) == 2 and items[0].startswith("2.1 WHEN")  # the criterion's restatement
+    assert items[1] == f"2.2 {then}"  # and the one scenario
+    assert len([line for line in (folder / "tasks.md").read_text().splitlines() if line.startswith("- [ ]")]) == 1
+    assert provider_of(repo).validate(fix, strict=True).valid

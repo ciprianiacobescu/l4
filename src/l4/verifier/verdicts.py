@@ -29,6 +29,7 @@ from typing import Any, Literal, Protocol
 
 from l4.clarifier.actor import Actor
 from l4.config.schema import L4Config
+from l4.implementer.excerpt import MAX_CHARS, redacted_cut
 from l4.redact import Redactor
 from l4.specs.base import Criterion
 from l4.specs.criteria import normalise
@@ -47,7 +48,16 @@ from l4.specs.questions import (
 from l4.state.fold import UnitState
 from l4.state.ledger import LedgerEvent
 from l4.verifier.aggregate import CAP_ONLY
-from l4.verifier.types import CriterionEvidence, CriterionOutcome, Finding, GeneratedOutcome, HumanVerdict, Severity
+from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, has_evidence, numbered_code
+from l4.verifier.types import (
+    MAX_CODE_CHARS,
+    CriterionEvidence,
+    CriterionOutcome,
+    Finding,
+    GeneratedOutcome,
+    HumanVerdict,
+    Severity,
+)
 
 _DECISION = re.compile(r"\s*[`*_\"']*(accept|reject)[`*_\"']*(?![A-Za-z0-9])[\s:,.;\-–—)]*(.*)", re.I | re.S)
 _TARGET = re.compile(r"\b([CFH]-[0-9a-f]{8})\b")
@@ -182,6 +192,11 @@ def _quote(finding: Finding) -> str:
 COVERAGE_FIX = "Add tests that run the changed code the hold names"  # a rejected coverage hold's finding starts so
 
 
+def is_ui_hold_finding(finding: Finding) -> bool:
+    """A rejected UI hold's finding (`_hold_finding`): the only finding with an `H-` id that cites a criterion."""
+    return finding.id.startswith("H-") and finding.criterion is not None
+
+
 def is_coverage_hold_finding(finding: Finding) -> bool:
     """A rejected coverage hold's finding (`_hold_finding`): its id is the hold's, and its detail starts with the
     harness's own sentence, never with a human's text (the reason is appended after it)."""
@@ -262,7 +277,11 @@ def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -
         )
     detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
     usable = bool(reason) and (kind != "other" or ends_with_scenario(reason))
-    return Finding(Severity.MAJOR, title, detail, "deterministic" if usable else "human", id=hold_id(hold))
+    # a UI hold's finding cites its criterion (L4-VER-085): the fix unit fixes the behaviour once, under the criterion
+    return Finding(
+        Severity.MAJOR, title, detail, "deterministic" if usable else "human", ui_hold_criterion(hold),
+        id=hold_id(hold),
+    )  # fmt: skip
 
 
 def settle_holds(
@@ -669,8 +688,43 @@ def _finding_question(finding: Finding, round_no: int) -> NewQuestion:
     )  # fmt: skip
 
 
+def _ui_hold_notes(criterion: str, generated: Sequence[GeneratedOutcome], redact: Callable[[str], str] | None) -> str:
+    """The harness notes of a UI hold's question (L4-VER-083): why the test step 5 wrote failed at the head, then that
+    test, numbered; empty when step 5 wrote no test or kept neither. Redacted and bounded where the outcome was made,
+    and redacted again here (`redacted_cut`: whole, cut, whole again) because a round that is reused restores the copy
+    that 0.4.59 stored, which was cut before it was redacted and can end inside a private key; the question's writer
+    redacts them once more. Never in the hold's text: its hash is the hold's id."""
+    done = next((g for g in generated if g.criterion == criterion), None)
+    if done is None or not has_evidence(done):
+        return ""
+    if redact is None:
+        raise ValueError("harness notes are redacted by the caller's redactor, and none was given")
+    done = dataclasses.replace(
+        done,
+        excerpt=redacted_cut(done.excerpt, redact, MAX_CHARS),
+        code=redacted_cut(done.code, redact, MAX_CODE_CHARS),
+    )
+    lines: list[str] = []
+    if done.excerpt:
+        lines += [
+            "Harness note: why the test step 5 wrote failed at the head (redacted; paths relative to the repository):",
+            "",
+            *(f"    {line}" for line in done.excerpt.splitlines()),
+        ]
+    if done.code and done.path:
+        lines += [""] if lines else []
+        lines += [
+            f"Harness note: the last test step 5 wrote, {done.path} (step 5 ended {done.status}; not committed, the "
+            f"file is removed after the run; at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):",
+            "",
+            *(f"    {line}" for line in numbered_code(done.code)),
+        ]
+    return "\n".join(lines)
+
+
 def _ui_hold_lines(criterion: str, generated: Sequence[GeneratedOutcome]) -> list[str]:
-    """What the hold's text no longer says (L4-VER-067): what step 5 did, and how long an accept lasts."""
+    """What the hold's text no longer says (L4-VER-067): what step 5 did, and how long an accept lasts; and, when the
+    question has harness notes (L4-VER-083), where to read the test step 5 wrote."""
     done = next((g for g in generated if g.criterion == criterion), None)
     attempt = (
         f"Step 5 for {criterion}: {done.status} after {done.attempts} attempt(s)"
@@ -678,12 +732,20 @@ def _ui_hold_lines(criterion: str, generated: Sequence[GeneratedOutcome]) -> lis
         if done is not None
         else f"Step 5 for {criterion}: no attempt was made (no writer ran)"
     )
-    return [
+    lines = [
         "",
         attempt + ".",
         "An accept lasts until the criterion's text or its tracing tests change (or a later reject); meanwhile this "
         "hold is not asked again, whatever step 5 reports in a later round.",
     ]
+    if done is not None and has_evidence(done):
+        lines.append(
+            "The harness notes below show the test step 5 wrote and why it failed at the head: read them to tell a "
+            "wrong test from wrong code."
+            if done.excerpt
+            else "The harness notes below show the test step 5 wrote."
+        )
+    return lines
 
 
 def _hold_question(
@@ -692,6 +754,7 @@ def _hold_question(
     quoted: Sequence[Finding] = (),
     paths: Sequence[str] = (),
     generated: Sequence[GeneratedOutcome] = (),
+    redact: Callable[[str], str] | None = None,
 ) -> NewQuestion:
     judged = [
         line
@@ -744,9 +807,10 @@ def _hold_question(
             answer + (" One answer settles both the hold and the judge's finding." if judged else ""),
         ]
     )
+    notes = _ui_hold_notes(ui, generated, redact) if (ui := ui_hold_criterion(hold)) else ""
     return NewQuestion(
         f"Hold {hold_id(hold)}: {_flat(hold, 120)}", QuestionKind.VERDICT, (), context,
-        f"round {round_no}, verifier", ("accept", "reject: <reason>"),
+        f"round {round_no}, verifier", ("accept", "reject: <reason>"), notes=notes,
     )  # fmt: skip
 
 
@@ -823,7 +887,11 @@ def raise_verdict_questions(
         if hold_id(hold) not in waiting:
             quoted = [f for f in findings if subsumed.get(f.id) == hold]
             view = (hold_views or {}).get(hold)
-            batch.append(_hold_question(hold, round_no, quoted, tuple(view["paths"]) if view else (), generated))
+            batch.append(
+                _hold_question(
+                    hold, round_no, quoted, tuple(view["paths"]) if view else (), generated, redactor.redact_text
+                )
+            )
             ui = ui_hold_criterion(hold)  # step 5 finds the answer again by the criterion (L4-VER-067)
             about = (
                 {"criterion": ui, "criterion_sha256": text_sha256(by_id[ui])} if ui is not None and ui in by_id else {}

@@ -651,3 +651,210 @@ def test_the_question_of_a_ui_hold_gives_the_generators_status_and_how_long_an_a
         consumed=(), raised=(), ledger=_Sink(), round_no=3, redactor=Redactor({}), holds=[UI_HOLD],
     )  # fmt: skip
     assert "no attempt was made" in (again / "questions.md").read_text()
+
+
+# -- ui-hold-evidence: the question shows the test step 5 wrote and why it failed at the head (L4-VER-083)
+
+LOCATOR = 'expect(page.get_by_role("heading", name="Orders")).to_be_visible()'
+FAILURE = (
+    "tests.e2e.test_l4_c_1a2b3c4d::test_orders_heading:\n"
+    f"  >       {LOCATOR}\n"
+    "  E       AssertionError: Locator expected to be visible\n"
+    "  e2e/test_l4_c_1a2b3c4d.py:19: AssertionError"
+)
+TEST_CODE = "\n".join(
+    [f"# line {n}" if n != 19 else f"    {LOCATOR}" for n in range(1, 21)] + [""]
+)  # twenty lines; the failing one is the nineteenth
+UI_PATH = "e2e/test_l4_c_1a2b3c4d.py"
+TEST_TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
+
+
+def _failed_outcome(**over):
+    from l4.verifier.types import GeneratedOutcome
+
+    values = dict(
+        criterion=UI_CRITERION.id, status="fails_at_head", path=UI_PATH, attempts=2,
+        reason="the test fails at the head: t::x", code=TEST_CODE, excerpt=FAILURE,
+    )  # fmt: skip
+    return GeneratedOutcome(**{**values, **over})
+
+
+def _ask_ui_hold(folder, *generated, round_no=1):
+    sink = _Sink()
+    raise_verdict_questions(
+        folder, "add-thing", outcomes=[], criteria=[UI_CRITERION], trace=[], findings=[], existing=None,
+        consumed=(), raised=(), ledger=sink, round_no=round_no, redactor=Redactor({}), holds=[UI_HOLD],
+        generated=list(generated),
+    )  # fmt: skip
+    [raised] = [e.data for e in sink.events if e.type == "question.raised"]
+    return QuestionsFile.load(folder / "questions.md"), raised
+
+
+def test_scn_ver_331_the_hold_s_question_shows_the_failure_and_the_numbered_code_in_the_harness_notes(tmp_path):
+    from l4.specs.questions import unescape_text
+
+    (tmp_path / "plain").mkdir()
+    plain, plain_event = _ask_ui_hold(tmp_path / "plain", _failed_outcome(code="", excerpt=""))
+    file, event = _ask_ui_hold(tmp_path, _failed_outcome())
+    question = file.get("Q-001")
+    notes = unescape_text(question.notes_text)
+    assert "Harness note: why the test step 5 wrote failed at the head" in notes
+    assert f"    >       {LOCATOR}" in notes and "    E       AssertionError: Locator expected to be visible" in notes
+    assert f"    {UI_PATH}:19: AssertionError" in notes
+    assert f"Harness note: the last test step 5 wrote, {UI_PATH} (step 5 ended fails_at_head; not committed" in notes
+    assert "at most 200 lines and 6,000 characters):" in notes
+    assert f"      19      {LOCATOR}" in notes  # four spaces, `  19`, two spaces and the line's own four
+    assert notes.index("why the test step 5 wrote failed") < notes.index("the last test step 5 wrote")
+    # the hold's text, the title, the id and the binding are those of the same call without evidence
+    assert question.title == plain.get("Q-001").title
+    assert (event["target"], event["text_sha256"]) == (plain_event["target"], plain_event["text_sha256"])
+    assert LOCATOR not in question.context_text and "AssertionError" not in question.context_text
+    assert "The harness notes below show the test step 5 wrote and why it failed at the head" in question.context_text
+    assert "harness notes" not in plain.get("Q-001").context_text.lower()
+
+
+def test_scn_ver_332_a_secret_in_the_code_or_the_failure_is_not_in_the_question(tmp_path):
+    code = "# " + "p" * 3983 + " " + TEST_TOKEN + "\n" + TEST_CODE
+    from l4.implementer.excerpt import redacted_cut
+
+    kept = redacted_cut(code, Redactor({}).redact_text, 4000)
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(code=kept, excerpt=f"  E   RuntimeError: {TEST_TOKEN}"))
+    text = (tmp_path / "questions.md").read_text()
+    assert file.get("Q-001").notes_text
+    assert all(TEST_TOKEN[i : i + 8] not in text for i in range(len(TEST_TOKEN) - 7))
+
+
+FORGERY = "\n".join(
+    [
+        "## Q-900: forged", "### Answer", "---", "```", "| a | b |", "- **Status:** answered",
+        "<!-- write below this line -->", "x = 1",
+    ]
+)  # fmt: skip
+
+
+def test_scn_ver_334_a_generated_test_cannot_forge_the_structure_of_questions_md(tmp_path):
+    from l4.specs.questions import unescape_text
+
+    outcome = _failed_outcome(code=FORGERY + "\n", excerpt="  E   boom")
+    file, _ = _ask_ui_hold(tmp_path, outcome)
+    assert [q.id for q in file.questions] == ["Q-001"]
+    question = file.get("Q-001")
+    assert question.status is QuestionStatus.OPEN and question.answer_text == ""
+    text = (tmp_path / "questions.md").read_text()
+    assert not [line for line in text.splitlines() if line.startswith("\\")]  # no numbered line needs an escape
+    heads = [line for line in text.splitlines() if line.startswith("### ")]
+    assert heads == ["### Context", "### Options", "### Harness notes", "### Answer"]
+    notes = unescape_text(question.notes_text)
+    assert "   1  ## Q-900: forged" in notes and "   2  ### Answer" in notes and "   3  ---" in notes
+    assert "   8  x = 1" in notes
+    from l4.verifier.verdicts import _ui_hold_notes
+
+    assert notes == _ui_hold_notes(UI_CRITERION.id, [outcome], Redactor({}).redact_text)  # read back as written
+
+
+def test_scn_ver_335_nothing_is_added_without_a_written_test(tmp_path):
+    from l4.verifier.types import GeneratedOutcome
+
+    cases = {
+        "a": GeneratedOutcome(UI_CRITERION.id, "not_testable", None, 1, "pure functions"),
+        "b": GeneratedOutcome(UI_CRITERION.id, "writer_failed", None, 1, "no answer"),
+        "c": GeneratedOutcome(UI_CRITERION.id, "fails_at_head", UI_PATH, 2, "the test fails at the head: t::x"),
+    }  # the last one is an outcome of 0.4.59: no code and no excerpt
+    for name, outcome in cases.items():
+        (tmp_path / name).mkdir()
+        file, _ = _ask_ui_hold(tmp_path / name, outcome)
+        question = file.get("Q-001")
+        assert question.notes_text == "" and "### Harness notes" not in (tmp_path / name / "questions.md").read_text()
+        step5 = f"Step 5 for {UI_CRITERION.id}: {outcome.status} after {outcome.attempts} attempt(s)"
+        step5 += f"; {outcome.reason}." if outcome.reason else "."
+        assert question.context_text == (  # byte for byte the Context of 0.4.59
+            f"After round 1 the verifier cannot decide on its own: {UI_HOLD}\n\n{step5}\n"
+            "An accept lasts until the criterion's text or its tracing tests change (or a later reject); meanwhile "
+            "this hold is not asked again, whatever step 5 reports in a later round.\n\n"
+            "Answer `accept` if the unit can go on as it stands, or `reject` and say why; end the reason with a "
+            "sentence WHEN ... THEN ... so that a fix unit can be made."
+        )
+
+
+def test_scn_ver_350_a_writer_failure_that_kept_the_first_test_shows_both_with_its_status(tmp_path):
+    from l4.specs.questions import unescape_text
+
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(status="writer_failed", reason="no answer"))
+    notes = unescape_text(file.get("Q-001").notes_text)
+    assert "AssertionError: Locator expected to be visible" in notes
+    assert f"the last test step 5 wrote, {UI_PATH} (step 5 ended writer_failed;" in notes
+    assert "The harness notes below show the test step 5 wrote and why it failed at the head" in (
+        file.get("Q-001").context_text
+    )
+
+
+def test_a_test_without_an_excerpt_shows_the_code_alone_and_the_shorter_sentence(tmp_path):
+    from l4.specs.questions import unescape_text
+
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(status="lint_failed", excerpt=""))
+    notes = unescape_text(file.get("Q-001").notes_text)
+    assert notes.startswith("Harness note: the last test step 5 wrote,") and "why the test step 5 wrote" not in notes
+    context = file.get("Q-001").context_text
+    assert "The harness notes below show the test step 5 wrote." in context and "why it failed" not in context
+
+
+def _code_block(notes: str) -> list[str]:
+    """The lines of the code the notes show, after the code's own heading and the blank line below it."""
+    lines = notes.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Harness note: the last test")) + 2
+    return lines[start:]
+
+
+@pytest.mark.parametrize(
+    ("code", "kept", "cut"),
+    [("\n" * 4000, 200, 3800), ("x\n" * 2000, 200, 1800)],
+    ids=["4000-empty-lines", "2000-one-character-lines"],
+)
+def test_scn_ver_331_the_code_in_the_notes_is_bounded_by_lines_and_by_its_numbered_length(tmp_path, code, kept, cut):
+    from l4.specs.questions import unescape_text
+
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(code=code, excerpt=""))
+    shown = _code_block(unescape_text(file.get("Q-001").notes_text))
+    assert len(shown) == kept + 1  # the lines kept and the line that says how many were cut
+    assert shown[-1] == f"    … (cut: {cut} more lines)"
+    assert shown[0] == ("       1" if code.startswith("\n") else "       1  x")  # the numbers are the file's own
+    assert sum(len(line) + 1 for line in shown) <= 6000 + 4 * len(shown)  # the numbered copy, before the indent
+
+
+def test_scn_ver_331_the_numbered_copy_stops_at_6000_characters_and_says_how_many_lines_it_cut():
+    from l4.verifier.hold_evidence import MAX_CODE_LINES, MAX_NUMBERED_CHARS, numbered_code
+
+    assert (MAX_CODE_LINES, MAX_NUMBERED_CHARS) == (200, 6000)
+    wide = "\n".join("w" * 99 for _ in range(60)) + "\n"  # 60 lines of 99 characters: 6,360 numbered
+    shown = numbered_code(wide)
+    assert sum(len(line) + 1 for line in shown) <= MAX_NUMBERED_CHARS  # the cut line included
+    kept = len(shown) - 1
+    assert 0 < kept < 60 and shown[-1] == f"… (cut: {60 - kept} more lines)"
+    assert shown[0] == "   1  " + "w" * 99 and shown[kept - 1].startswith(f"{kept:>4}  ")  # whole lines, from the top
+    exact = numbered_code("y\n" * 200)
+    assert len(exact) == 200 and exact[-1] == " 200  y"  # 200 lines fit: nothing is cut, no cut line
+    assert numbered_code("y\n" * 201)[-1] == "… (cut: 1 more line)"
+    assert numbered_code("") == [] and numbered_code("a\r\nb\n") == ["   1  a", "   2  b"]
+
+
+def test_scn_ver_353_a_half_key_block_in_a_record_that_0_4_59_wrote_is_not_in_the_question(tmp_path):
+    """0.4.59 cut the code at 4,000 characters before it redacted, so a stored copy can end inside a private key, and
+    a round that reuses it restores that copy. The notes are redacted again (whole, cut, whole) as they are built."""
+    from l4.verifier.evidence import _generated
+
+    begin = "-----BEGIN " + "RSA PRIVATE " + "KEY" + "-----"
+    stored = {  # the `generated` entry of a verdict.json of 0.4.59: no `excerpt`
+        "criterion": UI_CRITERION.id, "status": "fails_at_head", "path": UI_PATH, "attempts": 2,
+        "reason": "the test fails at the head: t::x", "artifacts": [], "tests": [],
+        "code": f"{TEST_CODE}# {begin}\n# MIIEowIBAAKCAQEA" + "q" * 60,
+    }  # fmt: skip
+    restored = _generated(stored)
+    assert restored.excerpt == "" and "MIIEow" in restored.code  # the half block is in what the round restored
+    file, _ = _ask_ui_hold(tmp_path, restored)
+    text = (tmp_path / "questions.md").read_text()
+    assert file.get("Q-001").notes_text and "MIIEow" not in text and "q" * 20 not in text
+    assert "[REDACTED:private-key]" in text and "# line 1" in text  # what came before the key stays
+    from l4.verifier.verdicts import _ui_hold_notes
+
+    with_excerpt = _failed_outcome(excerpt=f"  E   RuntimeError: {begin}\n  E   MIIEowIBAAKCAQEA" + "q" * 60)
+    assert "MIIEow" not in _ui_hold_notes(UI_CRITERION.id, [with_excerpt], Redactor({}).redact_text)

@@ -114,6 +114,16 @@ def test_a_noted_outcome_restores_with_its_covered_by_and_an_older_record_with_n
     assert [g.covered_by for g in back] == [(), ()] and back[0].status == "not_testable"
 
 
+def test_an_outcome_restores_with_its_excerpt_and_a_record_of_the_older_release_with_none():  # SCN-VER-333
+    kept = GeneratedOutcome("C-a", "fails_at_head", "e2e/test_l4_c_a.py", 2, "r", "def t(): ...", excerpt="E   boom")
+    result = VerifyResult(UNIT, 1, Verdict.NEEDS_HUMAN, "b" * 40, "c" * 40, subject_sha="abc", generated=[kept])
+    data = json.loads(json.dumps(verdict_json(result)))
+    assert restore_round(data, UNIT, 2).generated == [kept]
+    del data["generated"][0]["excerpt"]  # a verdict.json written by 0.4.59: no `excerpt`, no `carried` status
+    (back,) = restore_round(data, UNIT, 2).generated
+    assert back.excerpt == "" and back.code == "def t(): ..." and back.status == "fails_at_head"
+
+
 # --- the base merge commit (verifier 5.2 with M1.7: a merge that brings code is a new subject) -----------------------
 
 
@@ -157,3 +167,50 @@ def test_merge_with_empty_first_parent_diff_is_not_a_subject(tmp_path, git_envir
     merge2 = merge_main(repo2)
     assert repo2.git("diff", "--name-only", "HEAD^1", "HEAD").split() == [f"{UNIT_DIR}/questions.md"]
     assert subject_sha(git2, merge2, [UNIT_DIR]) == code2
+
+
+def _ledger(*generated: dict) -> list:
+    from datetime import UTC, datetime
+
+    from l4.state.ledger import LedgerEvent
+
+    stamp = datetime(2026, 11, 1, tzinfo=UTC)
+    events = [LedgerEvent(stamp, "r-1", UNIT, 1, "run.started", {"iteration": 1})]
+    events += [LedgerEvent(stamp, "r-1", UNIT, n + 2, "verify.generated", g) for n, g in enumerate(generated)]
+    return events
+
+
+def test_a_ledger_written_by_0_4_59_folds_unchanged():  # L4-VER-083
+    from pathlib import Path
+
+    from l4.state.fold import fold
+    from l4.verifier.ui_step import previously_generated
+
+    old = _ledger(
+        {"criterion": "C-a", "test": "e2e/test_l4_c_a.py", "base": "fail", "head": "fail", "attempts": 2,
+         "status": "fails_at_head", "reason": "the test fails at the head: t::x", "model": "m", "tests": [],
+         "sha256": "", "support": "head"},
+        {"criterion": "C-b", "status": "waived", "by": "Q-004", "attempts": 0},
+        {"criterion": "C-c", "status": "not_testable", "attempts": 1, "covered_by": ["t::a"]},
+    )  # fmt: skip
+    state = fold(old, UNIT)
+    assert state.iteration == 1 and state == fold(old[:1], UNIT)  # the fold reads no `verify.generated` event
+    assert previously_generated(old, Path("."), None) == ({}, [])  # only an `accepted` outcome is recognised again
+
+
+def test_a_ledger_with_a_carried_outcome_folds_like_one_without():  # L4-VER-086
+    from pathlib import Path
+
+    from l4.state.fold import fold
+    from l4.verifier.ui_step import previously_generated
+
+    events = _ledger({"criterion": "C-d", "status": "carried", "covered_by": ["t::old"], "attempts": 0})
+    assert fold(events, UNIT) == fold(events[:1], UNIT)
+    assert previously_generated(events, Path("."), None) == ({}, [])  # a carry is never read back as a generated test
+
+
+def test_a_carried_outcome_restores_with_its_covered_by_and_asks_nobody_again():  # SCN-VER-349
+    carried = GeneratedOutcome("C-a", "carried", reason="carried from the base", covered_by=("t::old",))
+    result = VerifyResult(UNIT, 1, Verdict.NEEDS_HUMAN, "b" * 40, "c" * 40, subject_sha="abc", generated=[carried])
+    back = restore_round(json.loads(json.dumps(verdict_json(result))), UNIT, 2)
+    assert back.generated == [carried] and back.holds == []

@@ -597,3 +597,61 @@ def test_the_sections_of_a_batch_are_picked_by_every_question():
     assert "Filler 5" not in p.user  # the budget held the keyed sections first
     first_only = [items[0], (verdict_view(2, context="the lockout rule"), items[1][1])]
     assert "uses `per_account` always" not in batch(first_only, tokens=120).user  # without its key, it is cut
+
+
+def test_the_delegate_reads_the_harness_notes_of_a_ui_hold_with_the_context(tmp_path):  # L4-VER-083
+    from l4.specs.questions import NewQuestion, QuestionsFile, raise_questions
+
+    failure = "tests.e2e.test_l4_c_1a2b3c4d::test_x:\n  E       AssertionError: Locator expected to be visible"
+    notes = f"Harness note: why the test step 5 wrote failed at the head:\n\n    {failure}\n"
+    raise_questions(
+        tmp_path, "add-thing",
+        [NewQuestion("Hold H-1", QuestionKind.VERDICT, (), "After round 1 the verifier cannot decide.", "now",
+                     ("accept", "reject: <reason>"), notes=notes)],
+        redactor=Redactor({}),
+    )  # fmt: skip
+    question = QuestionView.of(QuestionsFile.load(tmp_path / "questions.md").get("Q-001"))
+    text = prompt(question).text
+    assert "AssertionError: Locator expected to be visible" in text and "After round 1 the verifier" in text
+    assert text.index("After round 1") < text.index("Locator expected")  # the Context, then the notes
+
+
+def _asked_with_notes(folder, context: str, notes: str) -> QuestionView:
+    """A question as the harness raises it for a UI hold: its Context, and its harness notes in their own subsection
+    (read back through `QuestionView.of`, which shows the delegate the Context and the notes together)."""
+    from l4.specs.questions import NewQuestion, QuestionsFile, raise_questions
+
+    raise_questions(
+        folder, "add-thing",
+        [
+            NewQuestion(
+                "Hold H-1", QuestionKind.VERDICT, (), context, "now", ("accept", "reject: <reason>"), notes=notes
+            )
+        ],
+        redactor=Redactor({}),
+    )  # fmt: skip
+    return QuestionView.of(QuestionsFile.load(folder / "questions.md").get("Q-001"))
+
+
+def test_the_notes_of_a_question_do_not_pick_the_sections_the_delegate_reads(tmp_path):  # SCN-VER-354
+    """The notes hold code that a model wrote: what the delegate reads of the specification is picked by the title and
+    the Context only, as in 0.4.59, and the notes are still in the question's data block."""
+    filler = "".join(f"## Filler {n}\n" + "unrelated words. " * 30 + "\n" for n in range(6))
+    docs = (doc("design.md", f"{filler}## Rounding\nuses `half_even` always\n## Lockout\nuses `per_account` always\n"),)
+    notes = "Harness note: the last test step 5 wrote:\n\n       1  # the `half_even` rule\n"
+    context = "After round 1 the verifier cannot decide: the `per_account` rule."
+    noted = _asked_with_notes(tmp_path, context, notes)
+    plain = view(id="Q-001", title="Hold H-1", context=context, kind=QuestionKind.VERDICT, blocking=())
+    for tokens in (120, 200):
+        with_notes = prompt(noted, material(documents=docs), tokens=tokens)
+        without = prompt(plain, material(documents=docs), tokens=tokens)
+        assert "uses `per_account` always" in with_notes.user
+        assert ("uses `half_even` always" in with_notes.user) == ("uses `half_even` always" in without.user)
+    tight = prompt(noted, material(documents=docs), tokens=120)
+    assert "uses `half_even` always" not in tight.user  # the notes' key picked nothing
+    assert "the `half_even` rule" in tight.user  # the notes are in the data block, uncut
+    assert tight.user.index("After round 1") < tight.user.index("the `half_even` rule")
+    items = [(noted, material(documents=docs, verdict=verdict_of(1)))]
+    batched = batch(items, tokens=120)
+    assert "uses `half_even` always" not in batched.user and "the `half_even` rule" in batched.user
+    assert "uses `per_account` always" in batched.user
