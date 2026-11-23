@@ -1147,7 +1147,8 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   From 0.4.60 a UI criterion that the unit did not change (its scenario word for word the base spec's, its tests the
   base's files, passing as `pass_to_pass`, and never rejected) is not held: its row of the generated UI tests table
   says `carried from the base`, and the judge still has to pass it. A test whose file the harness cannot place with
-  certainty (not a Python module, or a module name that two roots share) keeps the hold.
+  certainty (a module name that two roots share, a TypeScript test beside a Python module of its stem, or two files that
+  could hold it) keeps the hold.
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria
   than `verifier.max_criteria_per_test`, so they are not evidence. The reason names the test with the fewest criteria and

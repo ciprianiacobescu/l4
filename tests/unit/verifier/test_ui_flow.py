@@ -639,10 +639,10 @@ def test_scn_ver_346_a_red_proof_keeps_the_writer(run_l4, valid_spec, web_repo, 
         (["src/pricing/total.py", "src/pricing/total.test.ts"], "src/pricing/total.py", "src.pricing.total.test.ts::x"),
         # a module of the same name under two roots: which of the two ran is not known
         (["tests/test_a.py", "pkg/tests/test_a.py"], "tests/test_a.py", "tests.test_a::x"),
-        # a test that is not Python: the module walk finds no file for it
-        (["src/pricing/total.test.ts"], "", "src.pricing.total.test.ts::x"),
+        # a test that is not Python, with two files that could hold it
+        (["src/pricing/total.test.ts", "lib/src/pricing/total.test.ts"], "", "src.pricing.total.test.ts::x"),
     ],
-    ids=["same-stem-module", "two-roots", "not-python"],
+    ids=["same-stem-module", "two-roots", "two-typescript-files"],
 )
 def test_scn_ver_351_a_test_whose_file_is_in_doubt_keeps_the_writer_and_the_hold(
     run_l4, valid_spec, web_repo, carry_repo, tree, walk, known
@@ -661,6 +661,16 @@ def test_scn_ver_351_the_plain_case_is_carried_with_its_file_found_by_both_readi
     run_l4, valid_spec, web_repo, carry_repo
 ):
     carry_repo.update(tree=["tests/test_base.py", "tests/test_other.py", "src/pricing/total.py"])
+    run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"
+
+
+def test_scn_ver_351_a_typescript_only_criterion_is_carried_when_the_walk_finds_no_module(
+    run_l4, valid_spec, web_repo, carry_repo
+):
+    ids = {KNOWN: "src.pricing.total.test.ts::x", UNKNOWN: "src.pricing.total.test.ts::y"}
+    carry_repo.update(tree=["src/pricing/total.test.ts", "src/pricing/total.ts"], walk="", ids=ids)
     run = run_l4([red_step(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
     assert run.code == 0, run.outcome
     assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "carried"

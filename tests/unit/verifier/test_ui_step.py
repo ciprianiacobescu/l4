@@ -676,8 +676,33 @@ def test_scn_ver_351_two_modules_of_one_name_under_two_roots_are_not_told_apart(
 def test_scn_ver_351_a_test_that_either_reading_cannot_place_is_not_placed():
     assert carry_file("tests.test_a::x", None, ["tests/test_a.py"]) is None  # the module walk finds nothing
     assert carry_file("tests.test_a::x", "tests/test_a.py", []) is None  # the id is in no file of the tree
-    assert carry_file("src.pricing.total.test.ts::x", None, ["src/pricing/total.test.ts"]) is None  # not Python
+    assert (
+        carry_file("tests.test_a::x", None, ["tests/test_a.py", "src/a.test.ts"]) is None
+    )  # a `.py` is not a walk's gap
     assert carry_file("", "tests/test_a.py", ["tests/test_a.py"]) is None
+    assert carry_file("src.nothing.test.ts::x", None, ["src/pricing/total.test.ts"]) is None  # no file at all
+
+
+@pytest.mark.parametrize("test_id", ["src.pricing.total.test.ts::x", "src/pricing/total.test.ts::x"])
+def test_scn_ver_351_a_test_that_is_not_python_is_placed_when_the_walk_finds_nothing_and_one_file_fits(test_id):
+    only = ["src/pricing/total.test.ts", "src/pricing/other.test.ts", "src/pricing/total.py.bak"]
+    assert carry_file(test_id, None, only) == "src/pricing/total.test.ts"
+    assert carry_file(test_id, "src/pricing/other.test.ts", only) is None  # the two disagree when both place it
+    two = ["src/pricing/total.test.ts", "lib/src/pricing/total.test.ts"]
+    assert carry_file("src.pricing.total.test.ts::x", None, two) is None  # two files could be it
+
+
+def test_scn_ver_351_a_typescript_only_criterion_is_carried_unless_its_file_changed():
+    tree = ["src/pricing/total.test.ts", "src/pricing/total.ts"]
+    ts_id = "src.pricing.total.test.ts::x"
+    files = {ts_id: carry_file(ts_id, None, tree)}
+    trace = base_tests(p2p(ts_id))
+    assert carry(trace, files=files) == {CID: (ts_id,)}
+    assert carry(trace, files=files, changed=["src/pricing/total.test.ts"]) == {}  # the unit changed that test
+    beside = {ts_id: carry_file(ts_id, "src/pricing/total.py", [*tree, "src/pricing/total.py"])}
+    assert (
+        carry(trace, files=beside, changed=["src/pricing/total.test.ts"]) == {}
+    )  # the walk's wrong `.py` stays refused
 
 
 @pytest.mark.parametrize("test_id", ["tests.test_a::x", "tests.test_a.TestX::x", "tests/test_a.py::x"])

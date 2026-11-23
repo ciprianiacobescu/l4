@@ -211,14 +211,18 @@ def _holders(test_id: str, paths: Collection[str]) -> set[str]:
 
 def carry_file(test_id: str, walked: str | None, paths: Collection[str]) -> str | None:
     """The file that holds the test of `test_id` for the carry of L4-VER-086, or None when that is in any doubt. Two
-    readings of the id must give the same file: `walked` (the dotted module found in the work tree, which reads
+    readings of the id are taken: `walked` (the dotted module found in the work tree, which reads
     `src.pricing.total.test.ts` as `src/pricing/total.py` when that lies beside the test) and `file_of_id` over
-    `paths`; and no other of `paths` may be a file the id could name (a module of the same name under two roots). A
-    test that either reading cannot place, a test that is not Python included, is not placed."""
+    `paths`. `file_of_id` must place the id, and no other of `paths` may be a file the id could name (a module of the
+    same name under two roots). When the walk places it too, both must give the same file; when the walk finds nothing,
+    the file of `file_of_id` stands if it is not a `.py` file (a TypeScript test is no Python module, so the walk has
+    nothing to say about it). A walk that finds a file `file_of_id` does not give is the wrong-module case: refused."""
     found = file_of_id(test_id, paths)
-    if found is None or walked != found or len(_holders(test_id, paths)) != 1:
+    if found is None or len(_holders(test_id, paths)) != 1:
         return None
-    return found
+    if walked is None:
+        return None if found.endswith(".py") else found
+    return found if walked == found else None
 
 
 def carried_from_base(

@@ -54,15 +54,13 @@ criterion (D7); a criterion with any proof but `pass_to_pass`.
    since its merge base). `_test_blobs` keeps its own mapping (`file_of_test`, else `file_of_id` with `changed` first),
    which binds a UI hold's accept: the carry must not change what an accept in force is bound to. The carry reads the
    id both ways and fails closed: the dotted-module walk reads `src.pricing.total.test.ts` as `src/pricing/total.py`
-   when that lies beside the test, so a changed `.ts` test would look unchanged. `carry_file` gives a file only when the
-   walk and `file_of_id` over the tree give the same one and no other file of the tree could be what the id names (two
-   modules of one name under two roots: `tests.test_a` may be `tests/test_a.py` or `pkg/tests/test_a.py`). A test that
-   either reading cannot place is not carried, so a test that is not a Python module (the walk finds no module for it)
-   is never carried: a project whose tests are all TypeScript keeps its UI holds. That is a consequence of the owner's
-   delegate's ruling as worded (refuse when either reading cannot place a test), not a choice of the owner's; SCN-VER-351
-   pins it. D4's replay of the evidence assumed the carry for such a project: it holds only where the tracing tests are
-   Python modules. To relax it, let a walk that finds nothing stand when `file_of_id` finds exactly one non-Python file
-   (`carry_file`: `walked != found` becomes `walked not in (None, found)`, with `found` not a `.py` file).
+   when that lies beside the test, so a changed `.ts` test would look unchanged. `carry_file` gives a file only when `file_of_id`
+   over the tree places the id, no other file of the tree could be what the id names (two modules of one name under two
+   roots: `tests.test_a` may be `tests/test_a.py` or `pkg/tests/test_a.py`; two `.test.ts` files that could hold the
+   id), and the walk agrees: it gives the same file, or it finds no module (`walked is None`) and the file is not a
+   `.py` file. A walk that gives a file other than `file_of_id`'s is the wrong-module case and is refused, and a
+   `.py` file that the walk does not find is refused. So a TypeScript-only criterion whose test file is unchanged is
+   carried, and a changed `.test.ts` is refused by the changed-file condition like any other file.
    A test whose file is not found is not carried.
 4. `C` is not in `rejected`: `rejected_ui_criteria(events, criteria)` in `l4.verifier.ui_step` gives every criterion among `criteria` with a
    `human.verdict{decision: reject}` whose target is the criterion, or one of its UI holds (the targets of
@@ -109,7 +107,9 @@ at the base and the head, or errors). The hold asks a person to accept on a merg
 the head. In the evidence, every such hold was accepted. Replayed on that evidence: the follow-up's three held
 criteria meet all four conditions of D1 (every tracing test `pass_to_pass` and passing, none listed as not evidence,
 their test files outside the two files the follow-up changed, no reject in its ledger), and so does the restated
-scenario of the other unit (its test file unchanged since the base).
+scenario of the other unit (its test file unchanged since the base). Tracing tests that are TypeScript
+meet condition 3 because `carry_file` takes the file of a test that is no Python module (the walk finds none) when it
+is the only file that could hold it.
 
 This reverses, for this one case, the rule that 0.4.56 chose on purpose (L4-VER-067: "the hold SHALL stay when only
 `pass_to_pass` tests trace the criterion"). That rule was written for the `not_testable` note, where a writer's word
