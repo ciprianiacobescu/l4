@@ -108,3 +108,6 @@ parts so that no test file holds a key marker as one string.
   `test_excerpt.py` fails on its own when `redacted_cut` cuts before it redacts (SCN-VER-332).
 - [x] 6.4 The delegate's selection key is the title and the Context without the harness notes
   (`QuestionView.context_without_notes`, SCN-VER-354).
+- [x] 6.5 A copy that the 4,000-character cut shortened ends with its cut line: `GeneratedOutcome.code_lines` (the lines
+  of the whole redacted test, 0 when unknown), `numbered_code(code, total_lines)`, kept in `verdict.json` as
+  `generated[].code_lines` beside the code and restored with a default of 0 (SCN-VER-355).

@@ -27,7 +27,7 @@ line as four spaces, its number right-aligned in four columns, two spaces and th
 bounded by its lines and by its own length, not only by the 4,000 characters of the raw copy (4,000 empty lines are
 4,000 numbered lines): at most 200 lines and 6,000 characters with their line ends, the numbers included and before the
 indent of the container; a longer copy SHALL keep its first lines (their numbers are those of the excerpt's locations)
-and end with one line `… (cut: N more lines)`, which the 6,000 counts. They SHALL NOT be in the hold's text, its
+and end with one line `… (cut: N more lines)`, which the 6,000 counts. A copy that the 4,000-character cut shortened SHALL always end with that line, and N SHALL count the lines of the whole test (redacted, before the cut), kept as `generated[].code_lines` in `verdict.json` beside the code when it is not 0 and the code is written (absent in a record of 0.4.59, and then N counts the copy, as before). They SHALL NOT be in the hold's text, its
 title or its Context, so the hold's id, its accept binding and `question.raised` are unchanged; the Context SHALL say in
 one sentence that the harness notes show the test (and why it failed at the head, when there is an excerpt). The delegate reads the notes with the Context, but the sections of the specification it is shown are picked by the title and the Context alone: the notes steer none of them.
 `verification.md` SHALL have a section `## Generated UI tests that were not accepted` after the generated UI tests
@@ -171,3 +171,9 @@ exist and what each answer settles SHALL be unchanged.
 - **When** the delegate's prompt is built, alone or in a batch
 - **Then** the section of `per_account` is shown and that of `half_even` is cut, as for the same question without the
   notes; the notes are still in the question's data block, after the Context
+
+#### Scenario: SCN-VER-355 (−) A test longer than the kept copy is shown with its cut line
+- **Given** a generated test that is not accepted of 120 lines and 8,780 characters
+- **When** the round raises the hold question and writes `verification.md`
+- **Then** each shows the copy's first lines numbered from 1 and ends with `… (cut: N more lines)` where N is 120 minus
+  the lines shown; a `verdict.json` of 0.4.59 without `code_lines` restores and shows the copy as before
