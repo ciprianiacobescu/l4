@@ -2814,7 +2814,8 @@ for good, so only a failure the run shows refuses.]
 
 **L4-IMP-102 A fix task, its prompt and its questions carry the failure text of its tests.** A fix task whose findings
 name failing tests SHALL carry a *failure block*. The tests are, per finding: for `test gate failed` and `e2e gate
-failed` every record of that gate in the round's `failures` (collection records included); for `new tests failed` and
+failed` every record of that gate in the round's `failures` (collection records included); for `a pre-existing test
+fails on the unit's code` every record of the gate `base-tests` (L4-VER-080); for `new tests failed` and
 `new tests errored` the recorded ids its detail names (the part of a cut list that matches included); for any other
 finding none. The block SHALL hold each test, sorted, as `<id> (<kind>, <gate>):` followed by the lines of its `excerpt`
 (L4-VER-078), or its `message` when it has none, indented by two spaces, at most 8 tests and 6,000 characters, whole tests
@@ -2846,6 +2847,35 @@ redactor (the notes are redacted again when `questions.md` is written). With no 
 SHALL be added. [V, a consumer's fix chore for a browser test that failed by assertion got the test's id but not its
 message; its implementer asked a question that said it did not reproduce the failure, the delegate escalated it, and the
 person read a question without the one-line cause, which the round's `verdict.json` held.]
+
+**L4-IMP-105 A step runs its test gate once more before it fails on pre-existing tests.** When a red step would fail
+its attempt with `red broke existing tests` (the last reason of its verdict), or a green step or a fix, tests or
+refactor chore with `green broke existing tests`, and that is the attempt's only reason, the step SHALL run its test
+gate once more, its whole command, as `test-recheck` with run 1's environment, when all of these hold: one to five tests
+regressed; each failed or errored in run 1 (a test missing from the report is gone, not flaky) and its message holds no
+time-out marker; and each one's file, found as L4-VER-076 finds it among the files of HEAD and of the work tree, is not
+a file that the unit's branch or the step changed. Before run 1 the step SHALL record the worktree's untracked paths,
+and before the re-run it SHALL remove every entry that is new since (L4-VER-076's `tree_reset`). It SHALL make no
+re-run when the tree cannot be listed or cleaned (`stopped: tree`), or when the armed soft deadline leaves less than
+twice run 1's duration plus the larger of 60 seconds and a tenth of run 1's duration (`stopped: budget`: the step goes
+on after the re-run). The step's own guard after a gate
+run (red's tamper check, the replay restore of green and of a chore) SHALL run after the re-run. A re-run is usable when
+a report was read, it has no collection error, it executed a test and it holds every regressed test; else `stopped:
+unusable`. When every regressed test passed in it (a test skipped in it did not pass) and no test that passed in run 1 failed,
+errored or is missing in it (`new_failures`), the regressed tests are flaky (`stopped: passed`). The step SHALL then go on with run 1's report, each
+flaky test's case taken from the re-run, and judge it again with the same checks, so a later reason still fails the
+attempt. Every later reader of the step's report, and the next task's baseline (L4-IMP-088), SHALL get that report,
+and a warning SHALL name the flaky tests. In every other case the attempt SHALL fail with run 1's reason and run 1's
+excerpt, followed by `; failed again on a re-run (L4-IMP-105): <ids>` (`stopped: failed`) or `; its re-run was not
+usable`. Each attempt with candidates SHALL be recorded as `task.tests_rechecked{task, phase, attempt, tests, flaky,
+failing, new_failures, stopped}` (lists at most 20), and the re-run as its own `gate.finished`. An attempt SHALL get at
+most one re-run, bounded by `gates.timeout`; `deadline.cap_s` is unchanged, so a step with no room for it fails as
+before. A repair chore, a new test, a red test, a test in a file the unit or the step changed, a hung test and a test
+missing from run 1 SHALL get none. A test the step broke fails both runs and still fails the attempt; one that passed
+only on the re-run is listed at verification (L4-VER-082), whose steps 1 and 3 run it again. [V, three attempts in two
+units of a consumer were lost to pre-existing tests of its e2e stack helper (one starts the stack on fixed ports with a
+90-second ready timeout, one checks that no DNS lookup happens) that failed once in a red or green step; the cause is
+not known]
 
 **L4-IMP-108 A test chore counts the browser tests it writes.** When `gates.e2e` is configured (`e2e_configured`), a
 test chore (a `[chore]` task of kind `tests`) SHALL compute the browser tests of its step: the tests of
@@ -3896,7 +3926,8 @@ its stops). A profile that already reached `escalate_after` for the task's phase
 `roles.implementer`, SHALL be escalated before the task's first attempt in this run, and again while the profile it
 moves to has also reached `escalate_after` and has a later profile (each move is recorded as `implementer.escalated`).
 When the window holds a move of the phase whose `from` comes after the run's selected profile in `roles.implementer`,
-the first of these moves SHALL be asked from that profile (L4-IMP-094).
+the first of these moves SHALL be asked from that profile (L4-IMP-094). A `task.attempts_renewed` of the task's green
+phase in the window (L4-IMP-104) clears the green counts, reasons and move seeded before it; attempt numbers go on.
 
 **L4-IMP-094 A move never takes a spent profile, passes over a used one, and a later run continues it.** For phase P
 of task T, a profile SHALL be *spent* when its failed attempts of P of T in the window of L4-IMP-075 (those of earlier
@@ -3932,6 +3963,34 @@ failure of P, a chain of one profile, and `escalate_after: 0` SHALL keep their b
 red step moved from glm to claude-sonnet after two failures, and the soft deadline ended the run; the next run started
 the step on deepseek, which the first run had skipped as cooling, and after two failures there the move went to glm,
 whose third failure halted the unit; claude-sonnet ran no step in that run]
+
+**L4-IMP-104 An answer that unfreezes a file for a task's green renews its green attempts once.** When a task's green
+step is about to start in a run (a red commit that the run resumes at the task's start, or a red commit made in the
+run), and before the escalation that precedes its first attempt (L4-IMP-075, L4-IMP-094), the harness SHALL take the
+grants that open a frozen file for that green under the rules of L4-IMP-015 and L4-DLG-014 (`unfreeze_for`: `reason`
+`human_answer` or `delegate_answer`, at least one path). A grant SHALL renew the green window when its question is
+credited nowhere yet: no earlier `task.attempts_renewed` of the task names it, and no earlier `task.unfrozen` of the
+task with `reason` `human_answer` or `delegate_answer` (or none, an old event) names it in `question` (the same fix
+unit, over the whole ledger, not only the window). The harness records `task.attempts_renewed{task, phase: green, questions, failed}`, where `failed` is the number of failed
+green attempts it clears. It clears the green phase's failed-attempt counts per profile, their reasons and the newest
+move of the phase, so the phase starts on the run's selected profile as after `l4 retry`. Attempt numbers SHALL go on
+(a step key is used once). A renewal with `failed: 0` SHALL be recorded too, so that the answer cannot renew later. A
+renewal with `failed` above 0 SHALL NOT be made when the task already has 2 such renewals after the newest
+`unit.retried`, `unit.resumed` or `unit.restarted` (of the same fix unit): the harness logs `task <k>: no attempt
+renewal for <ids>: 2 renewals since the last retry, resume or restart` and records nothing. When a later run seeds the
+task's attempts, a `task.attempts_renewed` of phase green in the window SHALL clear the green counts, reasons and move
+seeded before it. The task's own text (`named_by_task`) SHALL renew nothing. Red, single and the deadline's stop count
+(L4-IMP-071) SHALL NOT change. Bound: a renewal needs an answered question that blocks the task and a grant that opens a
+file. A question renews once per task. At most 2 renewals that clear a failure come per task between two `l4 retry`,
+`l4 resume` or `l4 restart`, whoever answered; the delegate's answers are also capped by
+`delegate.max_answers_per_task`. So a task's green phase has at most three windows between two of those commands,
+each bounded as L4-IMP-075 and L4-IMP-094 bound one; with one profile in `roles.implementer` that is three times
+`implementer.max_task_attempts` failed green attempts. A ledger written by 0.4.59 holds no `task.attempts_renewed`: an
+answer it recorded that no green has used yet (no `task.unfrozen` names its question) renews once on the next run, and
+one that a 0.4.59 green already used does not. [V, three times in two consumer units green attempts 1
+and 2 failed against a wrong frozen red browser test and attempt 3 asked; the delegate accepted the unfreeze, and the
+next run had one attempt left: once it failed on a second wrong line and the breaker halted the unit for a person, once
+it passed]
 
 **L4-IMP-076** A usable budget below one step is refused before any unit. When `ci.time_budget` is a duration (not
 `auto`) and `ci.time_budget` minus `ci.soft_deadline_margin` is less than the smallest step estimate
@@ -6138,7 +6197,7 @@ fixtures or helpers):` and the file's unified diff between the base and head (3 
 **L4-VER-069 Step 3 records why each test failed, and in which gate.** The verdict of a round (`verdict.json`) SHALL hold,
 beside the `tests` map (id to status, unchanged), a `failures` map: for each test id that failed or errored in step 3,
 `{gate, kind, message}`. `gate` is `test` (the unit's test gate) or `e2e` (the browser gate; an id both reports hold is the
-e2e one). `kind` is the failure kind the JUnit reader gives (`assertion`, `not_implemented`, `error`, `other`, …), and
+e2e one), or `base-tests` for a base test that step 1's run failed (L4-VER-080; step 3 does not run then). `kind` is the failure kind the JUnit reader gives (`assertion`, `not_implemented`, `error`, `other`, …), and
 where the reader gives none `error` for an errored test and `other` for a failed one. `message` is the first line of the
 failure message, redacted and at most 200 characters. A module that a report could not collect has a record of its own,
 kind `collection`, with the first line of its collection detail (else the module's name): it is not a test id, so it is
@@ -6649,6 +6708,16 @@ consumer run: generated browser tests failed, or the writer declared the criteri
 login() ... helpers"), for want of the sign-in helper, the test users and the accessibility assertion that the suite's
 `e2e/conftest.py` defines; the writer had been shown only the criterion, the UI diff and the page snapshot]
 
+**L4-VER-082 Verification lists the tests that passed only on a task step's re-run.** `verification.md` SHALL list,
+after `## Guard events`, under `## Pre-existing tests that passed on a task step's re-run (L4-IMP-105)`, each test that a
+`task.tests_rechecked{stopped: passed}` of the unit's ledger (its fix units' events included) names in `flaky`, as
+`<id> (task <k> <phase> attempt <n>)` (with `, fix unit <f>` for a fix unit's), at most 20 lines and then `(+<n>
+more)`. `verdict.json` SHALL store the lines as `step_flakes`, and a reused round SHALL keep them. The listing SHALL NOT
+be a finding and SHALL NOT change the verdict: steps 1 and 3 run every pre-existing test again (L4-VER-038,
+L4-VER-076). A ledger without such an event SHALL list nothing. [V, three attempts in two units of a consumer were lost
+to pre-existing tests of its e2e stack helper that failed once in a task step; nothing a person reads at verification
+showed it]
+
 **L4-VER-030** Step 1 SHALL compare every test that exists at the base in each changed test file with head (L4-IMP-045..047). A test
 changed, rebound or unparsable SHALL be the blocker `a pre-existing test was changed` and a deleted test that did not
 move the blocker `a pre-existing test was deleted`, each naming `<path>::<name>` and why, when a harness commit
@@ -6705,12 +6774,79 @@ one, has none of the three allowances that read a file. A test or support file t
 person's commit, SHALL stay at head for the run, listed; the last kind as a person's line that names every commit that
 changed it, the harness's included. A harness commit after the person's puts the file back, and so does being support
 (step 5's rule: one of `tdd.test_support_globs`, a `.py` file that defines no test, another language's file whose name
-does not look like a test module).
+does not look like a test module). A support file that a task's reviewed text names and that only that task's red
+commit changed stays at head too, listed (L4-VER-079).
 
 **L4-VER-039** Step 1's content scan SHALL flag in support files call/setup hooks that replace tests, `atexit.register`, `os._exit` and
 session-end file writers. In test, support and production files it SHALL flag the names `l4_trace`, `_OUTCOME_FD`,
 `L4_OUTCOME_FILE`, `config.option.xmlpath`, `sys.modules` lookups of `l4` and assignments to `.exitstatus`/`.xmlpath`,
 and a production read of `L4_*`/`PYTEST_*`; `verifier.test_awareness_allow` lists instead of blocking.
+
+**L4-VER-079 A support file that a task's reviewed text names and its red step changed stays at head for the base's
+tests.** When step 1 runs the base's tests (L4-VER-038), a file of the revert set SHALL stay at head for the run when
+all of these hold: it is a regular file at the base and at head; it is no ignore file; it is a support file by step 5's
+rule (`is_support_file`: one of `tdd.test_support_globs`, a `.py` file that defines no test, another language's file
+whose name does not look like a test module); no test id of the base's test report belongs to it; at least one
+harness commit changed it; and every harness commit that changed it is an `L4-TDD: red` commit of a task for which the
+ledger holds a `task.unfrozen` with `reason: named_by_task`, the same unit and task, `red_sha` equal to that commit, a
+`source`, and the path in its `paths` or in a `kept` entry. That event says the task's reviewed text names the path
+(L4-IMP-014). A test id belongs to a file when `test_locate.file_of_id` finds the file for it among that one path (the id's head
+is the path, the path with dots for slashes, a dotted Python module or a class of it, or the end of such a path, which
+reads a runner that writes ids relative to its test directory; for a spec id the slashes are read as dots, as in
+`gate_repeat.untouched`), or when the head is a dotted class name that ends the path without its extension
+(`com.acme.Shared`). Jest runs every file under `__tests__/` and mocha every file under `test/`, and for a
+file that is not Python this run is the only guard against a weakened test of it, so such a file is reverted. A file no
+id maps to, such as a data file with no tests of its own, stays eligible. The base report is the workbench's baseline,
+the `integrity.base_tests` of an earlier round or a run at the merge base (step 1's base reference); it is fetched only
+when a file passed every other condition, and with none nothing stays this way (fail closed). A runner whose ids hold no
+path (jest-junit's default) gives the report no way to see a test file: such a file stays eligible. The manifest's kind and the
+entry's `why` text are not read: with the default globs a data file under `test/` is kind `test` there. A person's
+commit needs no cover. `git diff --numstat` of the base and head SHALL count at most 40 added and deleted lines for the
+file, and a binary file SHALL NOT be kept. At most three files per task SHALL stay this way, in path order. The others are reverted, and
+the row's note counts them. A kept file SHALL be listed under `Pre-existing tests changed with an allowance` as
+`<path> kept at head for the run (task <t>: changed by its red step, named by its reviewed text (<source>))`. The rule
+SHALL apply to this run only: `_allowance`, the comparison of pre-existing tests (L4-VER-030, L4-VER-031) and the
+people-last rule keep theirs. A file that fails any condition SHALL be reverted as before. A ledger written by 0.4.59
+already holds these events, so a unit in flight keeps such a file on its next round. Limits: a file red added, an
+ignore file, a test module, a file a base test belongs to, a task with no reviewed text (a fix or follow-up unit) and a task that finished as already
+satisfied (no green step, so no event) are not covered. Green's edit of a support file that a task's text opens must
+keep every statement of the red version (L4-IMP-016) and may open only a Python file; red's change to a named file has
+no such rule. For a Python support file L4-VER-037 and L4-VER-039 still read it; for any file the listing, the judge's
+diff and the 40-line bound are what remains. Slippable: it relaxes the run of L4-VER-038. [V, a TypeScript consumer's task
+text told red to add an edge to the module-graph data file `test/arch/modules.ts`; step 1 reverted it, so the base
+graph forbade the unit's import and the unchanged base test `test/arch/repo.test.ts` failed; the fix chore found
+nothing to fix and committed only its tick, round 2 failed the same way and the unit escalated `same_failure`; a
+person's `[test-infra]` tag let the next round pass]
+
+**L4-VER-080 A base-tests blocker names the reverted support files, and its tests reach the fix task with their failure
+text.** `verify.base_tests` SHALL carry `support_reverted`: for each reverted file that is a support file (the rule of
+L4-VER-079), `{path, tasks, people}` with the tasks of the harness commits that changed it and whether a person's
+commit did, sorted by path, at most 20. When it is not empty, the detail of `a pre-existing test fails on the unit's
+code` and of `a pre-existing test no longer runs on the unit's code` SHALL start with `with the unit's test and support
+files at their base version (support files reverted: <path> (task <t>[, <t2>]), ... (+<n> more); <k> files in all),
+these base tests fail: ` (`no longer run: ` for the second; a file a person's commit changed and no task's did is
+`(a person)`, one only a harness commit with no task changed is `(a harness commit)`), at most 5 files, where `<k>` counts every file the run reverted, support or not, and go on with the list of today. The lead comes first because a fix chore's detail is cut at 600 characters.
+The detail SHALL NOT say that a test passes at head: step 1 never runs it there. Each blocked failing base test SHALL
+have a record in the round's `failures` (L4-VER-069) with `gate: base-tests`, its kind, its first line and the excerpt
+of L4-VER-078, built and redacted the same way. Step 3 never runs after such a blocker, so no record is replaced. The
+finding `a pre-existing test fails on the unit's code` SHALL name every `base-tests` record for the failure block of
+its fix task (L4-IMP-102), so the fix proposal, the fix chore's prompt and its questions carry the failure text.
+Readers that filter by gate (`failing_ids`, `finding_test_ids`, `repair_candidates`) SHALL ignore these records. With
+no reverted support file, the detail SHALL be as before; a 0.4.59 verdict has no such record and adds nothing. [V, the
+unit of L4-VER-079: the blocker named the test and the first line of its message, and the fix chore could not tell
+that the test fails only with the reverted files]
+
+**L4-VER-081 A repeated base-tests failure escalates with the reverted support files and the way out.** When a round
+escalates `same_failure` (L4-OPS-007) and its blocking findings hold `a pre-existing test fails on the unit's code` or
+`a pre-existing test no longer runs on the unit's code`, and the newest `verify.base_tests` of the unit up to that
+round names in `support_reverted` a file that a task changed, the escalation's text SHALL start with `base versions of
+support files fail a pre-existing test; tag the task that changed one [test-infra] if its change is intended, or fix
+the code, then l4 retry: <path> (task <t>), ...`, at most 3 files and 300 characters, then `; ` and the `same_failure`
+detail. The way out comes before the files: the note's `Round <n> ended FAIL: <reason>` and the exit reason
+`escalated: <detail>. Next: ...` are cut at 300 characters, so a cut drops files, not the way out. The code, the edge and the fold
+SHALL stay those of `same_failure`. With no such entry (a 0.4.59 event) the text SHALL be the detail alone. A fix chore
+that changes nothing still commits its tick. [V, the unit of L4-VER-079 escalated with `round 2 failed the same way as
+round 1: finding <id>`, which named neither the file nor the tag that resolved it]
 
 **L4-VER-011 Resumable ladder.** Each completed step is recorded (`verify.step{round, step, subject_sha, evidence_hash,
 status}`), where `subject_sha` is the **last commit not authored by the verifier**. Verifier-generated tests live in the
@@ -7221,6 +7357,8 @@ CI evidence adds `failed_step` on `ci.failed.jobs[]` (L4-VER-061): the name of a
 zero-value-inconclusive adds these records (L4-IMP-060..064, L4-QMD-004): `check.inconclusive` (`{task, phase, check, criteria, tests, reason, runs, kept, question}`), `check.accepted` (`{task, check, question, answer_sha256, by, criteria | tests}`), `zero.kept` (`{gate, rerun, cause, functions}`), `collection_errors` and `excerpt` on `gate.finished`, `excerpt` on `task.attempt_failed`, `via: not_applicable | human_override | agent_override` (with `question` and `answer_sha256` for the overrides), `question.answered{by: agent}` on `criterion.pre_satisfied` and in the criteria of `task.red_ok`, and `kind: harness` with `check`, `criteria` and `tests` on `question.raised`.
 
 Base run scope adds `base_run.scope` (`{decided, kept, aside, more, timeout_s, unscoped}`, L4-IMP-097), once before each base run's gate: the number of tests the run decides, the files that hold them (at most 20; none when nothing is set aside), the unit's added test files removed for the run (at most 50, only files actually removed), the count left out of the two lists, the run's limit in seconds and why nothing was set aside (empty when the run is scoped); paths only, no test source.
+
+An answer's renewal adds `task.attempts_renewed` (`{task, phase, questions, failed}`, L4-IMP-104): the green window of a task starts anew once per answered question whose grant opens a frozen file, `failed` is the number of failed attempts it cleared (0 is recorded too), and attempt numbers go on. A step's re-run adds `task.tests_rechecked` (`{task, phase, attempt, tests, flaky, failing, new_failures, stopped}`, L4-IMP-105; `stopped` is `passed`, `failed`, `unusable`, `tree` or `budget`; lists at most 20 ids) and the `gate.finished` of the gate `test-recheck`. `verify.base_tests` gains `support_reverted` (`[{path, tasks, people}]`, at most 20, L4-VER-080). An older harness ignores the two events and the key.
 
 A near pass adds these records (L4-IMP-100): `near_pass: true` on `task.attempt_failed` of a green attempt that passed every test and failed only its static gates (absent otherwise), `task.near_pass_applied` (`{task, attempt, from_attempt, from_profile, patch_sha256, files}`: the near pass is applied to the work tree before the agent runs; `files` at most 50) and `task.near_pass_dropped` (`{task, attempt, from_attempt, reason}`: `reason` is `replay` or the first line of the `git apply` error, at most 300 characters), and `near_pass` (`{attempt, profile}`) on `breaker.tripped`; paths and the patch's digest only, never the patch. A
 lint-only failure with a link out of the work tree also records `guard.violation{action: refused}`: the outside-link check
@@ -9895,7 +10033,9 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 133 | `e2e-in-task-steps` | the step that completes a task runs that task's own browser tests, so a wrong browser test is met where the task can still be unfrozen and fixed; the check is fail-safe. `l4.implementer.browser_tests` (new): `collectable_tests` (what pytest would collect: `python_files`, no fixture, `Test*` classes without `__init__`), `match_task_tests` (a report id by module suffix, the module read as `evidence.testsran.file_of_test` does with a file inside the e2e directory before an exact match outside it, and by exact class, two fitting files left `ambiguous`), `selecting_option` (`-m`/`-k`), `shared_with_unit_gate`. `l4.implementer.tdd.task_browser_tests(wb, before, after)` (new): the collectable tests of the Python files under `e2e_test_dir(gates.e2e)` that the red commit added or whose own definition it changed (read from git, so a resumed red counts; a git error is `e2e.task_tests_unread`); `_task_e2e_reason` (new, the shape of `_e2e_chore_reason`): `run_build_only`, `run_e2e(name="e2e-task")` with no `must_contain`; only a failing or erroring task test, a timed-out gate, no report, a collection error of a mapped task module, a failed build or a server that is not ready refuse, and a test the report does not show is `e2e.task_tests_unseen`; `_e2e_skip_reason` (`e2e.task_run_skipped`: a selecting command or a directory the unit gate also runs); `_drop_gate_output(freeze_phase=...)`; `run_green` calls it last, after the test gate, the static gates, the test-at-red run and any hold; `finish_already_satisfied` calls it before its commit with no freeze; a red commit runs none. The green prompt lists the tests (`PromptContext.browser_tests`), the red prompt says the step that completes the task runs them, and that they are frozen only when `PromptContext.e2e_frozen` (the green prompt says so in both forms). `deadline.cap_s(..., e2e=True)`: the agent's limit plus three `gates.timeout` for a green step, passed by `loop._check_step` only when `task_runs_e2e` (in `l4.implementer.tdd`) is true. A consumer unit's browser test with a wrong expectation (a `set_content` page kept the default 8px body margin) went through nine tasks unrun and failed first at verification, where its fix unit could change neither it nor its support file (L4-IMP-101, L4-IMP-067, SCN-IMP-548..556, 562..564; `openspec/changes/e2e-in-task-steps/`). Limits: the e2e suite runs whole; e2e tests that are not the task's are judged only at step 3; a task test the report does not show is run first at step 3; browser tests in another language, a support-only change and a pytest configuration that overrides `python_files` are not run at a task step | the unit tests (`test_e2e_task_steps`, `test_browser_tests`, `test_deadline`) |
 | 134 | `fix-failure-excerpt` | the failure text of a test that verification saw fail travels with the fix task made for it. `l4.implementer.excerpt.case_excerpt` (new): one test's retry-excerpt lines, redacted before and after the cut, 8 lines and 600 characters, a private-key block with one marker removed to the edge (`_redact_keys`, also for `failure_excerpt`); `collection_case_excerpt` cut the same way; `l4.verifier.gates.failure_records(..., excerpt=, collection_excerpt=)` adds `excerpt` to the first 20 records of each gate (`MAX_EXCERPT_RECORDS`), passed from `ladder.tests()`. `l4.verifier.failures.shown_failure_ids` and `failure_block` (new, plain data): the tests of a finding and the block (`<id> (<kind>, <gate>):`, 8 tests, 6,000 characters). `Finding.failures` (new field), set by `fixunit.plan_fix_unit` and redacted by `redact_plan`, is written indented under the finding (six spaces in `openspec._proposal`, where the finding is a list item; four in `kiro._fix_design`), never into `tasks.md`. `PromptContext.failing_tests`: a fix chore's prompt block, from `fix_failure_text` of `l4.implementer.tdd` (`_parent_verdict`), threaded through `run_single`, `step_or_replay`, `agent_step`, `_prompt`. `loop._questions(notes=)`: a fix chore's questions get the block, and a question after a failed attempt of the task and phase gets its reason (redacted before and after the 300-character cut) and ledger excerpt, in the question's own `### Harness notes` subsection (`NewQuestion.notes`, `Question.notes_text`, `QuestionView.context`), not its Context, so no `asked` text that decides an unfreeze holds them. A consumer's fix chore for a browser test that failed by assertion carried only the test's id; its question said the failure was not reproduced, and the person who got it did not see the one-line cause that `verdict.json` held (L4-VER-078, L4-IMP-102, L4-VER-069, SCN-VER-308..311, SCN-IMP-557..561, 565; `openspec/changes/fix-failure-excerpt/`). Limits: 20 excerpts per gate; the repair chore's prompt is unchanged; the gate log stays on the runner | the unit tests (`test_excerpt`, `test_failures_map`, `test_failures_block`, `test_fixunit`, `test_fix_unit`, `test_kiro_fix_unit`, `test_fix_failure_excerpt`, `test_harness_notes`, `test_questions`, `test_ui_flow`) |
 | 135 | `readiness-entry-and-actor` | the readiness review's `plan entry` block shows every object `id` first, then `depends_on`, then the other keys sorted (a unit, a batch and each part of a batch), so a judge no longer reads a unit's prerequisites as the previous unit's; the readiness prompt version is 5, so a review of 0.4.59 is stale before the activation (status, activation refusal, one full review in CI; acceptances bound to the old material no longer hold, rounds are kept, a force acceptance holds) and an active plan is neither stopped nor reviewed again (L4-YOLO-101); `plan.activated`, `plan.resumed` and `plan.cancelled` record `actor`, `marker` and `harness_version`, `l4 yolo status` and the plan report show the kind, an older event shows none, and nothing is refused for it (L4-YOLO-102); `l4 retry`, `l4 resume` and `l4 restart` record the actor in their unit events (L4-OPS-025); doctor CFG-013 warns about a judge chain of one profile and says a review-only judge belongs in `roles.plan_judges` (L4-YOLO-103); outside CI a command that writes is refused (exit 2, before it reads anything) when the running `l4` is older than the repository's pin (`harness.version`, or the `# vX.Y.Z` comment of the setup action's `uses:` line, read at `origin/<base>` as last fetched), unless `--allow-older-cli`; a stop and a local-only write warn (L4-OPS-026); the runbook, the skill and the CHANGELOG say so (L4-YOLO-104; L4-YOLO-025, L4-YOLO-098, SCN-YOLO-56, SCN-YOLO-276 amended; `openspec/changes/readiness-entry-and-actor/`) | a ten-unit plan whose judge raised a false `depends_on` finding twice; a consumer that cut `roles.judges` to one judge for a review; a retry run with an older local `l4`; the unit tests (`test_yolo_readiness_entry_order`, `test_yolo_prompt_upgrade`, `test_yolo_plan_actor`, `test_checks_cfg_013`, `test_cli_pin`, `test_readiness_entry_and_actor_docs`) |
+| 136 | `base-tests-named-support` | a support file whose change a task's reviewed text asked of the red step stays at head when step 1 runs the base's tests, and a base-tests blocker says what the run reverted. `l4.verifier.base_tests._named_red_change` (new, read by `kept_files` only, after `_allowance`): a regular file at the base and at head, no ignore file, support by `is_support_file`, no test of the base's report belonging to it (a file under `__tests__/` or `test/` that holds tests is reverted; with no base report nothing stays), every harness commit that changed it an `L4-TDD: red` commit whose task has a `task.unfrozen{reason: named_by_task}` of the same unit, task and `red_sha` with a `source` and the path in `paths` or `kept`; at most 40 changed lines (`--numstat`, no binary) and 3 files per task (`MAX_NAMED_SUPPORT`); listed `kept at head for the run (task <t>: changed by its red step, named by its reviewed text (<source>))`; `_allowance`, `_unfrozen_source`, `split_allowed` and `check_tests` are unchanged (slippable). `check_base_tests`: `support_reverted` (`{path, tasks, people}`, 20) in `verify.base_tests`, the blockers' detail leads with `with the unit's test and support files at their base version (support files reverted: ...)`, and each blocked failing test gets a `failures` record with `gate: base-tests` and an excerpt (`failure_records(..., unit_gate=)`, `Outcome.failures`, copied by `ladder.integrity()`); `failures.BASE_FAILS_TITLE` and its branch in `shown_failure_ids` give the fix task its failure block (L4-IMP-102). `fixloop.base_tests_way_out`: a `same_failure` escalation of a round with a base-tests blocker leads with `base versions of support files fail a pre-existing test; tag the task that changed one [test-infra] if its change is intended, or fix the code, then l4 retry:` and then the reverted support files and their tasks (300 characters, the way out before the files). The skill's spec rules say a red step may change an existing support file only when its task line names it. A TypeScript consumer's task text told red to add an edge to `test/arch/modules.ts`; step 1 reverted it, an unchanged base test failed twice, the fix chore committed only its tick, and the unit escalated `same_failure` until a person tagged the task `[test-infra]` (L4-VER-079, L4-VER-080, L4-VER-081, L4-VER-038, L4-VER-069, L4-IMP-102, SCN-VER-312..321, 324..328; `openspec/changes/base-tests-named-support/`). Limits: a file red added, an ignore file, a test module, a task without a reviewed text and an already-satisfied task are not covered; red's whole change to a named file is trusted, listed and in the judge's diff; a fix chore that changes nothing still commits its tick | the unit tests (`test_base_tests_named_support`, `test_base_tests`, `test_integrity`, `test_failures_block`, `test_failures_map`, `test_fix_failure_excerpt`, `test_fixloop_escalation`) |
 | 138 | `test-chore-browser-tests` | a test chore counts the browser tests it writes, says what each gate found when it added none, checks each new test against the report that holds it, and tells its agent and its questions what it may change. `l4.implementer.tdd.run_single` (kind `tests`): the step's browser tests are `task_browser_tests(wb, base, None)` limited to the files `review_test_chore` kept; after the test gate and `green_failures`, when `gates.e2e` is configured and `_runnable_browser_tests(..., "single", ...)` leaves some, `_chore_browser_tests` (new, the shape of `_task_e2e_reason`, with `freeze_phase=None`) runs `gates.build` and `run_e2e(name="e2e-test-chore")`; `_task_e2e_run` returns `TaskE2e` (reason, excerpt, passed, unseen, report) and `_task_e2e_reason` keeps its pair; the refusals are those of L4-IMP-101; a browser test counts when one of its ids passed and none failed, an unseen one is `e2e.task_tests_unseen{phase: "single"}` and does not count; `added_unit` and `added_e2e` together feed `no tests added` and `decision_calling_code_wrong`, and `_already_done` (a retake) applies only when the review kept no test file; `over_cap_text` reads each id from its own report; `_discriminating_tests` gets `added_unit` only, and a browser-only chore of a cited criterion is held with no run (`BROWSER_ONLY`); `task.tests_added` keeps `tests` for unit-gate ids and gains `e2e_tests`; `_no_tests_text` (new) names each gate. `PromptContext.retake_tests` and two blocks for the `single_tests` role in `prompt.py` (no template change); `loop.chore_question_note(unit, kind)`, whose test-chore note keeps the fix chore's first sentence. A TypeScript consumer's test chore for one requested Python browser test failed `no tests added` three times because the Node unit gate does not run `e2e/`, passed only with a Node meta-test, and its fix unit's test chore could not edit the earlier take's browser test (L4-IMP-108..111, L4-VER-006, SCN-IMP-586..600; `openspec/changes/test-chore-browser-tests/`). Limits: the e2e suite runs whole; the phase-`single` deadline cap does not grow; where the e2e run is skipped (`-m`/`-k`, a directory shared with the unit gate) a browser test still cannot count; a test chore still cannot edit the test files an earlier take added (a new test file can hold the missing check); a browser-only chore of a cited criterion still needs an answer | the unit tests (`test_test_chore_browser`, `test_single_phase`, `test_prompt`, `test_loop`) |
+| 140 | `attempt-window-recheck` | an answer that unfreezes a file for a task's green renews its attempts once, and a step runs its test gate once more before it fails on a few pre-existing tests. `l4.implementer.loop._renew_on_answers` (new): before a task's first green attempt in a run (a resumed red commit, before the start escalation; or a red commit of the run), the grants of `unfreeze_for` with `reason` `human_answer` or `delegate_answer` and a path, whose question no earlier `task.attempts_renewed` of the task names, record `task.attempts_renewed{task, phase, questions, failed}` and clear the green failures, reasons and `escalated_from`; a question is credited once, by a renewal or by an earlier answer `task.unfrozen` that names it; attempt numbers go on; at most 2 renewals with `failed > 0` per task after the newest retry, resume or restart (`MAX_RENEWALS`), so at most three green windows between two of them (3 x `max_task_attempts` failed attempts with one profile); `seed_attempts` clears at the event; `deadline.window` is unchanged. `l4.implementer.recheck` (new): `recheck_candidates` (1 to 5 regressed ids, failed or errored, no time-out marker, in a file neither the branch nor the step changed: `gate_repeat.untouched`, factored out of `pre_existing`), the `test-recheck` run after `tree_reset` and `gate_repeat.short_of_time` (now public), the step's guard after it, the merged report (each flaky test's case from the re-run) judged again and handed on (`keep_tested` too), `task.tests_rechecked`; `RedVerdict.regressed` and the branch of `green_failures`; red, green and the fix, tests and refactor chores, not the repair chore. `VerifyResult.step_flakes` from the ledger, the section `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)` of `verification.md` and `verdict.json`'s `step_flakes`, kept by a reused round; no finding. Three times in two consumer units an accepted unfreeze left one green attempt, and three attempts in two units were lost to pre-existing tests of an e2e stack helper that failed once (L4-IMP-104, L4-IMP-105, L4-VER-082, L4-IMP-075, SCN-IMP-566..576, SCN-VER-322..323; `openspec/changes/attempt-window-recheck/`). Limits: an answer that opens nothing renews nothing; the gate runs whole; the re-run needs room before the soft deadline (`deadline.cap_s` is unchanged); a step that made a test flaky can pass its attempt, and is listed | the unit tests (`test_attempt_renewal`, `test_recheck`, `test_step_recheck`, `test_report_step_flakes`, `test_loop`, `test_gate_repeat`, `test_tdd_green`, `test_tdd_red`) |
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
@@ -14057,6 +14197,78 @@ scenario is a spec defect (§26).
   note does not exist; the note is in the question's own `### Harness notes` subsection, which a line of the note cannot
   forge (a `###` line in it is escaped)
 
+#### SCN-IMP-566 (+) An answer that unfreezes the test gives green a full window · L4-IMP-104, L4-IMP-075
+- **Given** green attempts 1 and 2 of task 1.2 that failed, a green attempt 3 that raised a question, and the
+  delegate's accept of the suggestion `Edit e2e/test_layout.py`, which unfreezes that file (`delegate.unfreeze: true`)
+- **When** the next run resumes the task at green with one profile and `implementer.max_task_attempts: 3`
+- **Then** `task.attempts_renewed{task: 1.2, phase: green, questions: [Q-001], failed: 2}` is recorded before the first
+  attempt, the attempt is numbered 3, and the task may fail 3 green attempts in this window before the breaker trips
+
+#### SCN-IMP-567 (−) The same answer renews once · L4-IMP-104
+- **Given** the unit of SCN-IMP-566 after attempts 3 and 4 failed with the same answer in place
+- **When** a later run resumes the task at green
+- **Then** no second `task.attempts_renewed` is recorded, and the task has one attempt left
+
+#### SCN-IMP-568 (−) An answer that opens nothing, and the task's text, renew nothing · L4-IMP-104, L4-DLG-014
+- **Given** an answered question whose answer names no frozen file, a delegate's accept while `delegate.unfreeze` is
+  false, and a support file that the task's reviewed text opens (`named_by_task`)
+- **When** green is about to start
+- **Then** no `task.attempts_renewed` is recorded, and the failed attempts count as before
+
+#### SCN-IMP-569 (−) Renewals are bounded between two retries · L4-IMP-104
+- **Given** a task with 2 renewals with `failed` above 0 since its last `unit.resumed`, and a third answered question
+  that unfreezes another file
+- **When** green is about to start
+- **Then** nothing is recorded, a warning names the cap, and the task halts on `max_task_attempts` as before; after
+  `l4 resume` the window is new anyway
+
+#### SCN-IMP-570 (+) A unit in flight from 0.4.59 renews on its next run · L4-IMP-104
+- **Given** a ledger written by 0.4.59 with two failed green attempts and an accepted answer that unfreezes the test,
+  not yet used by a green attempt; and another whose 0.4.59 green attempt already recorded `task.unfrozen` for its
+  answer
+- **When** the next run on 0.4.60 resumes each task at green
+- **Then** the first window is renewed once, the second is not, and a ledger without the event folds as before
+
+#### SCN-IMP-571 (+) A pre-existing test that fails once in green and passes on the re-run does not fail the attempt · L4-IMP-105
+- **Given** a green step whose test gate passes the red tests and fails only `tests.test_stack::test_ready`, which
+  passed in the step's base report and lies in a file the unit did not change, and a re-run in which it passes
+- **When** the step judges its gate
+- **Then** `test-recheck` ran once, `task.tests_rechecked{stopped: passed, flaky: [tests.test_stack::test_ready]}` is
+  recorded, the task is committed green, and `keep_tested` holds the test as passed
+
+#### SCN-IMP-572 (−) A test the step broke fails twice and fails the attempt · L4-IMP-105
+- **Given** the step of SCN-IMP-571 whose re-run fails `tests.test_stack::test_ready` again, or skips it
+- **When** the step judges its gate
+- **Then** the attempt fails with `green broke existing tests: tests.test_stack::test_ready; failed again on a re-run
+  (L4-IMP-105): tests.test_stack::test_ready` and `task.tests_rechecked{stopped: failed}`
+
+#### SCN-IMP-573 (−) No re-run for six tests, a changed file, a hang, a gone test or another reason · L4-IMP-105
+- **Given** green attempts that regress six pre-existing tests; one in a file the unit changed; one whose message holds
+  the time-out marker; one missing from the report; and one whose gate also leaves a red test failing
+- **When** each step judges its gate
+- **Then** no `test-recheck` runs, no `task.tests_rechecked` is recorded, and each attempt fails with the reason of
+  0.4.59
+
+#### SCN-IMP-574 (−) No re-run without time or a clean tree · L4-IMP-105
+- **Given** a step with candidates whose armed soft deadline leaves less than twice run 1's duration plus 60 seconds
+  (run 1 took 100 s and 200 s are left), and another whose tree cannot be put back
+- **When** each step judges its gate
+- **Then** no `test-recheck` runs, `task.tests_rechecked` has `stopped: budget` and `stopped: tree`, and each attempt
+  fails with run 1's reason
+
+#### SCN-IMP-575 (+) Red and a fix chore get the re-run too · L4-IMP-105
+- **Given** a red step whose only failure reason is `red broke existing tests: tests.test_dns::test_no_lookup`, and a
+  fix chore whose only one is `green broke existing tests` on the same test, each passing it on the re-run
+- **When** each step judges its gate
+- **Then** red commits its red tests and the chore commits its fix, each with `task.tests_rechecked{stopped: passed}`,
+  and the red step's tamper check ran after the re-run
+
+#### SCN-IMP-576 (−) A re-run that fails a test run 1 passed fails the attempt · L4-IMP-105
+- **Given** a re-run in which the regressed test passes and another pre-existing test, which passed in run 1, fails
+- **When** the step judges its gate
+- **Then** the attempt fails with run 1's reason and `; failed again on a re-run (L4-IMP-105): <that test>`, and
+  `new_failures` names it
+
 #### SCN-IMP-586 (+) A new browser test of a test chore counts · L4-IMP-108
 - **Given** a test chore whose step adds `e2e/test_layout.py` with `test_regions`, a unit gate that does not collect
   `e2e/`, and an e2e gate whose report shows `test_layout::test_regions[chromium]` passed
@@ -16281,6 +16493,119 @@ scenario is a spec defect (§26).
 - **When** step 3 writes the verdict
 - **Then** no line of either key block is in the `excerpt` or in `verdict.json`, and the collection record's excerpt
   holds its first 8 lines
+
+#### SCN-VER-312 (+) A data file the task named stays at head and the base test passes · L4-VER-079, L4-VER-038
+- **Given** `test/arch/modules.ts` at the base, task 1.1's red commit that adds an edge to it, a `task.unfrozen{reason:
+  named_by_task, red_sha: <that commit>, source: plan:p@d, kept: [{path: test/arch/modules.ts, why: a red test of this
+  task}]}`, and the unchanged base test `test/arch/repo.test.ts`, which passes only with the head version
+- **When** step 1 runs the base's tests
+- **Then** `verify.base_tests.reverted` does not hold the file, the allowances list `test/arch/modules.ts kept at head
+  for the run (task 1.1: changed by its red step, named by its reviewed text (plan:p@d))`, and no base-tests blocker is
+  raised
+
+#### SCN-VER-313 (−) A file another task's commit also changed is reverted · L4-VER-079
+- **Given** the file of SCN-VER-312, also changed by task 1.2's red commit, whose text does not name it
+- **When** step 1 runs the base's tests
+- **Then** the file is reverted and the base test's failure is a blocker, as before
+
+#### SCN-VER-314 (−) An ignore file, an added file, a test module, an older red and a fourth file are reverted · L4-VER-079
+- **Given** a red commit of a named task that changed `.gitignore`, added `test/arch/new.ts`, changed
+  `test/arch/repo.test.ts` and four named data files, and rewrote a fifth named data file in 60 lines; and a
+  `task.unfrozen{named_by_task}` whose `red_sha` is an earlier red commit of a reopened task
+- **When** step 1 runs the base's tests
+- **Then** only the first three data files in path order stay at head, the note counts one more, and every other file
+  is reverted or set aside as before
+
+#### SCN-VER-315 (−) The comparison of pre-existing tests is unchanged · L4-VER-079, L4-VER-030
+- **Given** a Python file that matches a test glob and a support glob, that the task names and red changed, and in
+  which red changed a test that exists at the base
+- **When** step 1 runs
+- **Then** `a pre-existing test was changed` is still a blocker
+
+#### SCN-VER-316 (+) A unit in flight from 0.4.59 keeps its named file on its next round · L4-VER-079
+- **Given** a ledger written by 0.4.59 that holds the `task.unfrozen{named_by_task}` of SCN-VER-312, and a round 1 that
+  failed on the base test
+- **When** round 2 runs on 0.4.60
+- **Then** the file stays at head and is listed, and the ledger folds as before
+
+#### SCN-VER-317 (+) The blocker names the reverted file and the tasks that changed it · L4-VER-080
+- **Given** the unit of SCN-VER-313
+- **When** step 1 raises the blocker
+- **Then** its detail starts with `with the unit's test and support files at their base version (support files
+  reverted: test/arch/modules.ts (task 1.1, 1.2); 5 files in all), these base tests fail:` and then names
+  `test/arch/repo.test.ts` with its first line, and `verify.base_tests.support_reverted` holds the file and both tasks
+
+#### SCN-VER-318 (+) The fix chore sees the failure text of the base test · L4-VER-080, L4-IMP-102
+- **Given** the round of SCN-VER-317, whose failing case has a body with `AssertionError: expected [ 'src/a -> src/b' ]
+  to deeply equal []`
+- **When** the fix unit is written and its fix chore is prompted
+- **Then** `verdict.json` holds the record of `test/arch/repo.test.ts` with `gate: base-tests` and an `excerpt` with
+  that line, and the fix unit's `proposal.md` and the chore's prompt hold it in the failure block
+
+#### SCN-VER-319 (−) A secret is not recorded, and other readers ignore the records · L4-VER-080, L4-VER-069, L4-OBS-002
+- **Given** a failing base test whose body holds a token-shaped value
+- **When** step 1 writes the records and the fix unit is planned
+- **Then** no part of the token is in `verdict.json`, and no repair chore and no e2e duty is made from a `base-tests`
+  record
+
+#### SCN-VER-320 (+) The escalation tells the person which task to tag · L4-VER-081, L4-OPS-007
+- **Given** the unit of SCN-VER-317, whose fix chore committed only its tick, and a round 2 that fails the same way
+- **When** the fix loop escalates
+- **Then** the reason starts with `base versions of support files fail a pre-existing test; tag the task that changed
+  one [test-infra] if its change is intended, or fix the code, then l4 retry: test/arch/modules.ts (task 1.1, 1.2)` and
+  holds `round 2 failed the same way as round 1`
+
+#### SCN-VER-321 (−) Another repeated failure keeps its text · L4-VER-081
+- **Given** a round that fails `test gate failed` the same way twice, and a round whose `verify.base_tests` has no
+  `support_reverted`
+- **When** each escalates `same_failure`
+- **Then** each reason is `round <n> failed the same way as round <m>: ...` as before
+
+#### SCN-VER-322 (+) The flaky test of a task step is listed · L4-VER-082, L4-IMP-105
+- **Given** the unit of SCN-IMP-571
+- **When** the unit is verified
+- **Then** `verification.md` holds the section with `tests.test_stack::test_ready (task 1.2 green attempt 1)`, and
+  `verdict.json` holds it in `step_flakes`, which a reused round keeps
+
+#### SCN-VER-323 (−) Nothing is listed without a passed re-run · L4-VER-082
+- **Given** a unit whose ledger holds only `task.tests_rechecked{stopped: failed}`, and a 0.4.59 unit with none
+- **When** each unit is verified
+- **Then** neither `verification.md` has the section, and the verdict is what it is without this change
+
+#### SCN-VER-324 (−) A file that a base test belongs to is reverted, whatever its name · L4-VER-079
+- **Given** `src/__tests__/render.ts`, `test/arch/repo.ts` and `test/helpers/x.ts`, which have no test-looking name,
+  that task 1.1's reviewed text names and its red commit changed (each in 40 lines or fewer), and a base report that
+  holds a test id whose class name is that path
+- **When** step 1 runs the base's tests
+- **Then** each file is reverted, `verify.base_tests.reverted` holds it, and no allowance lists it
+
+#### SCN-VER-325 (−) With no base report nothing stays by this rule · L4-VER-079
+- **Given** a file of SCN-VER-312, and a unit with no baseline of its base, no earlier round's evidence and a run at the
+  merge base that gives no report
+- **When** step 1 runs the base's tests
+- **Then** the file is reverted and no allowance lists it, and a unit that names no such file never runs the merge base
+  for this
+
+#### SCN-VER-326 (+) A data file with no test of its own stays, and a plan named people is no person's · L4-VER-079
+- **Given** `src/__tests__/data.ts`, named by task 1.1 and changed by its red commit, a base report whose ids belong to
+  other files, and a `source` of `plan:people@d`
+- **When** step 1 runs the base's tests
+- **Then** the file stays at head, and the line is in `allowed_tests` and not in `human_tests`
+
+#### SCN-VER-327 (+) A file that a harness commit with no task changed is not called a person's · L4-VER-080
+- **Given** a reverted support file that only a harness commit with no `L4-Task` trailer (a lessons commit) changed, and
+  another that a person's commit also changed
+- **When** step 1 raises the blocker
+- **Then** the lead names the first as `(a harness commit)` and `support_reverted` holds `people: false` for it; the
+  second is `(a person)`
+
+#### SCN-VER-328 (−) A name that is not the path, a link, a deleted file and another reason are reverted · L4-VER-079
+- **Given** a data file `x.ts` that red changed and whose task names `x.tsx` (and the reverse, and `x` and `sub/x.ts`);
+  a named file that is a link at head, a link at the base, or deleted at head; and a `task.unfrozen` of reason
+  `human_answer`, `delegate_answer` or none that holds a source, the red commit and a `kept` entry for the file
+- **When** step 1 runs the base's tests
+- **Then** every such file is reverted: the rule reads the exact path, a regular file at both revisions and the reason
+  `named_by_task`
 
 #### SCN-VER-356 (−) A TypeScript unit with a changed Python browser test does not audit · L4-VER-089, L4-VER-002
 - **Given** a unit that changes `web/src/layout.ts` and `e2e/test_layout.py`, and a unit-gate report of Node test ids

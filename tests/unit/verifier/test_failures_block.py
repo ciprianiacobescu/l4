@@ -1,6 +1,7 @@
 """L4-IMP-102 (D2, D3): which tests a fix task is about, and the failure block it carries."""
 
 from l4.verifier.failures import (
+    BASE_FAILS_TITLE,
     MAX_FAILURE_BLOCK_CHARS,
     MAX_SHOWN_FAILURES,
     failure_block,
@@ -78,3 +79,29 @@ def test_one_test_over_the_bound_is_cut_to_it_and_counted_with_the_rest():
     block = failure_block(one, list(one))
     assert len(block) <= MAX_FAILURE_BLOCK_CHARS and block.startswith("t.m::a (assertion, test):")
     assert block.splitlines()[-1] == "and 1 more failing tests (the round's verdict.json)"
+
+
+BASE_ID = "test/arch/repo.test.ts::graph"
+WITH_BASE = {
+    **FAILURES,
+    BASE_ID: {"gate": "base-tests", "kind": "assertion", "message": "expected [] to deeply equal []", "excerpt": "E x"},
+    "test/arch/gone.test.ts": {"gate": "base-tests", "kind": "other", "message": "boom"},
+}
+
+
+def test_a_base_tests_finding_names_every_base_tests_record():  # L4-VER-080
+    assert BASE_FAILS_TITLE == "a pre-existing test fails on the unit's code"
+    assert shown_failure_ids(WITH_BASE, BASE_FAILS_TITLE, "x") == sorted([BASE_ID, "test/arch/gone.test.ts"])
+    assert shown_failure_ids(FAILURES, BASE_FAILS_TITLE, "x") == []  # a verdict of 0.4.59 holds no such record
+
+
+def test_the_readers_that_filter_by_gate_ignore_base_tests_records():  # L4-VER-080
+    from l4.verifier.failures import e2e_ids_of, failing_ids, finding_test_ids
+
+    assert failing_ids(WITH_BASE, "test") == failing_ids(FAILURES, "test")
+    assert failing_ids(WITH_BASE, "e2e") == failing_ids(FAILURES, "e2e")
+    assert shown_failure_ids(WITH_BASE, "test gate failed", "x") == shown_failure_ids(FAILURES, "test gate failed", "x")
+    verdict = {"failures": WITH_BASE, "findings": []}
+    assert e2e_ids_of(verdict, []) == []
+    for title in ("test gate failed", "e2e gate failed", BASE_FAILS_TITLE):
+        assert finding_test_ids(title, "x", WITH_BASE) == finding_test_ids(title, "x", FAILURES)

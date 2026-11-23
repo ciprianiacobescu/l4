@@ -66,7 +66,7 @@ from l4.state.next_step import CI_NOT_FIXED, JUDGE_VIEW_REJECTED, NO_CONVERTIBLE
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
-from l4.verifier.failures import GATE_FINDING_GATES
+from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, GATE_FINDING_GATES
 from l4.verifier.feedback import record_no_status
 from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
 from l4.verifier.gate_repeat import is_repeat
@@ -589,6 +589,49 @@ def repeated_failure(unit_dir: Path, git: Git, events: Sequence[LedgerEvent], re
     return f"round {result.round} failed the same way as round {before}: {listed}"
 
 
+WAY_OUT_CHARS = 300
+WAY_OUT_FILES = 3
+BASE_TESTS_WAY_OUT = (
+    "base versions of support files fail a pre-existing test; tag the task that changed one [test-infra] if its "
+    "change is intended, or fix the code, then l4 retry: "
+)
+
+
+def base_tests_way_out(events: Sequence[LedgerEvent], round_no: int) -> str:
+    """L4-VER-081: the way out of a repeated base-tests failure, then the reverted support files that a task changed
+    and their tasks (at most 3, the whole at most 300 characters, whole files only: a cut drops files, not the way out).
+    From the newest `verify.base_tests` of the unit up to this round; empty when it names no such file (an event of
+    0.4.59 has no `support_reverted`)."""
+    newest: LedgerEvent | None = None
+    for e in events:
+        n = e.data.get("round")
+        if e.type == "verify.base_tests" and isinstance(n, int) and not isinstance(n, bool) and n <= round_no:
+            newest = e
+    entries = newest.data.get("support_reverted") if newest is not None else None
+    files = []
+    for entry in entries if isinstance(entries, list) else []:
+        tasks = entry.get("tasks") if isinstance(entry, dict) else None
+        if isinstance(tasks, list) and tasks and entry.get("path"):
+            files.append(f"{entry['path']} (task {', '.join(str(t) for t in tasks)})")
+    if not files:
+        return ""
+    text = BASE_TESTS_WAY_OUT
+    for index, one in enumerate(files[:WAY_OUT_FILES]):
+        added = (", " if index else "") + one
+        if index and len(text) + len(added) > WAY_OUT_CHARS:
+            break
+        text += added
+    return text[:WAY_OUT_CHARS]
+
+
+def same_failure_text(events: Sequence[LedgerEvent], result: VerifyResult, detail: str) -> str:
+    """The `same_failure` escalation's text: `detail`, led by `base_tests_way_out` when a blocking finding of the round
+    is a base-tests one (L4-VER-081). The code, the edge and the fold are unchanged."""
+    held = any(f.blocking and f.title in (BASE_FAILS_TITLE, BASE_GONE_TITLE) for f in result.findings)
+    lead = base_tests_way_out(events, result.round) if held else ""
+    return f"{lead}; {detail}" if lead else detail
+
+
 def unfixed_ci_jobs(
     events: Sequence[LedgerEvent], git: Git, unit_rel: str, cfg: L4Config, findings: Sequence[Finding]
 ) -> list[CiHistory]:
@@ -701,7 +744,7 @@ def decide_fix(ctx: HookContext, wb: Workbench, result: VerifyResult) -> None:
         ):
             why, code = ci_not_fixed_detail(unfixed), CI_NOT_FIXED  # L4-OPS-023: before the repeat and the limit
         elif (same := repeated_failure(wb.ref.path, wb.git, events, result)) is not None:  # L4-OPS-007
-            why, code = same, SAME_FAILURE
+            why, code = same_failure_text(events, result, same), SAME_FAILURE
         elif used >= limit:
             why, code = f"fix rounds used {used}/{limit}", FIX_ROUNDS_EXHAUSTED
         elif not plan.groups:

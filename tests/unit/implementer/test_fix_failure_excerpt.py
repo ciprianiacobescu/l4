@@ -6,7 +6,7 @@ from l4.implementer.tdd import fix_failure_text, run_single
 from l4.specs.questions import QuestionsFile, unescape_text
 
 from .conftest import blocked_step, red_step, result
-from .test_fix_chore_e2e import E2E_FINDING, NEW_FINDING, TASK, TEST_X, TEST_Z, seed_round
+from .test_fix_chore_e2e import E2E_FINDING, NEW_FINDING, TASK, TEST_X, TEST_Z, finding_id, seed_round
 from .test_loop import TASK as LOOP_TASK
 
 TOKEN = "glpat-" + "A1b2C3d4E5f6G7h8I9j0"
@@ -220,3 +220,21 @@ def test_only_a_fix_chore_gets_the_failure_block_in_its_question(make_bench, mon
     assert run_task(bench.wb, LOOP_TASK).status == "blocked"
     question = first_question(bench)
     assert NOTE not in question.notes_text and EXCERPT not in question.notes_text and question.notes_text == ""
+
+
+# L4-VER-080 (SCN-VER-318): a fix task for `a pre-existing test fails on the unit's code`
+
+BASE_TITLE = "a pre-existing test fails on the unit's code"
+BASE_FINDING = finding_id(BASE_TITLE)
+BASE_ID = "test/arch/repo.test.ts::graph"
+BASE_EXCERPT = "AssertionError: expected [ 'src/a -> src/b' ] to deeply equal []"
+
+
+def test_scn_ver_318_the_fix_chore_of_a_base_tests_finding_sees_the_failure_text(make_bench):
+    bench = make_bench([BLOCKED])
+    stored = [{"id": BASE_FINDING, "title": BASE_TITLE, "detail": f"{BASE_ID} (x)", "severity": "blocker"}]
+    failures = {BASE_ID: {"gate": "base-tests", "kind": "assertion", "message": "x", "excerpt": BASE_EXCERPT}}
+    seed_round(bench, findings=stored, failures=failures)
+    run_single(bench.wb, TASK, [BASE_FINDING], attempt=1)
+    prompt = first_prompt(bench)
+    assert HEADING in prompt and f"{BASE_ID} (assertion, base-tests):" in prompt and BASE_EXCERPT in prompt

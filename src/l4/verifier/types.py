@@ -339,6 +339,9 @@ class VerifyResult:
     failures_dropped: int = 0  # `test`-gate failure records left out of `failures` (the cap)
     red_green: dict[str, str] = field(default_factory=dict)  # new test id -> task whose `task.red_ok` named it
     guards: list[str] = field(default_factory=list)  # `guard.*` ledger events of the unit, one line each
+    step_flakes: list[str] = field(
+        default_factory=list
+    )  # pre-existing tests that passed on a step's re-run (L4-VER-082)
     feedback: list[str] = field(default_factory=list)  # items taken or judged in this round, one line each (D12)
     feedback_outcomes: list[FeedbackOutcome] = field(default_factory=list)  # the judge check of L4-FBK-007; not stored
     integrity: IntegrityReport | None = None

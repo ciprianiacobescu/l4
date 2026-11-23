@@ -209,3 +209,12 @@ def test_the_excerpt_is_in_the_verdict_and_a_reused_round_keeps_it():
     )
     assert body["failures"][E2E_ID]["excerpt"] == "E   assert 1508 == 1500"
     assert restore_round(body, "openspec:x", 2).failures == failures
+
+
+def test_the_unit_gate_value_of_the_records_can_be_named_and_the_cap_stays():  # L4-VER-080
+    unit = {f"tests.t::t{n:04}": case(f"tests.t::t{n:04}", "failed", "assert 0") for n in range(MAX_TEST_FAILURES + 5)}
+    records, dropped = failure_records(TestReport(unit), None, str, unit_gate="base-tests")
+    assert dropped == 5 and len(records) == MAX_TEST_FAILURES
+    assert {r["gate"] for r in records.values()} == {"base-tests"}
+    plain, _ = failure_records(TestReport({"a::b": case("a::b", "failed", "x")}), None, str)
+    assert plain["a::b"]["gate"] == "test"  # without the keyword the records are as before

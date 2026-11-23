@@ -16,7 +16,7 @@ list), or from a run in a merge-base worktree.
 
 import posixpath
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -25,12 +25,19 @@ from l4.config.schema import duration_seconds
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
+from l4.implementer.excerpt import case_excerpt
+from l4.implementer.guards import IGNORE_FILE_GLOBS
+from l4.implementer.test_locate import file_of_id
 from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
-from l4.vcs.authorship import SHA
+from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
 from l4.verifier.evidence import read_verdict
+from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, BASE_TESTS_GATE
+from l4.verifier.gate_repeat import JS_EXTENSIONS
+from l4.verifier.gates import failure_records
 from l4.verifier.integrity import (
+    Commit,
     IntegrityContext,
     Outcome,
     _allowance,
@@ -43,6 +50,7 @@ from l4.verifier.integrity import (
     _listed,
     _named_by_task,
     _text,
+    _unit_of,
     commits,
     tagged_files,
 )
@@ -50,10 +58,14 @@ from l4.verifier.playwright import base_checkout
 from l4.verifier.support_base import is_support_file, support_at_base, unit_test_plan
 from l4.verifier.types import IntegrityCheck, Severity
 
-FAILS_TITLE = "a pre-existing test fails on the unit's code"
-GONE_TITLE = "a pre-existing test no longer runs on the unit's code"
+FAILS_TITLE = BASE_FAILS_TITLE
+GONE_TITLE = BASE_GONE_TITLE
 FLAKY_TITLE = "a pre-existing test is flaky on the unit's code"
 ROW = "pre-existing tests still pass"
+MAX_NAMED_SUPPORT = 3  # files per task that stay at head by L4-VER-079 (the bound of `unfreeze.MAX_PATHS_PER_QUESTION`)
+MAX_SUPPORT_REVERTED = 20  # entries of `verify.base_tests.support_reverted`
+MAX_LEAD_FILES = 5  # support files the blocker's lead names
+MAX_NAMED_SUPPORT_LINES = 40  # added plus deleted lines of such a file
 _PARAMETRISED = re.compile(r"\S+\[.*\]")  # the test-name part of a pytest id with a parameter: `test_x[a-b]`
 
 
@@ -186,24 +198,145 @@ def split_allowed(ctx: IntegrityContext, candidates: Sequence[str]) -> tuple[lis
     return blocked, allowed, human
 
 
-def kept_files(ctx: IntegrityContext, paths: Sequence[str]) -> dict[str, str]:
+def kept_files(ctx: IntegrityContext, paths: Sequence[str], base: TestReport | None = None) -> dict[str, str]:
     """The files of the revert set that stay at head for the run (second review M4): a test or support file (conftest,
     fixture, golden data, helper) that only people's commits changed, that a `[test-infra]` task changed or that a
-    `task.unfrozen` frees, and a test module whose last change in `base..head` is a person's commit (the rule that
-    excuses its failing tests, so the run uses the content the person set). Their effect on the tests is accepted and
-    listed; every other file is reverted. A support file a person changed last is reverted: it can change what other
-    files' tests check, and no other check reads a harness change to it."""
+    `task.unfrozen` frees, a support file that a task's reviewed text names and only that task's red commit changed
+    (L4-VER-079), and a test module whose last change in `base..head` is a person's commit (the rule that excuses its
+    failing tests, so the run uses the content the person set). Their effect on the tests is accepted and listed; every
+    other file is reverted. A harness change to a support file is read by that listing and by the judge, whose diff
+    holds it. A support file a person changed last is reverted: it can change what other files' tests check. `base` is
+    the base's test report: a support file a task names stays only when no test of it maps to the file, and with no
+    report none stays this way (L4-VER-079)."""
+    return _kept(ctx, paths, lambda: base)[0]
+
+
+def _kept(
+    ctx: IntegrityContext, paths: Sequence[str], base_of: Callable[[], TestReport | None]
+) -> tuple[dict[str, str], dict[str, int], set[str]]:
+    """(kept files with their reasons, task -> named support files reverted for the cap of L4-VER-079, the files kept by
+    L4-VER-079). `check_base_tests` lists the last as allowances whatever their reason says: it embeds a plan id, and
+    the word `people` in one is no person's commit. `base_of` gives the base's test report, and is called only for a
+    file that passed every other condition of L4-VER-079."""
     by_sha = {c.sha: c for c in commits(ctx)}
     kept: dict[str, str] = {}
-    for path in paths:
+    named_files: set[str] = set()
+    per_task: dict[tuple[str, str], int] = {}
+    over: dict[str, int] = {}
+    for path in sorted(paths):
         who = _introducers(ctx, path, lambda before, after: before != after)
         if _by_people(who):
             kept[path] = f"only people's commits changed it ({', '.join(r[SHA][:10] for r in who)})"
         elif (why := _allowance(ctx, who, path, by_sha)) is not None:
             kept[path] = why.strip("()")
+        elif (named := _named_red_change(ctx, who, path, by_sha, base_of)) is not None:
+            key, task, reason = named
+            if per_task.get(key, 0) < MAX_NAMED_SUPPORT:
+                per_task[key] = per_task.get(key, 0) + 1
+                kept[path] = reason
+                named_files.add(path)
+            else:
+                over[task] = over.get(task, 0) + 1
         elif _last_by_people(who) and not is_support_file(ctx.git, ctx.cfg, path, _rev_of(ctx, path)):
             kept[path] = f"people changed it last ({', '.join(r[SHA][:10] for r in who)})"
-    return kept
+    return kept, over, named_files
+
+
+def _regular(ctx: IntegrityContext, rev: str, path: str) -> bool:
+    """`path` is a regular file (not a link, not a submodule) at `rev`."""
+    listed = ctx.git.run("ls-tree", "-z", rev, "--", f":(literal){path}", check=False).stdout
+    return listed.split(" ", 1)[0] in ("100644", "100755") and " blob " in listed
+
+
+def _changed_lines(ctx: IntegrityContext, path: str) -> int | None:
+    """Added plus deleted lines of `path` in `base..head`; None for a binary file or when git cannot count."""
+    out = ctx.git.run("diff", "--numstat", ctx.base_sha, ctx.head_sha, "--", f":(literal){path}", check=False).stdout
+    fields = out.split("\t")
+    if len(fields) < 3 or not fields[0].isdigit() or not fields[1].isdigit():
+        return None
+    return int(fields[0]) + int(fields[1])
+
+
+def _names_red_change(ctx: IntegrityContext, commit: Commit, path: str) -> str | None:
+    """The `source` of the `task.unfrozen{named_by_task}` of this red commit that lists `path`, else None."""
+    for e in ctx.events:
+        if (
+            e.type != "task.unfrozen" or e.data.get("reason") != "named_by_task"
+            or e.data.get("task") != commit.task or _unit_of(ctx, e) != commit.unit
+            or e.data.get("red_sha") != commit.sha
+        ):  # fmt: skip
+            continue
+        listed = [str(p) for p in e.data.get("paths") or []]
+        listed += [str(k.get("path")) for k in e.data.get("kept") or [] if isinstance(k, dict)]
+        source = e.data.get("source")
+        if path in listed and isinstance(source, str) and source:
+            return source
+    return None
+
+
+def _in_report(report: TestReport, path: str) -> bool:
+    """Does a test id of `report` belong to the file `path`? `test_locate.file_of_id` over this one path (the id's head
+    is the path, the path with dots for slashes, a dotted Python module or a class of it, or the end of such a path),
+    with the JavaScript reading of `gate_repeat.untouched` (a spec id is relative to the runner's test directory: its
+    slashes are dots), and one more form: a dotted class name that ends the path without its extension
+    (`com.acme.Shared::name` and `src/test/java/com/acme/Shared.java`). An id that holds no path (jest-junit's default
+    `{classname} {title}`) maps to no file: the report cannot see a test file then. With one path there is no
+    ambiguity to give up on: the id is the file's whenever it can be, which reverts more, never less."""
+    stem = posixpath.splitext(path)[0]
+    for test_id in report.tests:
+        head, sep, rest = test_id.partition("::")
+        head = head.removeprefix("./")
+        if head.rsplit(".", 1)[-1] in JS_EXTENSIONS:
+            head = head.replace("/", ".")
+        if file_of_id(head + sep + rest, [path]) == path:
+            return True
+        if "." in head and stem.endswith("/" + head.replace(".", "/")):
+            return True
+    return False
+
+
+def _named_red_change(
+    ctx: IntegrityContext,
+    who: list[list[str]],
+    path: str,
+    by_sha: Mapping[str, Commit],
+    base_of: Callable[[], TestReport | None],
+) -> tuple[tuple[str, str], str, str] | None:
+    """L4-VER-079: ((unit, task), task, reason) when `path` is a support file that exists at the base and at head, is no
+    ignore file, is at most `MAX_NAMED_SUPPORT_LINES` changed lines, no test of the base's report belongs to, and every
+    harness commit that changed it is the red commit of a task whose reviewed text names it (a
+    `task.unfrozen{named_by_task}` of that commit). A person's commit needs no cover. With no base report, nothing
+    stays. Only `kept_files` reads this; `_allowance` is not widened (L4-VER-030 shares it)."""
+    harness = [r for r in who if is_harness(r)]
+    if not harness:
+        return None
+    sources: list[tuple[Commit, str]] = []
+    for record in harness:
+        commit = by_sha.get(record[SHA])
+        source = _names_red_change(ctx, commit, path) if commit is not None and commit.tdd == "red" else None
+        if commit is None or source is None:
+            return None
+        sources.append((commit, source))
+    if any(glob_match(g, path) for g in IGNORE_FILE_GLOBS):
+        return None
+    if not (_regular(ctx, ctx.base_sha, path) and _regular(ctx, ctx.head_sha, path)):
+        return None
+    if not is_support_file(ctx.git, ctx.cfg, path, ctx.head_sha):
+        return None
+    lines = _changed_lines(ctx, path)
+    if lines is None or lines > MAX_NAMED_SUPPORT_LINES:
+        return None
+    base = base_of()  # last: it may run the base's tests
+    if base is None or _in_report(base, path):
+        return None
+    commit, source = sources[0]
+    tasks = list(dict.fromkeys(c.task for c, _ in sources))
+    label = ", ".join(tasks)
+    return (
+        (commit.unit, commit.task),
+        commit.task,
+        f"task {label}: changed by its red step, named by its reviewed text ({source})",
+    )
 
 
 def _rev_of(ctx: IntegrityContext, path: str) -> str:
@@ -270,6 +403,39 @@ def _base_reference(
     return result.report, "base worktree", ""
 
 
+def _support_reverted(
+    ctx: IntegrityContext, reverted: Sequence[str], by_sha: Mapping[str, Commit]
+) -> list[dict[str, Any]]:
+    """L4-VER-080: for each reverted file that is a support file, `{path, tasks, people}`: the tasks of the harness
+    commits that changed it and whether a person's commit did. Sorted by path, at most `MAX_SUPPORT_REVERTED`."""
+    support = sorted(p for p in reverted if is_support_file(ctx.git, ctx.cfg, p, _rev_of(ctx, p)))
+    found: list[dict[str, Any]] = []
+    for path in support[:MAX_SUPPORT_REVERTED]:
+        who = _introducers(ctx, path, lambda before, after: before != after)
+        tasks = [c.task for r in who if is_harness(r) and (c := by_sha.get(r[SHA])) is not None]
+        found.append({"path": path, "tasks": list(dict.fromkeys(tasks)), "people": any(not is_harness(r) for r in who)})
+    return found
+
+
+def _lead(support: Sequence[Mapping[str, Any]], total: int, files: int, verb: str) -> str:
+    """The start of a base-tests blocker's detail (L4-VER-080): which support files the run reverted and who changed
+    them. Empty when it reverted none."""
+    if not support:
+        return ""
+    named = []
+    for entry in support[:MAX_LEAD_FILES]:
+        if entry["tasks"]:
+            who = f"task {', '.join(entry['tasks'])}"
+        else:  # no task trailer: a person's commit, or a harness commit with none (a lessons commit)
+            who = "a person" if entry["people"] else "a harness commit"
+        named.append(f"{entry['path']} ({who})")
+    more = f" (+{total - MAX_LEAD_FILES} more)" if total > MAX_LEAD_FILES else ""
+    return (
+        f"with the unit's test and support files at their base version (support files reverted: "
+        f"{', '.join(named)}{more}; {files} files in all), these base tests {verb}: "
+    )
+
+
 def check_base_tests(
     wb: Workbench, ctx: IntegrityContext, *, prior: Sequence[IntegrityCheck], round_no: int
 ) -> Outcome:
@@ -277,11 +443,21 @@ def check_base_tests(
     if any(c.status == "failed" for c in prior):
         return Outcome(note="step 1 already failed", skipped=True)
     cfg = wb.cfg
+    command = cfg.gates.test.command
+    reference: list[tuple[TestReport | None, str, str]] = []
+
+    def base_reference() -> tuple[TestReport | None, str, str]:
+        if not reference:
+            reference.append(_base_reference(wb, ctx, command, round_no))
+        return reference[0]
+
     full = unit_test_plan(wb.git, cfg, ctx.base_sha, ctx.head_sha, None)
-    kept = kept_files(ctx, [path for path, _ in full.changes])
+    kept, over, named_files = _kept(ctx, [path for path, _ in full.changes], lambda: base_reference()[0])
     plan = replace(full, changes=tuple(c for c in full.changes if c[0] not in kept))
-    allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" not in why]
-    people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if "people" in why]
+    # a file the named rule kept is an allowance; for the others the reason text decides, as in 0.4.59
+    human_kept = {p for p, why in kept.items() if "people" in why and p not in named_files}
+    allowed_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p not in human_kept]
+    people_files = [f"{p} kept at head for the run ({why})" for p, why in kept.items() if p in human_kept]
     changed = _changed(ctx.git, ctx.base_sha, ctx.head_sha)
     runner_changed = sorted(p for p in changed if any(glob_match(g, p) for g in cfg.tdd.runner_config_files))
     if not plan.changes and not runner_changed:
@@ -289,7 +465,6 @@ def check_base_tests(
         if kept:
             note = f"all {len(kept)} changed test and support file(s) are allowed and kept at head (listed)"
         return Outcome(note=note, allowed_tests=allowed_files, human_tests=people_files)
-    command = cfg.gates.test.command
     for setup in cfg.gates.setup:
         done = wb.run_gate("setup-base-tests", setup, network=True, builds_env=True)
         if done.status != "pass":
@@ -300,13 +475,14 @@ def check_base_tests(
         r1 = gate.report
         if r1 is not None and any(c.status in ("failed", "error") for c in r1.tests.values()):
             repeat = wb.run_gate("base-tests-repeat", command, reports=_reports(wb), extra_env=BASE_RUN_ENV).report
+    support = _support_reverted(ctx, reverted, {c.sha: c for c in commits(ctx)})  # L4-VER-080: recorded for every run
     if r1 is None:
         detail = f"the test gate gave no report with the unit's test and support files at the base ({gate.reason})"
-        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [])
+        _emit(wb, round_no, ctx, "not needed", reverted, Judged(), [], [], [], support)
         return Outcome([_blocker(GONE_TITLE, detail)], "no report from the run of the base's tests")
     needs_base = runner_changed or r1.collection_errors or any(c.status != "passed" for c in r1.tests.values())
     if needs_base:
-        r0, source, why = _base_reference(wb, ctx, command, round_no)
+        r0, source, why = base_reference()
         if r0 is None:
             return Outcome(note=f"no base reference: {why}", skipped=True)
     else:
@@ -323,18 +499,28 @@ def check_base_tests(
     failing = [i for i in judged.failing if i in blocked]
     gone = [i for i in judged.not_run if i in blocked]
     errors = _collection_lines(ctx, judged.collection_errors, gate.log_path)
+    total = len([p for p in reverted if is_support_file(ctx.git, ctx.cfg, p, _rev_of(ctx, p))]) if support else 0
+    records: dict[str, dict[str, str]] = {}
     if failing:
         detail = [f"{i} ({_first_line(r1.tests[i].message or r1.tests[i].status)})" for i in failing]
-        findings.append(_blocker(FAILS_TITLE, _listed(detail)))
+        findings.append(_blocker(FAILS_TITLE, _lead(support, total, len(reverted), "fail") + _listed(detail)))
+        redact, tmp_root = wb.redactor.redact_text, wb.unit_cache / "gate-tmp"  # as `ladder.tests()` (L4-VER-078)
+        records, _ = failure_records(
+            TestReport({i: r1.tests[i] for i in failing}), None, redact, unit_gate=BASE_TESTS_GATE,
+            excerpt=lambda case: case_excerpt(case, worktree=wb.worktree, tmp_root=tmp_root, redact=redact),
+        )  # fmt: skip
     if gone or errors:
-        findings.append(_blocker(GONE_TITLE, _listed([*gone, *errors])))
+        lead = _lead(support, total, len(reverted), "no longer run")
+        findings.append(_blocker(GONE_TITLE, lead + _listed([*gone, *errors])))
     if flaky:
         findings.append(_blocker(FLAKY_TITLE, _listed(flaky), Severity.MINOR))
     note = (
         f"{judged.still_passing + len(allowed) + len(human)} of {judged.passed_at_base} base tests pass on the unit's "
         f"code with its {len(reverted)} test and support files at the base (base: {source})"
     )
-    _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors)
+    for task, count in sorted(over.items()):
+        note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
+    _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors, support)
     record = {
         "base_sha": ctx.base_sha,
         "command": command,
@@ -342,16 +528,22 @@ def check_base_tests(
         "collection_errors": list(r0.collection_errors),
     }
     return Outcome(
-        findings, note, allowed_tests=[*allowed_files, *allowed], human_tests=[*people_files, *human], base_tests=record
+        findings,
+        note,
+        allowed_tests=[*allowed_files, *allowed],
+        human_tests=[*people_files, *human],
+        base_tests=record,
+        failures=records,
     )
 
 
 def _emit(
     wb: Workbench, round_no: int, ctx: IntegrityContext, source: str, reverted: Sequence[str], judged: Judged,
-    flaky: Sequence[str], allowed: Sequence[str], errors: Sequence[str],
+    flaky: Sequence[str], allowed: Sequence[str], errors: Sequence[str], support: Sequence[Mapping[str, Any]] = (),
 ) -> None:  # fmt: skip
     wb.emit(
         "verify.base_tests", round=round_no, base_sha=ctx.base_sha, base_source=source, reverted=list(reverted),
         passed_at_base=judged.passed_at_base, still_passing=judged.still_passing, failing=judged.failing,
         not_run=judged.not_run, collection_errors=list(errors), flaky=list(flaky), allowed=list(allowed),
+        support_reverted=[dict(e) for e in support],
     )  # fmt: skip

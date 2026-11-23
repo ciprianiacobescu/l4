@@ -462,6 +462,29 @@ def _guards(events: Sequence[LedgerEvent]) -> list[str]:
     ]
 
 
+MAX_STEP_FLAKES = 20  # lines of `VerifyResult.step_flakes`
+
+
+def _step_flakes(events: Sequence[LedgerEvent]) -> list[str]:
+    """L4-VER-082: each test that a `task.tests_rechecked{stopped: passed}` of the unit's ledger (its fix units'
+    included) names as flaky, as `<id> (task <k> <phase> attempt <n>[, fix unit <f>])`, at most `MAX_STEP_FLAKES`
+    lines and then `(+<n> more)`. Only a re-run that passed lists anything: a failed, unusable or skipped one lists
+    nothing."""
+    found: list[str] = []
+    for e in events:
+        flaky = e.data.get("flaky")
+        if e.type != "task.tests_rechecked" or e.data.get("stopped") != "passed" or not isinstance(flaky, list):
+            continue
+        fix = e.data.get("fix_unit")
+        where = f"task {e.data.get('task')} {e.data.get('phase')} attempt {e.data.get('attempt')}"
+        if isinstance(fix, str) and fix:
+            where += f", fix unit {fix}"
+        found += [f"{test} ({where})" for test in flaky if isinstance(test, str)]
+    if len(found) > MAX_STEP_FLAKES:
+        return [*found[:MAX_STEP_FLAKES], f"(+{len(found) - MAX_STEP_FLAKES} more)"]
+    return found
+
+
 MAX_CANDIDATES_LISTED = 5
 
 
@@ -724,6 +747,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
     result = VerifyResult(
         wb.ref.id, vc.round, Verdict.NEEDS_HUMAN, "", head, judge_profile=vc.judge_profile,
         implementer_profiles=list(vc.implementer_profiles), red_green=_red_green(events), guards=_guards(events),
+        step_flakes=_step_flakes(events),
         subject_sha=subject,
     )  # fmt: skip
     run = _Run(result)
@@ -746,6 +770,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         result.integrity = run_integrity(ctx)
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
+        if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
+            result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
         blocking = [f.title for f in result.integrity.findings if f.blocking]
         note = "; ".join(blocking) or f"{len(result.integrity.checks)} sub-checks"

@@ -189,6 +189,7 @@ def restore_round(prev: Mapping[str, Any], unit: str, round_no: int) -> VerifyRe
         cost_usd=prev.get("cost_usd"),
         tests=dict(prev.get("tests") or {}), red_green=dict(prev.get("red_green") or {}),
         guards=list(prev.get("guards") or []), judge_verdict=prev.get("judge_verdict"),
+        step_flakes=list(prev.get("step_flakes") or []),
         subject_sha=prev.get("subject_sha", ""), reused_from=int(prev.get("round") or 0),
     )  # fmt: skip
     result.gates = [GateLine(**g) for g in prev.get("gates", [])]

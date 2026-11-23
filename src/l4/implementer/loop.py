@@ -15,7 +15,7 @@ import os
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from l4 import deadline
 from l4.availability.fallback import Constraint
@@ -40,6 +40,7 @@ from l4.implementer.tdd import (
     run_red,
     run_single,
     task_runs_e2e,
+    unfreeze_for,
 )
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, NOTE_PREFIX, forbidden_note, unfreeze_note
 from l4.implementer.workbench import Workbench
@@ -491,6 +492,11 @@ def seed_attempts(wb: Workbench, task: Task) -> Seeded:
             if phase in failures and isinstance(origin := data.get("from"), str) and origin:
                 escalated_from[phase] = origin
             continue
+        if event.type == "task.attempts_renewed":  # L4-IMP-104: an answer gave the green phase a new window
+            if phase == "green":
+                failures["green"], reasons["green"] = {}, []
+                escalated_from.pop("green", None)  # `attempts` stays: a step key is used once
+            continue
         failed = event.type == "task.attempt_failed"
         stopped = event.type == "deadline.reached" and data.get("when") == "during"
         if phase not in failures or not (failed or stopped):
@@ -504,6 +510,77 @@ def seed_attempts(wb: Workbench, task: Task) -> Seeded:
             key = "red" if phase == "red" else "green"
             attempts[key] = max(attempts[key], number)
     return Seeded(failures, reasons, attempts, escalated_from)
+
+
+MAX_RENEWALS = 2  # renewals that clear a failed attempt, per task, between two retries, resumes or restarts
+
+
+def _credited(events: Sequence[Any], task: Task, fix_unit: object) -> set[str]:
+    """The question ids that an earlier renewal or an earlier answer's `task.unfrozen` of this task (and fix unit)
+    names, over the whole ledger (L4-IMP-104). `question` of a person's `task.unfrozen` is a `", "`-joined list; an old
+    event without a `reason` is a person's. The task's own text (`named_by_task`) credits nothing."""
+    found: set[str] = set()
+    for event in events:
+        data = event.data
+        if data.get("task") != task.key or data.get("fix_unit") != fix_unit:
+            continue
+        if event.type == "task.attempts_renewed" and isinstance(data.get("questions"), list):
+            found.update(str(q) for q in data["questions"])
+        elif event.type == "task.unfrozen" and data.get("reason") in (None, "human_answer", "delegate_answer"):
+            found.update(q for q in str(data.get("question") or "").split(", ") if q)
+    return found
+
+
+def _renewals_since_reset(events: Sequence[Any], task: Task, fix_unit: object) -> int:
+    """Renewals that cleared a failed attempt (`failed` above 0) after the newest `unit.retried`, `unit.resumed` or
+    `unit.restarted`."""
+    start = 0
+    for index, event in enumerate(events):
+        if event.type in deadline.RESETS:
+            start = index + 1
+    return sum(
+        1
+        for event in events[start:]
+        if event.type == "task.attempts_renewed" and event.data.get("task") == task.key
+        and event.data.get("fix_unit") == fix_unit and isinstance(event.data.get("failed"), int)
+        and event.data["failed"] > 0
+    )  # fmt: skip
+
+
+def _renew_on_answers(
+    wb: Workbench, task: Task, red: RedOutcome, seeded: Seeded, failures: dict[str, dict[str, int]],
+    reasons: dict[str, list[tuple[str, str]]],
+) -> None:  # fmt: skip
+    """L4-IMP-104: before the task's next green attempt, an answer that opens a frozen file for this green and is
+    credited nowhere yet gives the green phase a new window: `task.attempts_renewed` is recorded, and the failed
+    attempts, their reasons and the newest move of the phase are cleared. Attempt numbers go on. The grants are those
+    `run_green` uses (`unfreeze_for`): a person's, an agent's or the delegate's answer with a path; the task's own text
+    renews nothing. A renewal that clears a failure is refused once `MAX_RENEWALS` were made since the last retry,
+    resume or restart; one that clears none (`failed: 0`) is recorded all the same, so the answer cannot renew later."""
+    assert red.manifest is not None
+    grants = [
+        g for g in unfreeze_for(wb, task, red.manifest).grants
+        if g.reason in ("human_answer", "delegate_answer") and g.paths and g.question
+    ]  # fmt: skip
+    if not grants:
+        return
+    fix_unit = wb.event_context.get("fix_unit")
+    events = _ledger_events(wb)
+    credited = _credited(events, task, fix_unit)
+    ids = sorted({g.question for g in grants if g.question and g.question not in credited})
+    if not ids:
+        return
+    failed = sum(failures["green"].values())
+    if failed > 0 and _renewals_since_reset(events, task, fix_unit) >= MAX_RENEWALS:
+        log.warning(
+            "task %s: no attempt renewal for %s: %d renewals since the last retry, resume or restart",
+            task.key, ", ".join(ids), MAX_RENEWALS,
+        )  # fmt: skip
+        return
+    wb.emit("task.attempts_renewed", task=task.key, phase="green", questions=ids, failed=failed)
+    failures["green"].clear()
+    reasons["green"].clear()
+    seeded.escalated_from.pop("green", None)
 
 
 def _escalate_if_due(
@@ -657,6 +734,8 @@ def _run_task(
     if red is None:
         carry = None
     start = "single" if chore else "red" if red is None else "green"
+    if start == "green" and red is not None:  # L4-IMP-104: before `origin` is read and the escalation that precedes it
+        _renew_on_answers(wb, task, red, seeded, failures, reasons)
     # D7b: earlier runs' failures can say to move through several profiles; the first move is asked from the profile
     # an earlier run moved the phase from, when that profile comes after this run's (L4-IMP-094 D3)
     chain = wb.cfg.roles.implementer
@@ -716,6 +795,7 @@ def _run_task(
                 return TaskOutcome("done")  # the tests exist and pass: there is nothing for green to do
             if outcome.status == "ok":
                 red, failure, retry, excerpt = outcome, None, None, ""
+                _renew_on_answers(wb, task, red, seeded, failures, reasons)  # L4-IMP-104
                 continue
             phase, failure, excerpt = "red", outcome.reason, outcome.excerpt
         else:

@@ -346,6 +346,9 @@ def render_verification_md(result: VerifyResult) -> str:
         ]
     if result.guards:
         lines += ["", "## Guard events", ""] + [f"- {_flat(g, 300)}" for g in result.guards]
+    if result.step_flakes:  # L4-VER-082: not a finding
+        lines += ["", "## Pre-existing tests that passed on a task step's re-run (L4-IMP-105)", ""]
+        lines += [f"- {_flat(f, 300)}" for f in result.step_flakes]
     return "\n".join(lines) + "\n"
 
 
@@ -392,6 +395,7 @@ def verdict_json(result: VerifyResult) -> dict[str, Any]:
         "e2e_tests": list(result.e2e_tests),
         "red_green": dict(result.red_green),
         "guards": list(result.guards),
+        "step_flakes": list(result.step_flakes),
         "prompt_sha256": result.prompt_sha256,
         "template": result.prompt_template,
         "harness_commit": harness_commit(),

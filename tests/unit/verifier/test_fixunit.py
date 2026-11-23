@@ -534,3 +534,22 @@ def test_redact_plan_redacts_the_failure_block():
     plan = plan_fix_unit(FAMILY, failing_round(failures, found), [], ordinal=1, fix_minor=False)
     assert TOKEN in plan.groups[0].failures
     assert TOKEN not in redact_plan(plan, Redactor({}).redact_text).groups[0].failures
+
+
+def test_scn_ver_318_a_base_tests_finding_task_carries_the_failure_block_of_its_records():  # L4-VER-080
+    base_id = "test/arch/repo.test.ts::graph"
+    failures = {
+        base_id: {
+            "gate": "base-tests",
+            "kind": "assertion",
+            "message": "m",
+            "excerpt": "E   expected [ 'a -> b' ] = []",
+        },
+        E2E_ID: {"gate": "e2e", "kind": "assertion", "message": "m"},
+    }
+    found = Finding(
+        Severity.BLOCKER, "a pre-existing test fails on the unit's code", f"{base_id} (m)", "deterministic", None
+    )
+    plan = plan_fix_unit(FAMILY, failing_round(failures, found), [], ordinal=1, fix_minor=False)
+    [group] = plan.groups
+    assert group.failures == f"{base_id} (assertion, base-tests):\n  E   expected [ 'a -> b' ] = []"
