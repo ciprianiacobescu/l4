@@ -20,6 +20,7 @@ M1: verifier 3.3 (the synthetic baseline), 3.7/3.8 (audit sampling), the agentic
 import dataclasses
 import hashlib
 import re
+import sys
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.verifier.conventions import e2e_support_files
 from l4.verifier.e2e_trace import e2e_coverage
+from l4.verifier.hold_evidence import count_lines
 from l4.verifier.playwright import artifact_dir, base_checkout, failure_artifacts
 from l4.verifier.support_base import NO_SUPPORT, SupportPlan, collect_only_env, runner_support, support_at_base
 from l4.verifier.testwriter import request_test, test_path, write_test_file
@@ -265,10 +267,11 @@ def generate_ui_test(
         # the evidence copy of the last test written: redacted whole, cut at a line end, redacted again (L4-VER-083);
         # the raw code is what the trees hold and what is hashed
         shown = redacted_cut(code, wb.redactor.redact_text, MAX_CODE_CHARS)
+        whole = redacted_cut(code, wb.redactor.redact_text, sys.maxsize)  # the lines of the test, not of its copy
         return GeneratedOutcome(
             criterion.id, verdict.status, rel if code else None, attempts, verdict.reason, shown, verdict.artifacts,
             cost, model, sha, verdict.base, verdict.head, verdict.tests, digest, verdict.support,
-            excerpt=kept_excerpt,
+            excerpt=kept_excerpt, code_lines=count_lines(whole),
         )  # fmt: skip
 
     for attempt in range(1, MAX_ATTEMPTS + 1):

@@ -837,6 +837,35 @@ def test_scn_ver_331_the_numbered_copy_stops_at_6000_characters_and_says_how_man
     assert numbered_code("") == [] and numbered_code("a\r\nb\n") == ["   1  a", "   2  b"]
 
 
+def test_scn_ver_355_numbered_code_counts_the_cut_lines_of_the_whole_test_not_of_the_copy():
+    from l4.verifier.hold_evidence import MAX_NUMBERED_CHARS, numbered_code
+
+    copy = "".join(f"    page.click('#button-{n}')  # step {n}\n" for n in range(55))  # the kept copy: 55 lines
+    shown = numbered_code(copy, 120)
+    assert shown[:-1] == numbered_code(copy)  # the same lines, numbered from 1
+    assert shown[-1] == "… (cut: 65 more lines)" and shown[0].startswith("   1  ")
+    assert numbered_code(copy, 56)[-1] == "… (cut: 1 more line)"  # a copy that is shorter than the test is never whole
+    assert numbered_code(copy, 55) == numbered_code(copy, 0) == numbered_code(copy)  # equal or unknown: as before
+    assert numbered_code(copy, 3) == numbered_code(copy)  # a count below the copy's own is never trusted
+    wide = "\n".join("w" * 99 for _ in range(60)) + "\n"  # 6,360 numbered characters: cut by length already
+    cut_at_999 = numbered_code(wide, 999_999)
+    assert cut_at_999[-1].startswith("… (cut: ") and sum(len(line) + 1 for line in cut_at_999) <= MAX_NUMBERED_CHARS
+    kept = len(cut_at_999) - 1
+    assert cut_at_999[-1] == f"… (cut: {999_999 - kept} more lines)"  # N counts the whole test
+
+
+def test_scn_ver_355_the_question_of_a_hold_ends_the_cut_copy_with_its_cut_line(tmp_path):
+    from l4.specs.questions import unescape_text
+
+    copy = "".join(f"    page.click('#button-{n}')  # step {n}\n" for n in range(55))
+    file, _ = _ask_ui_hold(tmp_path, _failed_outcome(code=copy, excerpt="", code_lines=120))
+    shown = _code_block(unescape_text(file.get("Q-001").notes_text))
+    assert len(shown) == 56 and shown[-1] == "    … (cut: 65 more lines)" and shown[0].startswith("       1  ")
+    (tmp_path / "old").mkdir()  # a record of 0.4.59 has no count: the copy is shown as before
+    old, _ = _ask_ui_hold(tmp_path / "old", _failed_outcome(code=copy, excerpt=""))
+    assert len(_code_block(unescape_text(old.get("Q-001").notes_text))) == 55
+
+
 def test_scn_ver_353_a_half_key_block_in_a_record_that_0_4_59_wrote_is_not_in_the_question(tmp_path):
     """0.4.59 cut the code at 4,000 characters before it redacted, so a stored copy can end inside a private key, and
     a round that reuses it restores that copy. The notes are redacted again (whole, cut, whole) as they are built."""

@@ -717,7 +717,7 @@ def _ui_hold_notes(criterion: str, generated: Sequence[GeneratedOutcome], redact
             f"Harness note: the last test step 5 wrote, {done.path} (step 5 ended {done.status}; not committed, the "
             f"file is removed after the run; at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):",
             "",
-            *(f"    {line}" for line in numbered_code(done.code)),
+            *(f"    {line}" for line in numbered_code(done.code, done.code_lines)),
         ]
     return "\n".join(lines)
 

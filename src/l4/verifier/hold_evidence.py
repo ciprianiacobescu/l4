@@ -17,22 +17,36 @@ def _cut_line(count: int) -> str:
     return f"… (cut: {count} more line{'' if count == 1 else 's'})"
 
 
-def numbered_code(code: str) -> list[str]:
-    """Each line of `code` as its number right-aligned in four columns, two spaces and the line (an empty line is its
-    number alone): the numbers are those of pytest's locations in the excerpt. At most `MAX_CODE_LINES` lines and
-    `MAX_NUMBERED_CHARS` characters, the numbers included: a longer copy keeps its first lines and ends with one line
-    that says how many were cut (`… (cut: N more lines)`), which the bound counts."""
+def count_lines(code: str) -> int:
+    """The lines of `code` as `numbered_code` counts them: `\\r\\n` and `\\r` are line ends, and the empty piece after a
+    last line end is no line."""
+    return len(_split(code))
+
+
+def _split(code: str) -> list[str]:
     lines = code.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     if lines and lines[-1] == "":
         lines.pop()
+    return lines
+
+
+def numbered_code(code: str, total_lines: int = 0) -> list[str]:
+    """Each line of `code` as its number right-aligned in four columns, two spaces and the line (an empty line is its
+    number alone): the numbers are those of pytest's locations in the excerpt. At most `MAX_CODE_LINES` lines and
+    `MAX_NUMBERED_CHARS` characters, the numbers included: a longer copy keeps its first lines and ends with one line
+    that says how many were cut (`… (cut: N more lines)`), which the bound counts. `total_lines` is the number of lines
+    of the whole test when `code` is a copy that was cut before (`GeneratedOutcome.code_lines`; 0: unknown): a copy
+    shorter than that is never returned whole, and N counts the test's lines, not the copy's."""
+    lines = _split(code)
     numbered = [f"{n:>4}  {line}" if line else f"{n:>4}" for n, line in enumerate(lines, 1)]
-    if len(numbered) <= MAX_CODE_LINES and sum(len(line) + 1 for line in numbered) <= MAX_NUMBERED_CHARS:
+    total = max(len(numbered), total_lines)
+    if total == len(numbered) <= MAX_CODE_LINES and sum(len(line) + 1 for line in numbered) <= MAX_NUMBERED_CHARS:
         return numbered
-    room = MAX_NUMBERED_CHARS - len(_cut_line(len(numbered))) - 1  # the cut line is the longest it can be
+    room = MAX_NUMBERED_CHARS - len(_cut_line(total)) - 1  # the cut line is the longest it can be
     kept: list[str] = []
     for line in numbered[:MAX_CODE_LINES]:
         if len(line) + 1 > room:
             break
         kept.append(line)
         room -= len(line) + 1
-    return [*kept, _cut_line(len(numbered) - len(kept))]
+    return [*kept, _cut_line(total - len(kept))]

@@ -148,7 +148,7 @@ def _unaccepted_blocks(result: VerifyResult) -> list[str]:
             lines += ["      Failure at the head:", *(f"        {line}".rstrip() for line in g.excerpt.splitlines())]
         if g.code and g.path:
             lines += [f"      The test (at most {MAX_CODE_LINES} lines and {MAX_NUMBERED_CHARS:,} characters):"]
-            lines += [f"      {line}".rstrip() for line in numbered_code(g.code)]
+            lines += [f"      {line}".rstrip() for line in numbered_code(g.code, g.code_lines)]
         lines.append("")
     return lines[:-1]
 
@@ -388,6 +388,8 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]  # a copy `generate` already bounded and redacted
     if not data["code"]:
         del data["code"]
+    if not data["code_lines"] or "code" not in data:  # the count is written beside the code, when it is known
+        del data["code_lines"]
     if not data["excerpt"]:
         del data["excerpt"]
     return data

@@ -199,6 +199,38 @@ def test_a_writer_failed_outcome_that_kept_a_test_is_listed():  # SCN-VER-350
     assert "- C-a (writer_failed after 2 attempt(s)): `e2e/test_l4_c_a.py`" in text and "         1  x = 1" in text
 
 
+def test_verdict_json_keeps_the_line_count_of_the_whole_test_next_to_the_code():  # SCN-VER-355
+    counted = GeneratedOutcome(**{**FAILED.__dict__, "code_lines": 120})
+    accepted = GeneratedOutcome(**{**ACCEPTED.__dict__, "code_lines": 40})
+    body = json.loads(json.dumps(verdict_json(result(generated=[accepted, counted, FAILED]))))
+    accepted_row, counted_row, plain_row = body["generated"]
+    assert counted_row["code_lines"] == 120 and counted_row["code"] == CODE
+    assert "code_lines" not in plain_row  # unknown (0): no key, like an empty excerpt
+    assert "code" not in accepted_row and "code_lines" not in accepted_row  # no code written, no count
+    back = restore_round(body, UNIT, 2)
+    assert back.generated[1] == counted and back.generated[1].code_lines == 120  # a reused round keeps it
+    assert back.generated[2].code_lines == 0
+
+
+def test_a_record_of_0_4_59_without_the_line_count_restores_as_unknown_and_shows_the_copy():  # SCN-VER-355
+    from l4.verifier.evidence import _generated
+
+    stored = {  # the `generated` entry of a verdict.json of 0.4.59
+        "criterion": "C-a", "status": "fails_at_head", "path": "e2e/test_l4_c_a.py", "attempts": 2, "reason": "r",
+        "artifacts": [], "tests": [], "code": "x = 1\ny = 2\n",
+    }  # fmt: skip
+    restored = _generated(stored)
+    assert restored.code_lines == 0
+    text = render_verification_md(result(generated=[restored]))
+    assert "         1  x = 1" in text and "         2  y = 2" in text and "more line" not in text
+
+
+def test_the_report_ends_a_copy_shorter_than_the_test_with_the_cut_line():  # SCN-VER-355
+    kept = GeneratedOutcome("C-a", "fails_at_head", "e2e/test_l4_c_a.py", 2, "r", "x = 1\ny = 2\n", code_lines=120)
+    lines = render_verification_md(result(generated=[kept])).splitlines()
+    assert lines[lines.index("         2  y = 2") + 1] == "      … (cut: 118 more lines)"
+
+
 def test_a_secret_in_the_code_or_the_failure_is_in_no_file_of_the_round(tmp_path):  # SCN-VER-332
     redactor = Redactor({})
     raw = "# " + "x" * 3983 + " " + TOKEN + "\n# more\n"  # one line: the token starts before the 4,000th character

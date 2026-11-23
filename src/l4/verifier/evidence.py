@@ -172,6 +172,7 @@ def _generated(d: Mapping[str, Any]) -> GeneratedOutcome:
             "tests": tuple(d.get("tests", ())),
             "artifacts": tuple(d.get("artifacts", ())),
             "covered_by": tuple(d.get("covered_by") or ()),
+            "code_lines": int(d.get("code_lines") or 0),
         }
     )
 

@@ -352,6 +352,38 @@ def test_a_secret_in_the_code_that_straddles_the_cut_is_in_no_part_of_the_copy(w
     assert all(TOKEN[i : i + 8] not in done.code for i in range(len(TOKEN) - 7))
 
 
+def test_a_test_longer_than_the_kept_copy_is_shown_with_its_cut_line(web, tmp_path):  # SCN-VER-355
+    import json
+
+    from l4.redact import Redactor
+    from l4.verifier.report import render_verification_md, verdict_json
+    from l4.verifier.types import StepRecord, Verdict, VerifyResult
+    from l4.verifier.verdicts import _ui_hold_notes
+
+    filler = 120 - WRONG.count("\n")
+    long = WRONG + "".join(f"# step {n} " + "x" * 60 + "\n" for n in range(filler))  # 120 lines, over 4,000 characters
+    assert long.count("\n") == 120 and len(long) > 4000
+    done = run_one(web, Writer(code(long), code(long)))
+    assert done.status == "fails_at_head" and done.code_lines == 120
+    shown = len(done.code.splitlines())
+    assert 0 < shown < 120  # the 4,000-character copy is shorter than the test
+    cut = f"… (cut: {120 - shown} more lines)"
+    notes = _ui_hold_notes(CID, [done], Redactor({}).redact_text)
+    assert notes.splitlines()[-1] == f"    {cut}" and f"{shown:>4}  " in notes
+    result = VerifyResult("openspec:x", 1, Verdict.NEEDS_HUMAN, "a" * 40, "b" * 40, steps=[StepRecord("5", "g", "ok")])
+    result.generated = [done]
+    assert f"      {cut}" in render_verification_md(result).splitlines()
+    body = json.loads(json.dumps(verdict_json(result)))
+    assert body["generated"][0]["code_lines"] == 120  # SCN-VER-355: kept next to the code
+
+
+def test_the_outcome_counts_the_lines_of_the_whole_test_redacted_before_the_cut(web):  # SCN-VER-355
+    short = run_one(web, Writer(code(WRONG), code(WRONG)))
+    assert short.code == WRONG and short.code_lines == WRONG.count("\n")  # a trailing line end adds no line
+    bare = WRONG.rstrip("\n")  # the last line has no line end: it still counts
+    assert run_one(web, Writer(code(bare), code(bare))).code_lines == WRONG.count("\n")
+
+
 def test_a_configured_secret_in_the_failure_is_not_in_the_excerpt_the_outcome_keeps(web):  # SCN-VER-332
     from l4.redact import Redactor
 
