@@ -35,6 +35,6 @@ def test_the_skill_names_cfg_013_and_the_plan_judges_and_says_to_move_the_local_
 
 
 def test_the_changelog_names_prompt_version_5_the_doctor_row_the_flag_and_the_actor() -> None:
-    unreleased = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+    unreleased = read("CHANGELOG.md").split("## 0.4.60 (", 1)[1].split("\n## ", 1)[0]
     for needle in ("prompt version is now 5", "CFG-013", "--allow-older-cli", "plan.activated", "actor"):
         assert needle in unreleased, needle

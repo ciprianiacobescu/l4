@@ -6,7 +6,7 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
-## Unreleased
+## 0.4.60 (2026-11-23)
 
 ### Added
 - `l4 doctor` CFG-013 warns when `roles.judges` names one profile: unit verification then has no fallback judge when that judge fails. A consumer cut `roles.judges` to one judge for a plan review three times, because before 0.4.59 the review had no fallback after a judge error; each time a person had to put the unit judges back before the activation, and once a unit outside the plan went `waiting_capacity` because its single judge failed its hello. Since 0.4.59 the review walks its chain, and a judge for plan reviews only belongs in `roles.plan_judges`, which unit verification never reads; the warning says so when `roles.plan_judges` is empty. It also warns when `roles.plan_judges` names one profile, since the review does not fall back to `roles.judges`. A fresh `l4 init` writes one judge, so it warns too. A warning does not change doctor's exit code (L4-YOLO-103).
