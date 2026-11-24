@@ -43,7 +43,7 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
 
 ## 3. The red step (L4-IMP-118, L4-IMP-119, L4-IMP-120, L4-GAT-007, L4-GAT-009; D3-D6)
 
-- [ ] 3.1 Write the tests first in a new `tests/unit/implementer/test_tdd_red_targeted.py`: SCN-IMP-626, SCN-IMP-627,
+- [x] 3.1 Write the tests first in a new `tests/unit/implementer/test_tdd_red_targeted.py`: SCN-IMP-626, SCN-IMP-627,
   SCN-GAT-13, SCN-GAT-15 to SCN-GAT-20 (each fallback word: the gate `test` runs after `test-targeted`, the verdict is the
   `full` step's, `task.red_check_full` has `why` and a `detail` of at most 300 characters), SCN-IMP-633 (a flaky old test
   in the baseline and a whole-suite report that would fail it: no verdict about it), SCN-IMP-634 (each reason of
@@ -52,7 +52,7 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   (the vacuity check, with a HEAD stub), SCN-IMP-638, SCN-IMP-639 and SCN-IMP-648 (a resumed targeted red: the base
   holds the broken old test as failing, green's regressed set is empty, nothing is recorded). Also assert that `confirmed_by_base_run` is never
   called with the targeted run's `seconds`. Run the file and see the new tests fail.
-- [ ] 3.2 Then change `run_red` in `src/l4/implementer/tdd.py`: after `changed = wb.changed_files()` call `choose`
+- [x] 3.2 Then change `run_red` in `src/l4/implementer/tdd.py`: after `changed = wb.changed_files()` call `choose`
   (with `changed_paths` for the existence), run `test-targeted` instead of `test` when it says so, call `tampered`, and
   either bind `report` and `gate` to the targeted results (`with_targeted`) or reset the tree, run `test` as today and
   record `task.red_check_full`. Add `check` and `files` to `task.red_ok` and `RedOutcome.check`, and set it in

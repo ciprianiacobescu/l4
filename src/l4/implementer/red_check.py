@@ -6,7 +6,7 @@ import shlex
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from l4.config.schema import L4Config
 from l4.fsutil import UnsafeFile, read_inside
@@ -153,3 +153,13 @@ def unusable(
     if passing := [i for i, case in targeted.tests.items() if case.status not in ("failed", "error")]:
         return "new_test_not_failing", detail_of(passing)
     return None
+
+
+def unit_switched(events: Iterable[Any]) -> bool:
+    """The unit's ledger holds `task.red_check_disabled` (L4-IMP-121): its red steps run the whole suite."""
+    return any(e.type == "task.red_check_disabled" for e in events)
+
+
+def unit_targeted(events: Iterable[Any]) -> bool:
+    """A red step of the unit (or of a fix unit) ran targeted: its `task.red_ok` says `check: targeted`."""
+    return any(e.type == "task.red_ok" and e.data.get("check") == "targeted" for e in events)
