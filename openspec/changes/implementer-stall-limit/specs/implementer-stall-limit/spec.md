@@ -159,14 +159,17 @@ or an `agent.time_limit` with `as_limit` true. A stall that was not a limit SHAL
   as L4-IMP-087 says
 
 ### Requirement: L4-IMP-115 A stall that cannot move stays a failed attempt, and it moves nothing it should not
-A stall of kind `idle` or `time` SHALL be a limit only when `Workbench.can_move(task)` is true, where the owner of the
-workbench sets it from `Factory.can_replace` (L4-AVL-015); a workbench with none SHALL apply the chain-length test only. A
-silent stop (L4-IMP-087) SHALL NOT use it. In a fix unit the fix loop's `can_move` SHALL also be false for a task that has
-already moved after a limit in this run, because the fix loop moves a task once and parks the unit on its second limit,
-and that path discards nothing (L4-IMP-113). A stall that is a limit SHALL go through the same fallback as every limit, so
-that: the move asks with the task's veto and never takes a spent profile (L4-IMP-094), and may take a profile that has used
-its share; a stall on a task's own profile (L4-IMP-017) leaves the run's profile where it is, and a stall on the run's
-profile moves it; the failure counts, `seed_attempts` and the attempt window (L4-IMP-075, L4-IMP-104) are unchanged, so a
+A stall of kind `idle` or `time` SHALL be a limit only when a profile can replace this one (`Factory.can_replace`,
+L4-AVL-015), asked through `Workbench.stall_plan(task, phase)`, which the owner of the workbench sets; a workbench with
+none SHALL apply the chain-length test only. A silent stop (L4-IMP-087) SHALL be a limit with no such check. In a fix
+unit a stall of kind `idle` or `time` SHALL NOT be a limit for a task that has already moved after a limit in this run,
+because the fix loop moves a task once and parks the unit on its second limit, and that path discards nothing
+(L4-IMP-113). Every stall that is a limit SHALL ask its fallback to refuse each profile that is spent for the task's phase
+(its failed attempts of the phase in the task's window are at least `implementer.max_task_attempts`), also when no move of
+this run has set the veto of L4-IMP-094: a fallback that handed the step to a spent profile would end the task at once with
+`max_task_attempts` while a profile before it has attempts left. A stall that is a limit SHALL go through the same fallback
+as every limit, so that: the move asks with that veto and the task's veto and never takes a spent profile, and may take a
+profile that has used its share; the run's profile follows the fallback as for any limit (`switch_profile`); the failure counts, `seed_attempts` and the attempt window (L4-IMP-075, L4-IMP-104) are unchanged, so a
 stall limit is no failed attempt and no renewal; the soft deadline (L4-IMP-067, L4-IMP-068) wins over a stall, and the
 next profile's step starts only when `_check_step` lets it, with the stall limit staying recorded; and with a chain of one
 profile, in an eval cell and in every case of L4-IMP-112 that does not hold, the stall is a failed attempt as before. When
@@ -179,6 +182,13 @@ the reason `<kind>: no other profile can take the step`.
 - **When** the step ends
 - **Then** `agent.time_limit{as_limit: false, reason: "time: no other profile can take the step"}` and `task.attempt_failed`
   are recorded, no profile is cooled, and the unit does not park
+
+#### Scenario: SCN-IMP-622 (+) A stall never hands the step to a spent profile
+- **Given** `roles.implementer: [free, glm, sonnet]`, `glm` with `max_task_attempts` failed green attempts of the task in its
+  window (from an earlier run), no move of this run, and a green step on `free` stopped as a stall
+- **When** the limit is handled
+- **Then** `availability.fallback` goes from `free` to `sonnet`, `glm`'s step is never started, and the task does not halt on
+  `max_task_attempts`
 
 #### Scenario: SCN-IMP-613 (−) The soft deadline wins, and a step that does not fit is not started
 - **Given** an armed soft deadline, and in turn a step that the deadline stops while the agent has been idle for 12
@@ -254,7 +264,7 @@ entry of kind `idle` or `time` SHALL load in a reader that does not know the kin
 ### Requirement: L4-AVL-015 A stall is a limit only when a profile with another cool-down key can take the step
 `Factory.can_replace(selected, constraints)` SHALL be true when `roles.implementer` lists a profile other than `selected` whose
 cool-down key (`(tool, model)`) differs from the key of `selected`, that is not cooling in the registry, and that every
-constraint of the request accepts (the task's veto of a spent profile among them). It SHALL send no probe and record
+constraint of the request accepts (the task's veto of a spent profile and the spent veto of L4-IMP-115 among them). It SHALL send no probe and record
 nothing. A stall of kind `idle` or `time` SHALL be a limit only when it is true (L4-IMP-115). When it is true and the
 fallback still finds no usable profile (every candidate fails its probe), the unit SHALL park as it does for any limit:
 `waiting_capacity`, exit 12, with `retry_after` the earliest end of a cool-down in the chain (L4-AVL-007), and the tree is

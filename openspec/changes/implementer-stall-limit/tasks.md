@@ -17,7 +17,7 @@ reads `docs/runbook.md` and must stay green.
   - SCN-IMP-607, SCN-IMP-608, SCN-IMP-609, SCN-IMP-610, SCN-IMP-612, SCN-IMP-621: the once-per-window rule over the three
     kinds, a 0.4.60 `agent.idle{silent: true}` (no `kind`, no `as_limit`) counted, a checkpoint ending the window and
     `task.attempts_renewed` not ending it, a chain of one unchanged, the escalation counts untouched, a silent stop with no
-    `can_move`;
+    `stall_plan`;
   - SCN-IMP-619: a judge, a verifier-agent call, a clarifier call and a delegate call that time out make no stall;
   - the reasons `idle: already once for this task`, `time: already once for this task` and `silent: already once for this
     task` (SCN-IMP-438 unchanged);
@@ -46,13 +46,14 @@ reads `docs/runbook.md` and must stay green.
 
 - [ ] 3.1 Write the tests first, in `tests/unit/availability/test_fallback.py` (where `Factory.on_limit` is tested) and
   `tests/unit/implementer/test_stall_limit.py`: `Factory.can_replace` (SCN-AVL-39, SCN-AVL-40, SCN-AVL-41: a cooling profile,
-  a profile with the same `(tool, model)`, a constraint that refuses, no probe sent, nothing recorded); SCN-IMP-611; SCN-IMP-613
+  a profile with the same `(tool, model)`, a constraint that refuses, no probe sent, nothing recorded); SCN-IMP-611; SCN-IMP-622 (a spent profile is never picked, also with no move in the run, and for a silent stop); SCN-IMP-613
   (the soft deadline first, `_check_step` before the next step); SCN-IMP-614 and SCN-IMP-615 (the fix loop: first move, and
   a task already in `retried`); SCN-AVL-42 (the probe fails: exit 12, tree clean, no wait). Run them and see them fail.
-- [ ] 3.2 Then add `Factory.can_replace` (`src/l4/agents/factory.py`), the `Workbench.can_move` field
-  (`src/l4/implementer/workbench.py`), its setting in `Orchestrator._workbench` (the task's selection with its veto) and in
-  `fixloop._child_workbench` (also false for a task in `retried`, which needs the set passed in), and the check in
-  `agent_step` for kinds `idle` and `time` only. Run the files of 3.1 one at a time, then
+- [ ] 3.2 Then add `Factory.can_replace` (`src/l4/agents/factory.py`), the `Workbench.stall_plan` field and
+  `StallPlan` (`src/l4/implementer/workbench.py`), `LimitSignal.veto` (`src/l4/agents/base.py`), the setting of the plan in
+  `Orchestrator._workbench` (the task's selection; the spent veto from `seed_attempts`) and in `fixloop._child_workbench`
+  (also not replaceable for an `idle` or `time` stall of a task in `retried`, which needs the set passed in), the veto added
+  to `asked` in `switch_profile`, and the `replaceable` check in `agent_step` for kinds `idle` and `time` only. Run the files of 3.1 one at a time, then
   `tests/unit/implementer/test_escalate_spent_profiles.py` and `tests/unit/orchestrator/test_escalate_spent_profiles.py`.
 
 ## 4. Cool-down, records and texts (L4-AVL-014, L4-IMP-116, D2, D7)

@@ -42,6 +42,9 @@ Verified at 0.4.60 (663cd6d5):
 - A stall of kind `idle` or `time` is a limit only when a profile with another cool-down key is not cooling and is
   not refused by the task's veto, and, in a fix unit, when the fix task has not already moved. Otherwise it is a failed
   attempt as today, so a stall never cools the last profile that can work or parks a fix unit (L4-IMP-115, L4-AVL-015).
+- The fallback of every stall limit, the silent stop included, refuses a profile that is spent for the task's phase, also
+  when no move of the run set L4-IMP-094's veto, because a fallback selects from the chain's start and a spent profile ends
+  the task at once with `max_task_attempts` while an earlier profile has attempts left (L4-IMP-115).
 - The new records are `agent.idle{kind, as_limit, discarded_files}`, a new `agent.time_limit`, and `kind` `idle` or
   `time` on `availability.limit`, `availability.cooldown` and `availability.fallback`. The runbook says how to read
   them and when to reorder a chain (L4-IMP-116).
@@ -76,7 +79,7 @@ requirement; none changes for a chain of one profile or for a task's second stal
 ## Impact
 
 - `src/l4/implementer/tdd.py` (`agent_step`, `_silent_before`, `_previous_attempt_block`), `src/l4/implementer/workbench.py`
-  (`Workbench.can_move`), `src/l4/agents/base.py` (`LimitSignal.kind`), `src/l4/agents/factory.py` (a new
+  (`Workbench.stall_plan`), `src/l4/agents/base.py` (`LimitSignal.kind`, `LimitSignal.veto`), `src/l4/agents/factory.py` (a new
   `Factory.can_replace`), `src/l4/orchestrator.py` (`_workbench`, `switch_profile`), `src/l4/verifier/fixloop.py`
   (`_child_workbench`, `_fall_back`, `fix_hook`), `src/l4/progress.py` (`_agent_idle`, a new `_agent_time_limit`).
 - `docs/SPEC.md`, `docs/runbook.md`, `CHANGELOG.md`. No change to the skill.

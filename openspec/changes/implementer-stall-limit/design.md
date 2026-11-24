@@ -81,7 +81,8 @@ cool-down is that limit's. A stall is a limit of its profile (`as_limit`) when t
 (`len(wb.cfg.roles.implementer) > 1`, the silent stop's test, so a chain of one is a failed attempt as today), the task
 has not used its stall limit (D3), and, for kinds `idle` and `time`, a profile can replace this one (D5). Otherwise the
 stop is a failed attempt, with the reason it has today and, when it is a stall that could not move, a `reason` in its
-record. The raise is `RoleLimit(run, carried)` with a `LimitSignal(tool, model, kind, None, source, excerpt)`:
+record. The raise is `RoleLimit(run, carried)` with a `LimitSignal(tool, model, kind, None, source, excerpt)` that also carries the
+spent veto of D5:
 `source` is `run.idle` for `silent` and `idle`, and `run.timeout` for `time`; the `excerpt` is `no output for <limit>`
 for `silent` (unchanged), `no output for <limit> after <n> tool calls` for `idle` (`no output for <limit>` when the
 reader did not count), and `the agent step reached its time limit (<limit>)` for `time`, where `<limit>` is the idle
@@ -184,30 +185,48 @@ The fix loop's second limit of a task (`fixloop.py:431-435`) cools the profile a
 stalled step's edits and WIP ref would stay, and a later run could restore them (`refs/l4/wip`, L4-IMP-100). A stall
 never takes that path: D6.
 
-### D5. A profile must be able to replace this one (L4-IMP-115, L4-AVL-015)
+### D5. A profile must be able to replace this one, and the fallback must not pick a spent one (L4-IMP-115, L4-AVL-015)
 
-A stall of kind `idle` or `time` is a limit only when `Workbench.can_move(task_key)` is true. `can_move` is a new optional
-field, `Callable[[str], bool] | None`, that the owner of the workbench sets; `None` (a bench in a unit test) means the
-chain-length test only. A new `Factory.can_replace(selected, constraints) -> bool` reads the cool-down registry and
-`roles.implementer`, sends no probe, and is true when the chain lists a profile `p` other than `selected` such that:
+`Workbench.stall_plan` is a new optional field, `Callable[[Task, str], StallPlan] | None`, that the owner of the workbench
+sets (`None`, a bench in a unit test, means the chain-length test only and no veto). `StallPlan(replaceable: bool, veto:
+Constraint)`. `agent_step` asks it once per stall, with the task and the step's phase (`role`: `red`, `green` or `single`).
+
+**replaceable.** A new `Factory.can_replace(selected, constraints) -> bool` reads the cool-down registry and
+`roles.implementer`, sends no probe, records nothing, and is true when the chain lists a profile `p` other than `selected`
+such that:
 
 - the cool-down key of `p` (`cooldown_key`, `(tool, model)`) differs from the key of `selected`, because recording the
   stall's cool-down cools every profile with that key, so a profile that shares it cannot take the step;
 - `p` is not cooling now (`cooldowns.cooling`);
-- every constraint of the request, the task's veto among them (a spent profile, L4-IMP-094), accepts `p`.
+- every constraint of the request, the task's veto (L4-IMP-094) and the `veto` below among them, accepts `p`.
 
-`Orchestrator._workbench` sets `can_move` to a closure that builds the selection the way `switch_profile` does (the
-task's own selection, or the run's, with the task's veto) and calls `can_replace`. `fixloop._child_workbench` sets one that
-also returns false for a task already in `retried` (the fix loop moves a task once after a limit and parks the unit on a
-second: D4).
+A stall of kind `idle` or `time` is a limit only when `replaceable` is true. `Orchestrator._workbench` sets a closure that
+builds the selection the way `switch_profile` does (the task's own selection, or the run's) and calls `can_replace`.
+`fixloop._child_workbench` sets one that also says not replaceable for an `idle` or `time` stall of a task already in
+`retried` (the fix loop moves a task once after a limit and parks the unit on a second: D4).
 
-Why: with no alternative, the limit would cool the only profile that can work (a stall is often the first sign of a
-profile that is slow, not dead), then `for_role` finds nothing and the unit parks for `default_cooldown` (30m, above
+**veto.** A limit fallback selects again from the top of the chain (`Factory.on_limit`, `factory.py:360`), so it can hand
+the step to a profile that has used all its attempts of the phase. `_run_task` then ends the task at once
+(`loop.py:753`, `failures[phase][profile] >= max_task_attempts` breaks the loop and the task halts on
+`max_task_attempts`), while a profile before it still has attempts left. The veto of L4-IMP-094 (`_task_veto`) is set only
+by a move of this run (`orchestrator.py:1342`), so a stall that follows no move has none, and neither has a silent stop of
+0.4.60. So `stall_plan` also returns a `Constraint` built like `loop.spent_constraint`, from `seed_attempts` of the window
+(`failures[phase]`, of this fix unit or of none): it refuses each profile whose failed attempts of the phase are at least
+`implementer.max_task_attempts`, with the text `spent: <n> failed attempts of <phase> of task <k> (implementer.max_task_attempts
+<m>)`. `agent_step` puts it on the stall's signal (`LimitSignal.veto`, a field outside equality and repr), and
+`switch_profile` adds it to the task's own veto when it asks `Factory.on_limit` (`asked`). Both loops reach
+`switch_profile`, so this is one change. It applies to the three kinds: for a silent stop it is a protection that 0.4.60
+lacks, and nothing else about the silent stop changes. When the adapter found its own limit on the run, the signal is the
+adapter's and carries no veto: that path is the genuine limit's, as before. `seed_attempts` is in `loop.py`, which imports
+`tdd.py`; the closure is built where both are visible, which is why the plan is a field of the workbench.
+
+Why `replaceable`: with no alternative, the limit would cool the only profile that can work (a stall is often the first sign
+of a profile that is slow, not dead), then `for_role` finds nothing and the unit parks for `default_cooldown` (30m, above
 `availability.wait_in_run`, so no in-run wait: L4-AVL-011), where today it retries at once. Every other unit and judge
 that uses the same `(tool, model)` would skip it for that time. A failed attempt costs at most `escalate_after` tries and
 moves the task by L4-IMP-017 as before.
 
-A silent stop keeps its 0.4.60 behaviour and does not use `can_move`: it did nothing, the profile is demonstrably not
+A silent stop keeps its 0.4.60 behaviour and does not need `replaceable`: it did nothing, the profile is demonstrably not
 working, and the park when nothing else is usable is the rule of L4-IMP-087. Residual risk: a profile that is not cooling
 and that `can_replace` accepts can still fail its probe in `for_role`; then the unit parks, as it does for a silent stop.
 It is named in the risks.
@@ -216,10 +235,10 @@ It is named in the risks.
 
 - **Escalation (L4-IMP-017, L4-IMP-094).** A stall limit adds no `task.attempt_failed`, so it adds nothing to a profile's
   count toward `escalate_after` or `max_task_attempts`, starts no escalation and records no `implementer.escalated`. It
-  is a limit fallback, so `switch_profile` asks with the task's veto: it never takes a profile that is spent for the
-  task's phase. It may take a profile that has used its share (`escalate_after`), as any limit fallback may. A stall on a
-  task's own (escalated) profile leaves the run's profile where it is (`switch_profile`, 1238-1252). A stall on the run's
-  profile moves the run's profile, so the next task starts on the new one.
+  is a limit fallback, so `switch_profile` asks with the task's veto and with D5's spent veto: it never takes a profile that
+  is spent for the task's phase, whether or not a move of this run set the task's veto. It may take a profile that has used
+  its share (`escalate_after`), as any limit fallback may. The run's profile follows the fallback as it does for any limit
+  (`switch_profile`, 1238-1252): it moves when the stalled profile was the run's, so the next task starts on the new one.
 - **Attempt window and renewal (L4-IMP-075, L4-IMP-104).** The failure counts are unchanged. The attempt number of the next
   step is the stalled step's again, as after every limit; the logs keep both. A renewal does not reset D3's count.
 - **Soft deadline (L4-IMP-067, L4-IMP-068).** The deadline's cancel is checked first in the runner and in `agent_step`, so
