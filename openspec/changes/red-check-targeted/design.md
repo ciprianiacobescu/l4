@@ -68,8 +68,8 @@ loads.
 
 It is a load error and not a doctor check. A wrong `targeted` would otherwise fall back on every step, so the setting
 would cost time and give nothing, and the fallback is silent in the run log. Load errors exit 2 in every command
-(L4-CFG-004 rules the rest of the file). A doctor row for the command's report path was considered and left out: it
-needs an unallocated doctor id and a heuristic.
+(L4-CFG-004 rules the rest of the file). There is no doctor row for a targeted command that names no report path, decided: it
+needs an unallocated doctor id and a heuristic, and is left for a later change.
 
 Default `full`. The key is off by default because a targeted red moves where a test that the new files break becomes
 visible, from red to green or to verification (D7), and that can change when a unit fails.
@@ -191,9 +191,10 @@ After red:
 - **A resumed red** (`resume_red`, 2142) rebuilds its base report from a new whole run at the red commit, with the new ids
   taken out. For a targeted red that run holds the red files, so an old test that they break is in the rebuilt base as
   failing: it is not in green's regressed set, and green commits with no record of it (a full red would have failed
-  before its commit). This is a limit. Verification's steps 1 and 3 run the whole suite and compare with the merge base,
-  so they report the test. Measuring the base at the red commit's parent instead would need a second checkout and a gate
-  run in `resume_red` for a case that needs a run killed between two commits; it is left out and asked of the delegate.
+  before its commit). This is a named limit, decided: `resume_red` keeps rebuilding its base from the red commit.
+  Verification's steps 1 and 3 run the whole suite and compare with the merge base, so they are the backstop and report
+  the test. Measuring the base at the red commit's parent instead would need a second checkout and a gate run in
+  `resume_red` for a case that needs a run killed between two commits; it is not built.
 
 Id stability. A targeted command that names the new tests differently from the whole suite (for example a runner that
 prefixes ids with a project name only when a project filter is on) gives ids that green's whole run does not hold, so
@@ -265,8 +266,9 @@ reason gets one suffix after the existing ones (`; failed again on a re-run (L4-
 A task whose own red was not targeted gets no suffix, also when the unit's switch is recorded for it. The text is only a
 reason: the structured `regressed` marker of L4-IMP-105 is not parsed from it. The attempt fails as today, so the loss
 is bounded by `implementer.max_task_attempts` and the unit's escalation, and it is never silent: the reason, the
-escalation text and the event name the cause. Whether the suffix should be addressed to the agent at all is a question
-for the delegate (most green regressions are green's own code, and a delegate's answer can grant an unfreeze).
+escalation text and the event name the cause. The suffix stays agent-facing, decided: the agent is the one who can report
+`blocked` with a question that names the file, and a person's answer can grant an unfreeze (most green regressions are
+green's own code, and the suffix says only what the targeted red did).
 
 Why green only, and not a chore: a fix, tests or refactor chore has no red step of its own in the task, and its
 regressions are its own. Why not a redo of red: a red commit is frozen state that verification and the criteria proofs
