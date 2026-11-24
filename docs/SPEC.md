@@ -2072,7 +2072,8 @@ for a red test that failed by the wrong kind of error
       passing new test (unless its criterion is pre-satisfied, below) fails the red phase (attempt counted);
    4. regression: every test that passed at the step's base still passes, otherwise red fails with
       `red broke existing tests` [V, spikes/01, spikes/02]; the base report MAY be a reused measurement of the
-      previous green gate (L4-IMP-088);
+      previous green gate (L4-IMP-088); with `gates.test.red_check: targeted` run (a) may be the targeted run of
+      L4-IMP-118, and a test it did not run is judged by its base status (L4-IMP-119);
    5. run (b), the **vacuity check, per criterion**, run only when check 2 passed (a stub-purity leak is never labelled
       vacuous): for **each criterion the task cites** that is not pre-satisfied (below; the discrimination check
       replaces vacuity for a pre-satisfied criterion, whose tests have no red stub to zero), at least one new test
@@ -2952,13 +2953,15 @@ gate. The step's duration is the sum of its runs, and `deadline.cap_s` is unchan
 
 **L4-IMP-119 A targeted red changes what no later reader of the red step sees.** `RedOutcome.base_report` SHALL stay
 the measured baseline, so green judges with it as before (`green_failures` against the baseline, the red ids from
-`new_ids`). A targeted red SHALL NOT change what these read: the near-pass carry; a resumed red, whose base report
-`resume_red` still measures with a new whole run at the red commit; the next task's baseline, which is green's report
-and never red's; and verification, which reads `task.red_ok` (`tests`, `frozen`, `criteria`, `notes`) and the red
-commit and runs its steps 1 and 3 on the whole suite. Inside red, a test that the targeted run did not run SHALL be
-judged by its base status: `red broke existing tests` and `no new test: existing tests were changed` cannot fire for
-it, and the checks that read passing old tests (`passing_now`, `unchanged_on_base`, the proofs of earlier reds) read
-base statuses. The duration of the targeted run SHALL never bound a whole-suite run.
+`new_ids`). A targeted red SHALL NOT change what these read: the near-pass carry; the next task's baseline, which is
+green's report and never red's; and verification, which reads `task.red_ok` (`tests`, `frozen`, `criteria`, `notes`)
+and the red commit and runs its steps 1 and 3 on the whole suite. Inside red, a test that the targeted run did not run
+SHALL be judged by its base status: `red broke existing tests` and `no new test: existing tests were changed` cannot
+fire for it, and the checks that read passing old tests (`passing_now`, `unchanged_on_base`, the proofs of earlier
+reds) read base statuses. The duration of the targeted run SHALL never bound a whole-suite run. A resumed red measures
+its base report with a whole run at the red commit (`resume_red`), so for a targeted red that base holds an old test
+that the red files break as failing, and the regressed set of green (L4-IMP-121) does not see it: this is a limit, and
+verification's whole-suite steps are its backstop.
 
 **L4-IMP-120 The ledger names the red check that ran and why the whole suite ran.** The gate of a targeted run is
 `gate.finished{name: "test-targeted"}`. `task.red_ok` of a step of a `targeted` configuration SHALL carry `check`
@@ -2971,25 +2974,30 @@ does not know the keys and events ignores them. `resume_red` SHALL set `RedOutco
 reads, so that green decides from the red commit's own record also in a later job.
 
 **L4-IMP-121 A regression after a targeted red switches the unit back to full red runs.** When green's whole-suite run
-of a task whose red was targeted (`RedOutcome.check` is `targeted`) still holds, after green's own re-run
-(L4-IMP-105), a regressed test (a test that was not new and passed in the red step's base report:
-`GreenWhy.regressed`), or fails `red tests still failing` for a red test that is missing from the run's report, the
-step SHALL record `task.red_check_disabled{task, attempt, why, tests, red_sha}` once for the unit: `why` is
-`regressed` or `ids_missing`, and `tests` holds at most 20 ids. Every later red step of the unit and of its fix units
-SHALL then run the whole suite and record `task.red_check_full{why: unit_switched}`. The switch SHALL last as long as
-the unit's ledger: `l4 retry` and `l4 resume` keep it, and `l4 restart`, which starts a new ledger, reads the key
-again. The record SHALL be made also when green's own code broke the test: both causes call for the same safe action.
-Green and verification stay whole-suite in every case. [I, a new test file can break an old test by interaction (a
-shared database, a port, a module-level mock, a snapshot directory) that only a whole run shows; no ledger of a
-consumer shows one yet]
+in a unit whose ledger holds a `task.red_ok` with `check: targeted` (of any task, fix units included) still holds,
+after green's own re-run (L4-IMP-105), a regressed test (a test that was not new and passed in the red step's base
+report: `GreenWhy.regressed`), or when green of a task whose own red was targeted (`RedOutcome.check` is `targeted`)
+fails `red tests still failing` for a red test that is missing from the run's report, the step SHALL record
+`task.red_check_disabled{task, attempt, why, tests, red_sha}` once for the unit: `why` is `regressed` or
+`ids_missing`, `tests` holds at most 20 ids, and `red_sha` is the task's red commit. Every later red step of the unit
+and of its fix units SHALL then run the whole suite and record `task.red_check_full{why: unit_switched}`. The switch
+SHALL last as long as the unit's ledger: `l4 retry` and `l4 resume` keep it, and `l4 restart`, which starts a new
+ledger, reads the key again. The record SHALL be made also when green's own code broke the test: both causes call for
+the same safe action. The unit-wide trigger is on purpose: an interaction that depends on order or on a shared port
+can first show in a later task's green. Green and verification stay whole-suite in every case. [I, a new test file can
+break an old test by interaction (a shared database, a port, a module-level mock, a snapshot directory) that only a
+whole run shows; no ledger of a consumer shows one yet]
 
-**L4-IMP-122 Green says that a targeted red may be the cause.** An attempt of a task whose red was targeted that fails
-with a regressed set, or with a red test missing from the report, SHALL end its reason with `; the red step of this
-task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass, report status
-blocked with a question that names the test file`, after any suffix of L4-IMP-105. The attempt fails as it does today,
-so the loss is bounded by `implementer.max_task_attempts` and the unit's escalation, and the cause is named in the
-reason, the escalation and `task.red_check_disabled`. A task whose red was not targeted gets no suffix. The structured
-marker of L4-IMP-105 SHALL NOT be read from the text.
+**L4-IMP-122 Green says that a targeted red may be the cause.** An attempt of a task whose own red was targeted that
+fails with a regressed set SHALL end its reason with `; the red step of this task ran only its new test files
+(L4-IMP-122): if no change of the code can make these tests pass, report status blocked with a question that names the
+test file`. One that fails with `red tests still failing` for a red test that is missing from the report SHALL end it
+with `; the red step of this task ran only its new test files (L4-IMP-122): the whole suite reports these tests under
+other ids than the targeted command did, so no change of the code can make them pass: report status blocked and say
+so; a person fixes gates.test.targeted and runs l4 restart`. The suffix follows any suffix of L4-IMP-105. The attempt
+fails as it does today, so the loss is bounded by `implementer.max_task_attempts` and the unit's escalation, and the
+cause is named in the reason, the escalation and `task.red_check_disabled`. A task whose own red was not targeted gets
+no suffix, whatever the unit's other tasks did. The structured marker of L4-IMP-105 SHALL NOT be read from the text.
 
 **L4-IMP-108 A test chore counts the browser tests it writes.** When `gates.e2e` is configured (`e2e_configured`), a
 test chore (a `[chore]` task of kind `tests`) SHALL compute the browser tests of its step: the tests of
@@ -10259,7 +10267,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 140 | `attempt-window-recheck` | an answer that unfreezes a file for a task's green renews its attempts once, and a step runs its test gate once more before it fails on a few pre-existing tests. `l4.implementer.loop._renew_on_answers` (new): before a task's first green attempt in a run (a resumed red commit, before the start escalation; or a red commit of the run), the grants of `unfreeze_for` with `reason` `human_answer` or `delegate_answer` and a path, whose question no earlier `task.attempts_renewed` of the task names, record `task.attempts_renewed{task, phase, questions, failed}` and clear the green failures, reasons and `escalated_from`; a question is credited once, by a renewal or by an earlier answer `task.unfrozen` that names it; attempt numbers go on; at most 2 renewals with `failed > 0` per task after the newest retry, resume or restart (`MAX_RENEWALS`), so at most three green windows between two of them (3 x `max_task_attempts` failed attempts with one profile); `seed_attempts` clears at the event; `deadline.window` is unchanged. `l4.implementer.recheck` (new): `recheck_candidates` (1 to 5 regressed ids, failed or errored, no time-out marker, in a file neither the branch nor the step changed: `gate_repeat.untouched`, factored out of `pre_existing`), the `test-recheck` run after `tree_reset` and `gate_repeat.short_of_time` (now public), the step's guard after it, the merged report (each flaky test's case from the re-run) judged again and handed on (`keep_tested` too), `task.tests_rechecked`; `RedVerdict.regressed` and the branch of `green_failures`; red, green and the fix, tests and refactor chores, not the repair chore. `VerifyResult.step_flakes` from the ledger, the section `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)` of `verification.md` and `verdict.json`'s `step_flakes`, kept by a reused round; no finding. Three times in two consumer units an accepted unfreeze left one green attempt, and three attempts in two units were lost to pre-existing tests of an e2e stack helper that failed once (L4-IMP-104, L4-IMP-105, L4-VER-082, L4-IMP-075, SCN-IMP-566..576, SCN-VER-322..323; `openspec/changes/attempt-window-recheck/`). Limits: an answer that opens nothing renews nothing; the gate runs whole; the re-run needs room before the soft deadline (`deadline.cap_s` is unchanged); a step that made a test flaky can pass its attempt, and is listed | the unit tests (`test_attempt_renewal`, `test_recheck`, `test_step_recheck`, `test_report_step_flakes`, `test_loop`, `test_gate_repeat`, `test_tdd_green`, `test_tdd_red`) |
 | 141 | `ui-carry-unchanged` | a UI criterion that the unit did not change, whose tracing tests are the base's and pass, is carried from the base instead of a step-5 gap that can only end as a hold (SLIPPABLE: it loosens L4-VER-067 for that case). `l4.verifier.ui_step.carried_from_base(gaps, trace, unchanged, file_of, changed, rejected)` (new, pure): a criterion unchanged on the base (`_Run.unchanged`, the `unchanged_ids` of step 4's baseline), `covered` with no `held` reason, every tracing test passed with `pass_to_pass`, no note, within the cap and adequate, every ignored test a passing over-cap candidate, every test file found (`ladder._carry_files`: `carry_file` over the work tree) and not among the unit's changed files; `rejected_ui_criteria(events, criteria)` (new): a criterion among `criteria` that a reviewer ever rejected, or one of its UI holds, is never carried; `carry_file(test_id, walked, paths)` (new, pure): the file of a test for the carry, found only when `file_of_id` places the id, no other file of the tree could be it, and the dotted-module walk agrees or finds no module for a file that is not `.py`. `ladder._generate_step` carries after the waiver and before the gap findings and the writer (also with no writer), records `verify.generated{status: carried, covered_by, attempts: 0}`, keeps the outcome (`GenStatus` `carried`), counts it in step 5's note and checks nothing out when every gap is waived or carried; `ui_gap_finding(carried=True)`, `unclosed_holds` and the fix planner's closed set treat it as closed (`lost_notes` is unchanged: taking `carried` would bring the hold back after step 9); `report._generated_rows` writes `carried from the base: <ids> …; a note, not a hold (L4-VER-086)`. A carry passes nothing: the judge's pass and an adequate test are still needed. A consumer's feedback follow-up that changed one web file raised UI holds for three of its merged parent's criteria that were word for word the base's and traced by passing `pass_to_pass` tests, which only the owner could answer (L4-VER-086, L4-VER-067, L4-VER-009, SCN-VER-343..349 and SCN-VER-351; `openspec/changes/ui-carry-unchanged/`). Not done: fuzzy matching of a restated scenario (a scenario with any changed word stays a new criterion); a pass-to-pass browser check of a carried criterion. Residual risk: a break of the browser side of an unchanged scenario that its base unit tests and the judge miss is no longer asked about | the unit tests (`test_ui_step`, `test_ui_flow`, `test_report_m15`, `test_resume`, `test_fixunit`) |
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
-| 144 | `red-check-targeted` | a red step that adds only test modules runs only those files, and every other red step runs the whole suite as before. `gates.test.red_check` (`full`, the default, or `targeted`; with `targeted` a `gates.test.targeted` that has no `{files}` word of its own, has it twice, or holds `{grep}` does not load, L4-CFG-007). `l4.implementer.red_check` (new): `choose` (per step, in order: no `task.red_check_disabled` in the unit's ledger, no named or stale test, no collection error at the base, no stub, nothing put back by red scope, every changed path new and a test module by `tdd.test_globs`, no support or runner-configuration glob and `is_support_file` on the work-tree file, 1 to 50 paths and 8,000 bytes, none starting with `-`; the first failing rule is the `why`), `targeted_command` (the `{files}` word replaced after `shlex.split`, paths sorted, one argument each), `unusable` (a report was read, no collection error, no id of the base report, every file owns an id and every id a file by `file_of_id`, every id failing; else the whole suite in the same step and `task.red_check_full{why, detail}`), `with_targeted` (the base report plus the new failing tests, local to `run_red`; `RedOutcome.base_report` stays the baseline). The gate is `test-targeted`, `task.red_ok` gains `check` and `files`, and a targeted run that times out fails the attempt with no fallback. After a targeted red, a regressed base-passing test of green's whole run after its re-run, or a red test missing from its report, records `task.red_check_disabled` once: the unit's later reds run whole (`unit_switched`), `l4 restart` starts a new ledger, and the reason ends with the text of L4-IMP-122. Green, the near-pass carry, the next baseline and verification are unchanged (L4-IMP-117..122, L4-GAT-007..009, L4-CFG-007, SCN-IMP-626..646, SCN-GAT-12..20, SCN-CFG-08..12; `openspec/changes/red-check-targeted/`). [V, in one TypeScript consumer plan 66 red steps ran the whole suite, about 4.9 minutes each, and 8 failed on end-to-end tests that were probably flakes.] Limits: off by default; a new file that breaks an old test by interaction shows at green, which cannot change the frozen files, so a person fixes the files or restarts the unit; a Python step that adds a stub runs the whole suite; no targeted green or verification; no `{grep}` | the unit tests (`test_gates_red_check`, `test_red_check`, `test_tdd_red_targeted`, `test_tdd_green_red_check`, `test_red_check_targeted_docs`, `test_tdd_red`, `test_step_recheck`) |
+| 144 | `red-check-targeted` | a red step that adds only test modules runs only those files, and every other red step runs the whole suite as before. `gates.test.red_check` (`full`, the default, or `targeted`; with `targeted` a `gates.test.targeted` that has no `{files}` word of its own, has it twice, or holds `{grep}` does not load, L4-CFG-007). `l4.implementer.red_check` (new): `choose` (per step, in order: no `task.red_check_disabled` in the unit's ledger, no named or stale test, no collection error at the base, no stub, nothing put back by red scope, every changed path new and a test module by `tdd.test_globs`, no support or runner-configuration glob and `is_support_file` on the work-tree file, 1 to 50 paths and 8,000 bytes, none starting with `-`; the first failing rule is the `why`), `targeted_command` (the `{files}` word replaced after `shlex.split`, paths sorted, one argument each), `unusable` (a report was read, no collection error, no id of the base report, every file owns an id and every id a file by `file_of_id`, every id failing; else the whole suite in the same step and `task.red_check_full{why, detail}`), `with_targeted` (the base report plus the new failing tests, local to `run_red`; `RedOutcome.base_report` stays the baseline). The gate is `test-targeted`, `task.red_ok` gains `check` and `files`, and a targeted run that times out fails the attempt with no fallback. In a unit that has a targeted red, a regressed base-passing test of green's whole run after its re-run, or a red test of a targeted task missing from its report, records `task.red_check_disabled` once: the unit's later reds run whole (`unit_switched`), `l4 restart` starts a new ledger, and the reason of a task whose own red was targeted ends with the text of L4-IMP-122. Green, the near-pass carry, the next baseline and verification are unchanged (L4-IMP-117..122, L4-GAT-007..009, L4-CFG-007, SCN-IMP-626..648, SCN-GAT-12..20, SCN-CFG-08..12; `openspec/changes/red-check-targeted/`). [V, in one TypeScript consumer plan 66 red steps ran the whole suite, about 4.9 minutes each, and 8 failed on end-to-end tests that were probably flakes.] Limits: off by default; a new file that breaks an old test by interaction shows at green, which cannot change the frozen files, so a person fixes the files or restarts the unit; a Python step that adds a stub runs the whole suite; no targeted green or verification; no `{grep}` | the unit tests (`test_gates_red_check`, `test_red_check`, `test_tdd_red_targeted`, `test_tdd_green_red_check`, `test_red_check_targeted_docs`, `test_tdd_red`, `test_step_recheck`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -14672,7 +14680,8 @@ scenario is a spec defect (§26).
 - **When** green judges its gate
 - **Then** `task.red_check_disabled{why: regressed, tests: [tests.test_db::test_rows]}` is recorded, and the attempt
   fails with the reason of 0.4.60, the suffix of L4-IMP-105 and `; the red step of this task ran only its new test
-  files (L4-IMP-122): ...`
+  files (L4-IMP-122): if no change of the code can make these tests pass, report status blocked with a question that
+  names the test file`
 
 #### SCN-IMP-641 (+) A regression that passes on green's re-run records nothing · L4-IMP-121
 - **Given** the green of SCN-IMP-640 whose re-run passes the test
@@ -14686,18 +14695,20 @@ scenario is a spec defect (§26).
 - **Then** each step before the restart runs the gate `test` with `task.red_check_full{why: unit_switched}`; after `l4
   restart` the new ledger has no record, so the key is read again
 
-#### SCN-IMP-643 (−) A red test missing from green's report records the switch · L4-IMP-121, L4-IMP-122
+#### SCN-IMP-643 (−) A red test missing from green's report records the switch and names the command · L4-IMP-121, L4-IMP-122
 - **Given** a task whose red was targeted, whose red id `test/a.test.ts::x` is not in green's whole report (the runner
   names it otherwise), and no failing base test
 - **When** green judges its gate
-- **Then** the attempt fails with `red tests still failing: test/a.test.ts::x` and the suffix of L4-IMP-122, and
-  `task.red_check_disabled{why: ids_missing}` is recorded
+- **Then** the attempt fails with `red tests still failing: test/a.test.ts::x` and the suffix of L4-IMP-122 for a
+  missing id (the targeted command names the tests differently; a person fixes `gates.test.targeted` and runs `l4
+  restart`), and `task.red_check_disabled{why: ids_missing}` is recorded
 
-#### SCN-IMP-644 (−) A regression after a whole-suite red records no switch · L4-IMP-122, L4-IMP-121
-- **Given** a task whose red ran the whole suite (not targeted, or a fallback) and a green with the failure of
-  SCN-IMP-640
-- **When** green judges its gate
-- **Then** no `task.red_check_disabled` is recorded and the reason has no suffix of L4-IMP-122
+#### SCN-IMP-644 (+) A regression in a later task whose own red ran whole still records the switch · L4-IMP-121, L4-IMP-122
+- **Given** a unit whose task 1.1 has `task.red_ok{check: targeted}`, and a task 1.2 whose red ran the whole suite
+  (`task.red_ok{check: full}`) and whose green has the failure of SCN-IMP-640
+- **When** green of task 1.2 judges its gate
+- **Then** `task.red_check_disabled{task: 1.2, why: regressed}` is recorded and the reason has no suffix of
+  L4-IMP-122, since the red of task 1.2 was not targeted
 
 #### SCN-IMP-645 (+) The switch is recorded once · L4-IMP-121
 - **Given** a unit with `task.red_check_disabled` and a green that fails again after a regression
@@ -14709,6 +14720,20 @@ scenario is a spec defect (§26).
 - **When** verification runs its steps 1 and 3
 - **Then** both run the whole suite with the same commands as for a unit of 0.4.60, and an old test that fails at head
   is a finding as it is today
+
+#### SCN-IMP-647 (−) A unit with no targeted red records no switch · L4-IMP-121, L4-IMP-122
+- **Given** a unit whose `task.red_ok` events have no `check` (a unit of 0.4.60) or `check: full`, in a `targeted`
+  configuration, and a green with the failure of SCN-IMP-640
+- **When** green judges its gate
+- **Then** no `task.red_check_disabled` is recorded and the reason has no suffix of L4-IMP-122
+
+#### SCN-IMP-648 (+) A resumed targeted red hides an old test its files break from green, and verification sees it · L4-IMP-119, L4-IMP-121
+- **Given** a run killed after a targeted red commit whose new test file breaks `tests.test_db::test_rows` only when
+  the whole suite runs, and a resumed red whose base report is measured at the red commit
+- **When** the next run resumes at green and green commits
+- **Then** the base report holds the test as failing, green's regressed set is empty, no `task.red_check_disabled` is
+  recorded, and verification's whole-suite steps report the test, which passed at the merge base, as a finding as they
+  do today
 
 #### SCN-IMP-586 (+) A new browser test of a test chore counts · L4-IMP-108
 - **Given** a test chore whose step adds `e2e/test_layout.py` with `test_regions`, a unit gate that does not collect
