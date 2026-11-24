@@ -25,7 +25,7 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
 
 ## 2. The pure parts (L4-GAT-007, L4-GAT-008, L4-GAT-009, L4-IMP-117; D2-D5)
 
-- [ ] 2.1 Write the tests first in a new `tests/unit/implementer/test_red_check.py`:
+- [x] 2.1 Write the tests first in a new `tests/unit/implementer/test_red_check.py`:
   - `targeted_command` (SCN-GAT-12): the argv of `shlex.split(result)` for two files, one with a space, one with a
     quote and a `$`; the other words of the template are unchanged;
   - `with_targeted` (SCN-GAT-14): the tests, the empty collection errors, the base object unchanged;
@@ -36,7 +36,7 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
     with a stub and a changed file gives `stubs`); `changed` as `{path: existed}`; the run's ledger path is ignored;
     `-x.test.ts`, 51 files and 8,000 bytes; a `.py` file with no test function is a support file; `test/data.ts` is one.
   Run the file and see the tests fail.
-- [ ] 2.2 Then add `src/l4/implementer/red_check.py` (`choose`, `targeted_command`, `with_targeted`, `unusable`, `Targeted`,
+- [x] 2.2 Then add `src/l4/implementer/red_check.py` (`choose`, `targeted_command`, `with_targeted`, `unusable`, `Targeted`,
   `Full`), and factor `is_support_file` of `src/l4/verifier/support_base.py` into `is_support_source(cfg, path,
   source)` and a wrapper that reads the revision (D2). Run `tests/unit/implementer/test_red_check.py`, then
   `tests/unit/verifier/test_support_base.py` and `tests/unit/verifier/test_generate_support.py`, one at a time.
