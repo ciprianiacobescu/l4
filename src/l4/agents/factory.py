@@ -27,7 +27,7 @@ from l4.agents.gate import ConcurrencyGate, GatedAdapter, login_key, slots_for
 from l4.agents.kiro_cli import KiroCliAdapter
 from l4.agents.opencode import OpenCodeAdapter
 from l4.agents.opencode_v2 import OpenCodeV2Adapter
-from l4.availability.cooldown import AvailabilityStore, Clock, Cooldown, SystemClock, iso_utc
+from l4.availability.cooldown import AvailabilityStore, Clock, Cooldown, SystemClock, cooldown_key, iso_utc
 from l4.availability.errors import REQUIRED_ROLES, RoleUnavailable, WaitingCapacity
 from l4.availability.fallback import Constraint, FallbackSelector, ProfileProbe, to_event
 from l4.availability.probes import LadderReport
@@ -349,6 +349,32 @@ class Factory:
         cooldown = self._selector().record_cooldown(selected.profile_name, profile, limit, selected.request.role)
         self._store.probes.invalidate(selected.profile_name)
         return limit, reason, cooldown
+
+    def can_replace(self, selected: Selected, constraints: Sequence[Constraint] = ()) -> bool:
+        """L4-AVL-015: does the role's chain list a profile that could take the step from `selected` if it stalled? It
+        is another profile whose cool-down key differs (recording the stall cools every profile with the key of
+        `selected`, and a profile without a model is the whole tool), that is not cooling now, that the request's own
+        constraints and `constraints` accept, and that can serve the request. It sends no probe and records nothing."""
+        request = selected.request
+        role = request.role if request is not None else "implementer"
+        chain: list[str] = getattr(self._cfg.roles, role)
+        key = cooldown_key(selected.profile_name, selected.profile)
+        asked = (*(request.constraints if request is not None else ()), *constraints)
+        now = self._clock.now()
+        for name in chain:
+            profile = self._cfg.profiles.get(name)
+            if name == selected.profile_name or profile is None:
+                continue
+            other = cooldown_key(name, profile)
+            if other == key or (key[1] is None and other[0] == key[0]):  # cooled with the stalled profile
+                continue
+            if request is not None and request.serves is not None and profile.adapter not in request.serves:
+                continue
+            if self._store.cooldowns.cooling(other, now) is not None:
+                continue
+            if all(constraint(name, profile) is None for constraint in asked):
+                return True
+        return False
 
     def on_limit(self, selected: Selected, run: RunResult | LimitSignal) -> Selected:
         """A run hit a limit: record the cool-down (the limit's reset, else the configured default), drop the cached

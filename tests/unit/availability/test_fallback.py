@@ -671,3 +671,183 @@ def test_selected_has_binary_pinned_only_on_a_drift(tmp_path):  # SCN-PRV-128
     drifted = event_for("2.33.0")
     assert drifted["binary"] == "2.33.0" and drifted["binary_pinned"] == "2.32.0"
     assert "binary_pinned" not in event_for("2.32.0")
+
+
+# --- a stall of an implementer step is a limit of its profile (implementer-stall-limit: L4-AVL-014, L4-AVL-015) ---
+
+
+def stall_run(tmp_path, kind: str, profile: Profile = CODEX) -> RunResult:
+    """FAKE: a run that a stall ended; `kind` is `idle` or `time`."""
+    source = "run.timeout" if kind == "time" else "run.idle"
+    limit = LimitSignal("fake", profile.model, kind, None, source, "stalled")  # type: ignore[arg-type]
+    return RunResult("timeout", tmp_path / "raw", limit=limit, detail="stalled")
+
+
+@pytest.mark.parametrize("kind", ["idle", "time"])
+def test_a_stall_cools_for_the_default_cooldown_and_the_length_is_the_keys(tmp_path, kind):
+    """SCN-AVL-37."""
+    plan = {**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")}
+    for configured, minutes in (("30m", 30), ("10m", 10)):
+        sink = Sink()
+        clock, store = world(tmp_path / configured)
+        cfg = config(PROFILES, implementer=CHAIN).model_copy(
+            update={"availability": AvailabilityCfg(default_cooldown=configured)}
+        )
+        factory = Factory(
+            cfg, probe_ctx(tmp_path), events=sink, adapters={"fake": Scripted(plan)}, availability=store, clock=clock
+        )
+        first = factory.for_role("implementer", "u")
+        second = factory.on_limit(first, stall_run(tmp_path, kind))
+        assert second.profile_name == "claude-sonnet"
+        entry = store.cooldowns.cooling(("fake", "gpt-6"), clock.now())
+        assert (entry.kind, entry.source, entry.until) == (
+            kind,
+            "run.timeout" if kind == "time" else "run.idle",
+            T0 + timedelta(minutes=minutes),
+        )
+        [cooldown] = sink.of("availability.cooldown")
+        assert (cooldown["kind"], cooldown["until"]) == (kind, entry.until.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        [fallback] = sink.of("availability.fallback")
+        assert fallback["reason"] == kind
+
+
+@pytest.mark.parametrize("kind", ["idle", "time"])
+def test_a_cooled_stall_is_skipped_without_a_request_and_its_hello_is_asked_again_afterwards(tmp_path, kind):
+    """SCN-AVL-38."""
+    clock, store = world(tmp_path)
+    adapter = Scripted({**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")})
+    cfg = config(PROFILES, implementer=CHAIN).model_copy(update={"availability": AvailabilityCfg(cache_ttl="2h")})
+    factory = Factory(cfg, probe_ctx(tmp_path), adapters={"fake": adapter}, availability=store, clock=clock)
+    first = factory.for_role("implementer", "u")
+    assert factory.for_role("implementer", "u").cached is True  # the hello is cached as passed
+    hellos = lambda: [c for c in adapter.calls if c == ("gpt-6", "hello")]  # noqa: E731
+    assert len(hellos()) == 1
+    factory.on_limit(first, stall_run(tmp_path, kind))
+    before = len(adapter.calls)
+    skipped = factory.for_role("implementer", "u").skipped
+    [cooling] = [s for s in skipped if s["profile"] == "codex-sol"]
+    assert cooling["step"] == "cooling" and cooling["resets_at"] == "2026-10-03T12:30:00Z"
+    assert store.cooldowns.cooling(("fake", "gpt-6"), clock.now()).kind == kind
+    assert [c for c in adapter.calls[before:] if c[0] == "gpt-6"] == []  # no probe sent
+    later(clock, minutes=31)
+    assert factory.for_role("implementer", "u").profile_name == "codex-sol"
+    assert len(hellos()) == 2
+
+
+def test_a_cooling_line_names_the_stall_kind():
+    from l4.availability.fallback import Skipped
+
+    for kind in ("idle", "time"):
+        line = format_skipped_line("implementer", Skipped("free", "cooling", "cooling", kind, resets_at=T0))
+        assert line.endswith(f"({kind}); no probe sent")
+
+
+def test_a_registry_reads_and_shows_the_stall_kinds(tmp_path):
+    """SCN-AVL-43: the kind is any string, so a reader that knows only `silent` still loads and prints the entries."""
+    from l4.availability.cooldown import CooldownRegistry
+
+    clock, store = world(tmp_path)
+    store.cooldowns.record("a", ("fake", "gpt-6"), T0 + timedelta(minutes=30), "idle", "run.idle", None, T0)
+    store.cooldowns.record("b", ("fake", "sonnet"), T0 + timedelta(minutes=30), "time", "run.timeout", None, T0)
+    fresh = CooldownRegistry(tmp_path / "cache" / "availability.json", clock=clock)
+    assert sorted((c.profile, c.kind) for c in fresh.entries(clock.now())) == [("a", "idle"), ("b", "time")]
+    assert fresh.cooling(("fake", "gpt-6"), clock.now()).kind == "idle"
+
+
+THREE_PROFILES = PROFILES | {"claude-opus": fake_profile("opus", vendor="anthropic", auth="subscription")}
+
+
+def can_replace_world(tmp_path, *, profiles=None, chain=None):
+    plan = {**healthy("gpt-6", version="0.160.0"), **healthy("sonnet"), **healthy("opus")}
+    return build(tmp_path, plan, profiles=profiles or PROFILES, implementer=chain or CHAIN)
+
+
+def test_can_replace_is_true_when_another_profile_is_free(tmp_path):
+    factory, adapter, _, _ = can_replace_world(tmp_path)
+    first = factory.for_role("implementer", "u")
+    calls = len(adapter.calls)
+    assert factory.can_replace(first, ()) is True
+    assert len(adapter.calls) == calls  # no probe sent
+
+
+def test_can_replace_is_false_for_a_chain_of_one_and_when_every_other_profile_cools(tmp_path):
+    """SCN-AVL-39."""
+    factory, _, clock, store = can_replace_world(tmp_path, chain=["codex-sol"])
+    assert factory.can_replace(factory.for_role("implementer", "u"), ()) is False
+    factory, _, clock, store = can_replace_world(tmp_path / "two")
+    first = factory.for_role("implementer", "u")
+    store.cooldowns.record(
+        "claude-sonnet", ("fake", "sonnet"), T0 + timedelta(hours=1), "usage_limit", "test", None, T0
+    )
+    assert factory.can_replace(first, ()) is False
+
+
+def test_a_profile_with_the_same_cooldown_key_is_no_replacement(tmp_path):
+    """SCN-AVL-40: two profiles of one adapter and model are cooled together by the stall."""
+    twin = fake_profile("gpt-6", vendor="openai", auth="subscription")
+    factory, _, _, _ = can_replace_world(
+        tmp_path, profiles={"free-a": CODEX, "free-b": twin}, chain=["free-a", "free-b"]
+    )
+    assert factory.can_replace(factory.for_role("implementer", "u"), ()) is False
+
+
+def test_a_profile_without_a_model_is_the_whole_tool_and_cools_every_profile_of_it(tmp_path):
+    """A stall of a profile that pins no model cools its whole tool, so another profile of that tool is no
+    replacement (L4-AVL-004); the keyed adapters of tests (`fake`) are the exception."""
+    from l4.agents.factory import Selected, SelectionRequest
+
+    whole = Profile(adapter="codex", vendor="openai", auth="subscription")
+    sibling = Profile(adapter="codex", model="gpt-6", vendor="openai", auth="subscription")
+    factory, _, _, _ = can_replace_world(
+        tmp_path, profiles={"free-a": whole, "free-b": sibling}, chain=["free-a", "free-b"]
+    )
+    stalled = Selected("free-a", whole, Scripted(), request=SelectionRequest("implementer", "u"))
+    assert factory.can_replace(stalled, ()) is False
+
+
+def test_a_profile_that_a_constraint_refuses_is_no_replacement(tmp_path):
+    """SCN-AVL-41: the spent veto, asked of the request and of the extra constraints alike."""
+    factory, _, _, _ = can_replace_world(tmp_path)
+    first = factory.for_role("implementer", "u")
+    spent = lambda name, profile: "spent: 3 failed attempts" if name == "claude-sonnet" else None  # noqa: E731
+    assert factory.can_replace(first, (spent,)) is False
+    assert factory.can_replace(first, (lambda name, profile: None,)) is True
+    from dataclasses import replace
+
+    from l4.agents.factory import SelectionRequest
+
+    held = replace(first, request=SelectionRequest("implementer", "u", None, (spent,)))
+    assert factory.can_replace(held, ()) is False
+
+
+def test_a_third_profile_makes_the_stall_replaceable_when_the_second_is_refused(tmp_path):
+    factory, _, _, _ = can_replace_world(
+        tmp_path, profiles=THREE_PROFILES, chain=["codex-sol", "claude-sonnet", "claude-opus"]
+    )
+    first = factory.for_role("implementer", "u")
+    refuse_second = lambda name, profile: "spent" if name == "claude-sonnet" else None  # noqa: E731
+    assert factory.can_replace(first, (refuse_second,)) is True
+
+
+def test_can_replace_records_nothing(tmp_path):
+    sink = Sink()
+    factory, _, _, store = build(tmp_path, {**healthy("gpt-6", version="0.160.0"), **healthy("sonnet")}, sink=sink)
+    first = factory.for_role("implementer", "u")
+    seen = len(sink.events)
+    factory.can_replace(first, ())
+    assert len(sink.events) == seen and store.cooldowns.entries(T0) == []
+
+
+def test_a_replacement_that_fails_its_probe_parks_the_unit_after_the_stall_cooled_the_profile(tmp_path):
+    """SCN-AVL-42 at the factory: `can_replace` accepted the second profile, but its hello fails, so the fallback finds
+    nothing and the unit parks with the end of the stalled profile's cool-down, no wait."""
+    from l4.agents.base import ProbeResult
+
+    failing = {"sonnet": {**healthy("sonnet")["sonnet"], "hello": ProbeResult("hello", False, {}, "no answer")}}
+    factory, _, clock, _ = build(tmp_path, {**healthy("gpt-6", version="0.160.0"), **failing})
+    first = factory.for_role("implementer", "u")
+    assert factory.can_replace(first, ()) is True
+    with pytest.raises(WaitingCapacity) as err:
+        factory.on_limit(first, stall_run(tmp_path, "time"))
+    assert err.value.retry_after == T0 + timedelta(minutes=30)
+    assert clock.now() == T0  # nothing waited
