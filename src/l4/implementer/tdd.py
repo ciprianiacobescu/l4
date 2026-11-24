@@ -19,7 +19,7 @@ import shlex
 import shutil
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from l4 import deadline
@@ -41,7 +41,15 @@ from l4.config.schema import duration_seconds
 from l4.evidence.diffcov import CODE_SUFFIXES
 from l4.evidence.scope import file_kind
 from l4.exitcodes import ExitCode, L4Exit
-from l4.fsutil import LinkedPath, UnsafeFile, linked_component, read_inside, reject_symlinks
+from l4.fsutil import (
+    LinkedPath,
+    UnsafeFile,
+    linked_component,
+    read_inside,
+    reject_symlinks,
+    unlink_inside,
+    write_inside,
+)
 from l4.gates.coverage import cov_env, is_python_gate, project_python
 from l4.gates.e2e import E2E_TEST_DIR, ServerNotReady, e2e_configured, e2e_test_dir, run_e2e
 from l4.gates.hang import TIMEOUT_MARKER, HungTest, hung_tests
@@ -150,7 +158,14 @@ from l4.implementer.result import (
 )
 from l4.implementer.resultalias import RESULT_ALIAS_PATH
 from l4.implementer.retrynote import RetryNote, note_block, retry_note
-from l4.implementer.stubs import ProductionGuard, RedScope, enforce_red_scope, escaping_links, restore_to_base
+from l4.implementer.stubs import (
+    ProductionGuard,
+    RedScope,
+    enforce_red_scope,
+    escaping_links,
+    is_tool_noise,
+    restore_to_base,
+)
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
 from l4.implementer.test_locate import file_of_id, outside_tests, window
@@ -303,6 +318,7 @@ class RedOutcome:
     superseded: frozenset[str] = frozenset()  # stale tests (L4-OPS-015) this red step removed or broke on purpose
     held: HeldCheck | None = None  # status "held": a check L4 could not decide (L4-IMP-063)
     check: Literal["full", "targeted"] = "full"  # how this red step ran its tests (L4-IMP-120)
+    files: tuple[str, ...] = ()  # a targeted red's new test files, as `task.red_ok` records them (L4-IMP-121)
 
 
 @dataclass(frozen=True)
@@ -2170,7 +2186,7 @@ def run_red(wb: Workbench, task: Task, *, attempt: int, previous_failure: str | 
     wb.push()
     return RedOutcome(
         "ok", sha=sha, new_ids=new_tests, manifest=manifest, base_report=base_report, criteria=proofs,
-        superseded=replaced, check=ran.check,
+        superseded=replaced, check=ran.check, files=ran.files,
     )  # fmt: skip
 
 
@@ -2198,6 +2214,90 @@ def _named_proofs_of(red_ok: Mapping[str, Any], new_ids: Collection[str]) -> set
     return found - set(new_ids)
 
 
+def _resume_base(
+    wb: Workbench, sha: str, parent: str, data: Mapping[str, Any], targeted: bool
+) -> tuple[GateResult, str]:
+    """The gate run that measures a resumed red's base, and why a targeted red's files were not left out of it ("" when
+    they were, or when the red was not targeted). A targeted red only adds test files, so the work tree without them
+    is the red commit's parent: that run is the base a whole red measured (L4-IMP-119, L4-IMP-121). Fail safe: a record
+    the commit does not match, or files that cannot be put back byte for byte, give today's rebuild (a whole run at the
+    red commit) and a reason for `task.red_check_disabled`."""
+    with wb.at_clean_head():
+        run_setup(wb)
+        why = ""
+        if targeted:
+            saved = _red_files_present(wb, sha, parent, data.get("files"))
+            if saved is None:
+                why = "resume_files"
+            else:
+                gate, exact = _run_without(wb, sha, saved)
+                if exact:
+                    return gate, ""
+                why = "resume_put_back"
+        return wb.run_gate("baseline", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports), why
+
+
+def _red_files_present(wb: Workbench, sha: str, parent: str, listed: Any) -> dict[str, tuple[bytes, int]] | None:
+    """`path -> (content, mode)` of the files `listed` in a `task.red_ok` when the red commit added exactly those test
+    files: each is a regular file of the work tree with the commit's own bytes, did not exist at the commit's parent,
+    and no other path of the commit is anything but the unit's own folder or a tool cache. None otherwise."""
+    if not isinstance(listed, list) or not listed or len(listed) > red_check.MAX_FILES:
+        return None
+    if not all(isinstance(f, str) and f and f == PurePosixPath(f).as_posix() for f in listed):
+        return None
+    if len(set(listed)) != len(listed) or any(f.startswith("/") or ".." in f.split("/") for f in listed):
+        return None
+    folders = (  # the unit's own folder and the one that holds the run's ledger (a fix unit's parent): harness files
+        wb.ref.path.resolve().relative_to(wb.worktree.resolve()).as_posix(),
+        Path(wb.ledger_rel).parents[2].as_posix(),
+    )
+    raw = wb.git.run_bytes("diff", "--name-only", "-z", "--no-renames", parent, sha, "--")
+    changed = [p.decode("utf-8", "surrogateescape") for p in raw.split(b"\0") if p]
+    if any(
+        p not in listed and not p.startswith(tuple(f"{f}/" for f in folders)) and not is_tool_noise(p) for p in changed
+    ):
+        return None
+    saved: dict[str, tuple[bytes, int]] = {}
+    for path in listed:
+        if wb.git.run("cat-file", "-e", f"{parent}:{path}", check=False).returncode == 0:
+            return None  # the parent had it: the red commit changed a file, it did not add one
+        blob = wb.git.run_bytes("cat-file", "blob", f"{sha}:{path}", check=False)
+        try:
+            held = read_inside(wb.worktree, path, limit=MAX_SNAPSHOT_BYTES)
+        except (UnsafeFile, OSError):
+            return None
+        if held is None or held[0] != blob or not blob:
+            return None
+        saved[path] = held
+    return saved
+
+
+def _write_file(root: Path, rel: str, data: bytes, mode: int) -> None:
+    write_inside(root, rel, data, mode=mode)
+
+
+def _run_without(wb: Workbench, sha: str, saved: Mapping[str, tuple[bytes, int]]) -> tuple[GateResult, bool]:
+    """Run the baseline gate with `saved`'s files absent, then put each back with its bytes and mode. The second value
+    is False when a file is not back exactly; git then restores them from the red commit, so that the caller's own
+    run is on the red commit's tree."""
+    try:
+        for path in saved:
+            unlink_inside(wb.worktree, path)
+        gate = wb.run_gate("baseline", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    finally:
+        exact = True
+        for path, (data, mode) in saved.items():
+            try:
+                _write_file(wb.worktree, path, data, mode)
+                held = read_inside(wb.worktree, path, limit=MAX_SNAPSHOT_BYTES)
+                exact = exact and held is not None and held[0] == data and held[1] & 0o7777 == mode & 0o7777
+            except (UnsafeFile, OSError):
+                exact = False
+        if not exact:
+            wb.git.run("checkout", sha, "--", *saved)
+    return gate, exact
+
+
 def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     """A run that died between the red commit and the green commit left the red checkpoint on the unit branch:
     redoing red there would fail ("no tests added"), so the task resumes at green. Needs the `task.red_ok` event of
@@ -2223,9 +2323,10 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     if event is None:
         return None
     new_ids = frozenset(fold_subtest_id(str(i)) for i in event.data.get("tests", []))  # an older run: L4-GAT-006
-    with wb.at_clean_head():
-        run_setup(wb)
-        gate = wb.run_gate("baseline", wb.cfg.gates.test.command, reports=wb.cfg.gates.test.reports)
+    targeted = event.data.get("check") == "targeted"  # L4-IMP-120: a missing key is `full`
+    gate, why = _resume_base(wb, sha, base, event.data, targeted)
+    if why and not red_check.unit_switched(ledger):  # L4-IMP-121: fail safe, once for the unit
+        wb.emit("task.red_check_disabled", task=task.key, attempt=0, why=why, tests=[], red_sha=sha)
     if gate.report is None or gate.report.collection_errors:
         raise BaselineFailed(f"the test gate cannot run at the red checkpoint: {gate.reason or 'collection errors'}")
     base = TestReport({i: c for i, c in gate.report.tests.items() if i not in new_ids})
@@ -2237,8 +2338,11 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     tdd = wb.cfg.tdd
     manifest = build_manifest(wb.git, sha, f"{sha}~1", test_globs=tdd.test_globs, support_globs=tdd.test_support_globs)
     wb.emit("task.red_resumed", task=task.key, sha=sha)
-    check = "targeted" if event.data.get("check") == "targeted" else "full"  # L4-IMP-120: a missing key is `full`
-    return RedOutcome("ok", sha=sha, new_ids=new_ids, manifest=manifest, base_report=base, check=check)
+    files = tuple(str(f) for f in event.data.get("files") or ()) if targeted else ()
+    return RedOutcome(
+        "ok", sha=sha, new_ids=new_ids, manifest=manifest, base_report=base, check="targeted" if targeted else "full",
+        files=files,
+    )  # fmt: skip
 
 
 def _red_exit(step: StepOutcome) -> RedOutcome:
@@ -2432,38 +2536,56 @@ MISSING_AFTER_TARGETED = (
     "other ids than the targeted command did, so no change of the code can make them pass: report status blocked and "
     "say so; a person fixes gates.test.targeted and runs l4 restart"
 )
+COLLECTION_AFTER_TARGETED = (
+    "; the red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make this "
+    "file collect, report status blocked with a question that names the test file"
+)
 MAX_DISABLED_TESTS = 20
 
 
 def _targeted_red_effect(
     wb: Workbench, task: Task, red: RedOutcome, attempt: int, why: GreenWhy, gate: GateResult
 ) -> str:
-    """What a failed green attempt says about a targeted red (L4-IMP-121, L4-IMP-122). A regressed test after green's
-    own re-run, in a unit whose ledger holds a targeted red, or a red test of a targeted red that the whole run does not
-    report at all, records `task.red_check_disabled` once for the unit: its later red steps run the whole suite. The
-    reason gets one suffix when this task's own red was targeted. Driven by the ledger, never by the configuration: a
-    unit whose key was set back to `full` still has its earlier targeted reds. The text of a reason is never read."""
+    """What a failed green attempt says about a targeted red (L4-IMP-121, L4-IMP-122). It records
+    `task.red_check_disabled` once for the unit, so that its later red steps run the whole suite, for: a regressed test
+    after green's own re-run, in a unit whose ledger holds a targeted red; and, when this task's own red was targeted,
+    a red test that the whole run does not report at all, a collection error that names a file of that red, and a whole
+    run with no readable report or a timeout (all three: a frozen red file may be the cause, and green cannot change
+    it). The reason gets one suffix when this task's own red was targeted, except for the last. Driven by the ledger,
+    never by the configuration: a unit whose key was set back to `full` still has its earlier targeted reds. The text of
+    a reason is never read."""
     report = gate.report
-    gone: list[str] = []
+    own = red.check == "targeted"
+    tests: list[str] = []
+    suffix = ""
     if why.regressed:
-        kind, ids = "regressed", list(why.regressed)
-    elif red.check == "targeted" and report is not None and why[0].startswith("red tests still failing"):
-        gone = [i for i in why[1] if i not in report.tests]
-        kind, ids = "ids_missing", gone
+        kind, tests, suffix = "regressed", list(why.regressed), REGRESSED_AFTER_TARGETED
+    elif not own:
+        return ""
+    elif report is None or gate.timed_out:
+        kind = "green_no_report"
+    elif report.collection_errors:
+        kind, tests, suffix = (
+            "green_collection",
+            red_check.collection_names(report.collection_errors, red.files),
+            COLLECTION_AFTER_TARGETED,
+        )
+        if not tests:
+            return ""
+    elif why[0].startswith("red tests still failing"):
+        kind, tests, suffix = "ids_missing", [i for i in why[1] if i not in report.tests], MISSING_AFTER_TARGETED
+        if not tests:
+            return ""
     else:
         return ""
-    if not ids:
-        return ""
     events = _ledger_events(wb)
-    if (kind == "ids_missing" or red_check.unit_targeted(events)) and not red_check.unit_switched(events):
+    if (kind != "regressed" or red_check.unit_targeted(events)) and not red_check.unit_switched(events):
         assert red.manifest is not None
         wb.emit(
-            "task.red_check_disabled", task=task.key, attempt=attempt, why=kind, tests=sorted(ids)[:MAX_DISABLED_TESTS],
-            red_sha=red.manifest.red_sha,
+            "task.red_check_disabled", task=task.key, attempt=attempt, why=kind,
+            tests=sorted(tests)[:MAX_DISABLED_TESTS], red_sha=red.manifest.red_sha,
         )  # fmt: skip
-    if red.check != "targeted":
-        return ""
-    return REGRESSED_AFTER_TARGETED if kind == "regressed" else MISSING_AFTER_TARGETED
+    return suffix if own else ""
 
 
 _FAILED_GATE = re.compile(r"^(lint|typecheck) gate `", re.MULTILINE)

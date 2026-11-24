@@ -2,6 +2,7 @@
 15..20): a red step of a `targeted` configuration runs only its new test files and falls back to the whole suite when
 the run cannot decide. The gates are the real ones on the fixture unit; FAKE wrappers change what a gate run reports."""
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from l4.implementer.tdd import resume_red, run_green, run_red
 
 from ..conftest import TEST_COMMAND
 from ._targeted import CODES, FILE, HEAD, NEW_TESTS, PRE, TARGETED, TASK, FakeGates, bench_of, ok_red, red, two_files
-from .conftest import KNOWN, UNKNOWN, green_step, red_step, result
+from .conftest import KNOWN, RUN_ID, UNKNOWN, green_step, red_step, result
 
 
 def finished(bench, *names: str) -> list[str]:
@@ -406,31 +407,158 @@ def test_scn_imp_637_the_zero_value_run_is_the_whole_command_judged_against_the_
     assert {info["proof"] for info in ok["criteria"].values()} == {"zero_value"}
 
 
-# --- SCN-IMP-648: a resumed targeted red hides an old test its files break --------------------------------------
+# --- SCN-IMP-648, 649: a resumed targeted red measures its base without its files ---------------------------------
 
 BREAKS = (
     HEAD
     + "import pytdd\n\npytdd.total = lambda prices: -1  # breaks `test_pricing` once the whole suite is collected\n\n\n"
     + CODES
 )
+BREAKING = "tests/test_aaa_targeted.py"
 
 
-def test_scn_imp_648_a_resumed_targeted_red_does_not_see_the_old_test_its_files_break(make_bench):
-    bench = bench_of(make_bench, [red(path="tests/test_aaa_targeted.py", tests=BREAKS), green_step()])
+def breaking_red(make_bench, *more: Step):
+    bench = bench_of(make_bench, [red(path=BREAKING, tests=BREAKS), *more])
     out = run_red(bench.wb, TASK, attempt=1)
     assert out.status == "ok", out.reason  # a whole run would have failed: red broke existing tests
+    return bench, out
+
+
+def edit_red_ok(bench, **changes) -> None:
+    """FAKE: rewrite the record of the one `task.red_ok` of the ledger (a record that the red commit does not match)."""
+    path = bench.wb.ref.path / ".l4" / "ledger" / f"{RUN_ID}.jsonl"
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    for line in lines:
+        if line["type"] == "task.red_ok":
+            line.update(changes)
+            for key in [k for k, v in changes.items() if v is None]:
+                del line[key]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+
+
+def test_scn_imp_648_a_resumed_targeted_red_measures_its_base_with_its_files_absent(make_bench):
+    bench, out = breaking_red(make_bench, green_step())
+    path = bench.wb.worktree / BREAKING
+    before, mode = path.read_bytes(), path.stat().st_mode
+    seen: list[bool] = []
+    FakeGates(bench, before={"baseline": lambda: seen.append(path.exists())})
+    resumed = resume_red(bench.wb, TASK)
+    assert seen == [False]  # the one whole run of the resume ran without the red's files
+    assert resumed is not None and resumed.check == "targeted" and resumed.files == (BREAKING,)
+    assert resumed.base_report.tests[PRE].status == "passed"  # the base the red commit's parent would measure
+    assert resumed.new_ids.isdisjoint(resumed.base_report.tests) and resumed.manifest is not None
+    assert path.read_bytes() == before and path.stat().st_mode == mode  # put back byte for byte
+    assert bench.wb.git.run("status", "--porcelain", "--", "tests", "src").stdout == ""
+    assert bench.events("task.red_check_disabled") == []
+    assert [e["name"] for e in bench.events("gate.finished")][-1] == "baseline"
+
+
+def test_scn_imp_648_green_after_a_resumed_targeted_red_sees_the_old_test_and_records_the_switch(make_bench):
+    bench, out = breaking_red(make_bench, green_step())
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None
+    done = run_green(bench.wb, TASK, resumed, attempt=1)
+    assert done.status == "failed" and done.reason.startswith(f"green broke existing tests: {PRE}")
+    assert "L4-IMP-122" in done.reason  # the own red of the task was targeted: the agent is told to ask
+    [event] = bench.events("task.red_check_disabled")
+    assert (event["why"], event["red_sha"]) == ("regressed", out.sha) and PRE in event["tests"]
+
+
+def test_scn_imp_648_a_resume_whose_red_ran_whole_measures_with_the_files_in_place(make_bench):
+    bench = make_bench([red()])  # no `red_check`: a red commit of 0.4.60
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "ok"
+    seen: list[bool] = []
+    FakeGates(bench, before={"baseline": lambda: seen.append((bench.wb.worktree / FILE).exists())})
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.check == "full" and resumed.files == ()
+    assert seen == [True] and bench.events("task.red_check_disabled") == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "step"),
+    [
+        ({"files": ["tests/test_not_there.py"]}, None),  # a file the red commit does not hold
+        ({"files": ["tests/test_pricing.py", BREAKING]}, None),  # a file the parent already had
+        ({"files": None}, None),  # a record with no list of files
+        ({"files": []}, None),
+        ({"files": [BREAKING, "../outside.py"]}, None),  # a path that leaves the work tree
+        ({"files": ["tests/test_a.py"]}, "two"),  # the red commit holds another file that the record does not name
+    ],
+)
+def test_scn_imp_649_a_record_that_the_red_commit_does_not_match_falls_back_and_records_the_switch(
+    make_bench, changes, step
+):
+    bench = bench_of(make_bench, [two_files() if step else red(path=BREAKING, tests=BREAKS)])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "ok", out.reason
+    edit_red_ok(bench, **changes)
     resumed = resume_red(bench.wb, TASK)
     assert resumed is not None and resumed.check == "targeted"
-    assert resumed.base_report.tests[PRE].status == "failed"  # measured at the red commit, files in place
-    done = run_green(bench.wb, TASK, resumed, attempt=1)
-    assert done.status == "ok", done.reason  # green's regressed set is empty
-    assert bench.events("task.red_check_disabled") == []
-    assert (
-        bench.wb.last_tested is not None and bench.wb.last_tested.report.tests[PRE].status == "failed"
-    )  # a whole run sees it
+    for path in ("tests/test_pricing.py", *(("tests/test_a.py", "tests/test_b.py") if step else (BREAKING,))):
+        assert (bench.wb.worktree / path).is_file(), path  # nothing was removed that stays removed
+    if not step:  # today's rebuild: the red's files are in the tree and the old test fails in the base
+        assert resumed.base_report.tests[PRE].status == "failed"
+    [event] = bench.events("task.red_check_disabled")
+    assert (event["why"], event["task"], event["attempt"], event["red_sha"]) == ("resume_files", "1.1", 0, out.sha)
+    assert event["tests"] == []
 
 
-def test_scn_imp_648_the_same_step_with_full_fails_red(make_bench):
-    bench = make_bench([red(path="tests/test_aaa_targeted.py", tests=BREAKS)], test={**TARGETED, "red_check": "full"})
-    out = run_red(bench.wb, TASK, attempt=1)
-    assert out.status == "failed" and out.reason.startswith("red broke existing tests: " + PRE)
+def test_scn_imp_649_a_put_back_that_is_not_exact_falls_back_and_records_the_switch(make_bench, monkeypatch):
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    before = path.read_bytes()
+
+    def broken(*args, **kwargs):  # FAKE: the put-back cannot write the file
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tdd, "_write_file", broken)
+    fake = FakeGates(bench)
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.check == "targeted"
+    assert [n for n, _ in fake.calls].count("baseline") == 2  # the run without the files, then today's rebuild
+    assert path.read_bytes() == before  # the files are back, from git, whatever happened to the first put-back
+    assert resumed.base_report.tests[PRE].status == "failed"  # today's rebuild, files in place
+    [event] = bench.events("task.red_check_disabled")
+    assert event["why"] == "resume_put_back" and event["red_sha"] == out.sha
+
+
+def test_scn_imp_649_the_switch_of_a_resume_is_recorded_once(make_bench):
+    bench, out = breaking_red(make_bench)
+    edit_red_ok(bench, files=["tests/test_not_there.py"])
+    assert resume_red(bench.wb, TASK) is not None and resume_red(bench.wb, TASK) is not None
+    assert len(bench.events("task.red_check_disabled")) == 1
+
+
+# --- SCN-IMP-630: the task's own text and a reopened task reach the choice from run_red --------------------------
+
+
+def test_scn_imp_630_a_task_that_names_an_existing_test_runs_the_whole_suite(make_bench, monkeypatch):
+    named = tdd.NamedTests("tasks.md", tests=(("tests/test_pricing.py", "test_total_adds_prices"),))
+    monkeypatch.setattr(tdd, "named_tests", lambda *a, **k: named)
+    bench = bench_of(make_bench, [red()])
+    fake = FakeGates(bench)
+    run_red(bench.wb, TASK, attempt=1)
+    assert fake.names[0] == "test" and "test-targeted" not in fake.names
+    [event] = bench.events("task.red_check_full")
+    assert event["why"] == "named_tests" and event["task"] == "1.1"
+
+
+def test_scn_imp_630_a_task_that_names_a_test_of_another_language_runs_the_whole_suite(make_bench, monkeypatch):
+    named = tdd.NamedTests("tasks.md", other=(("test/a.test.ts", "test/a.test.ts::x"),))
+    monkeypatch.setattr(tdd, "named_tests", lambda *a, **k: named)
+    bench = bench_of(make_bench, [red()])
+    fake = FakeGates(bench)
+    run_red(bench.wb, TASK, attempt=1)
+    assert fake.names[0] == "test" and bench.events("task.red_check_full")[0]["why"] == "named_tests"
+
+
+def test_scn_imp_630_a_reopened_task_with_stale_tests_runs_the_whole_suite(make_bench, monkeypatch):
+    stale = tdd.StaleTests({PRE: ("C-0",)}, ())
+    monkeypatch.setattr(tdd, "stale_for", lambda *a, **k: stale)
+    bench = bench_of(make_bench, [red()])
+    fake = FakeGates(bench)
+    run_red(bench.wb, TASK, attempt=1)
+    assert fake.names[0] == "test" and "test-targeted" not in fake.names
+    [event] = bench.events("task.red_check_full")
+    assert event["why"] == "stale_tests"

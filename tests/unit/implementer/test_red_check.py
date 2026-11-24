@@ -8,7 +8,15 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.gates.junit import TestCase, TestReport
-from l4.implementer.red_check import Full, Targeted, choose, targeted_command, unusable, with_targeted
+from l4.implementer.red_check import (
+    Full,
+    Targeted,
+    choose,
+    collection_names,
+    targeted_command,
+    unusable,
+    with_targeted,
+)
 from l4.implementer.stubs import RedScope
 from l4.verifier.support_base import is_support_source
 
@@ -224,6 +232,28 @@ def test_scn_imp_631_a_path_that_starts_with_a_dash_or_holds_a_control_character
         assert found.why == "odd_path", path
 
 
+def test_scn_imp_631_a_path_that_starts_with_an_at_sign_is_odd_since_pytest_reads_it_as_an_argument_file(tree: Path):
+    found = pick(tree, {"@list.test.ts": False})
+    assert isinstance(found, Full) and found.why == "odd_path" and "@list.test.ts" in found.detail
+    assert isinstance(pick(tree, {"test/@list.test.ts": False}), Targeted)  # only the first character matters
+
+
+def test_scn_imp_631_the_8000_byte_limit_counts_bytes_of_a_non_ascii_path_not_characters(tree: Path):
+    accents = "\u00e9" * 100
+
+    def path(c: str, filler: int) -> str:
+        return f"test/{c}{accents}{'x' * filler}.test.ts"  # 14 + 200 + filler bytes
+
+    exact = {path(c, 1386): False for c in "abcde"}  # 5 x 1,600 bytes: exactly 8,000 bytes, 7,500 characters
+    assert sum(len(p.encode()) for p in exact) == 8000 and sum(map(len, exact)) == 7500
+    assert isinstance(pick(tree, exact), Targeted)
+    over = {**exact, path("f", 0): False}  # 6 files: far below 8,000 characters, but over 8,000 bytes
+    assert sum(map(len, over)) < 8000 < sum(len(p.encode()) for p in over)
+    assert pick(tree, over).why == "too_many_files"
+    one_more = {path(c, 1387 if c == "a" else 1386): False for c in "abcde"}  # 8,001 bytes
+    assert pick(tree, one_more).why == "too_many_files"
+
+
 def test_scn_imp_632_a_python_test_module_with_no_stub_is_eligible_and_one_with_a_stub_is_not(tree: Path):
     assert pick(tree, {"tests/test_pricing.py": False}) == Targeted(("tests/test_pricing.py",))
     stub = RedScope(("src/pricing.py",), ("src/pricing.py:apply",), ())
@@ -254,3 +284,29 @@ def test_is_support_source_is_the_rule_of_is_support_file():
     assert is_support_source(CFG, "tests/test_a.py", "def test_x(:\n")
     assert not is_support_source(CFG, "tests/test_a.py", "def test_x():\n    pass\n")
     assert is_support_source(CFG, "test/data.ts", None) and not is_support_source(CFG, "test/a.test.ts", None)
+
+
+# --- collection_names (SCN-IMP-650): the files of the red a collection error names -----------------------------------
+
+RED_FILES = ("tests/test_new.py", "test/new.test.ts")
+
+
+@pytest.mark.parametrize(
+    ("entry", "named"),
+    [
+        ("tests/test_new.py", ["tests/test_new.py"]),  # pytest names the module by its path
+        ("tests.test_new", ["tests/test_new.py"]),  # a dotted module
+        ("test/new.test.ts", ["test/new.test.ts"]),
+        ("tests/test_old.py", []),  # a file that is not the red's
+        ("conftest.py", []),
+        ("", []),
+    ],
+)
+def test_scn_imp_650_a_collection_error_names_a_red_file_by_its_path_or_its_module(entry: str, named: list[str]):
+    assert collection_names([entry], RED_FILES) == named
+
+
+def test_scn_imp_650_the_named_files_are_sorted_once_and_only_the_reds():
+    errors = ["test/new.test.ts", "tests/test_old.py", "tests/test_new.py", "tests.test_new"]
+    assert collection_names(errors, RED_FILES) == ["test/new.test.ts", "tests/test_new.py"]
+    assert collection_names([], RED_FILES) == [] and collection_names(errors, ()) == []

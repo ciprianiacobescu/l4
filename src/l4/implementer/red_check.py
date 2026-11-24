@@ -83,7 +83,8 @@ def _file_of(cfg: L4Config, worktree: Path, path: str) -> bool:
 
 
 def _odd(path: str) -> bool:
-    return path.startswith("-") or any(ord(c) < 32 or ord(c) == 127 for c in path)
+    """An option (`-`), an argument file (`@`: pytest reads `@file`) or a control character in a path (L4-IMP-117)."""
+    return path.startswith(("-", "@")) or any(ord(c) < 32 or ord(c) == 127 for c in path)
 
 
 def choose(
@@ -153,6 +154,12 @@ def unusable(
     if passing := [i for i, case in targeted.tests.items() if case.status not in ("failed", "error")]:
         return "new_test_not_failing", detail_of(passing)
     return None
+
+
+def collection_names(errors: Iterable[str], files: Collection[str]) -> list[str]:
+    """The files of `files` (a targeted red's) that a collection error of a whole run names, sorted (L4-IMP-121). A
+    collection error is named by its module's path or dotted module, as a test id's file is (`file_of_id`)."""
+    return sorted({owner for e in errors if (owner := file_of_id(e, files)) is not None})
 
 
 def unit_switched(events: Iterable[Any]) -> bool:
