@@ -90,7 +90,9 @@ The first rule that fails gives `why`:
 4. `base_collection_errors`: the base report has a collection error (redundant, see Context).
 5. `stubs`: `scope.stub_files` or `scope.stubs` is not empty.
 6. `restored`: `scope.restored` is not empty (red scope put something back: the step is not "only test files").
-7. `existing_file_changed`: a changed path, less `wb.ledger_rel`, existed at the base (a modified or deleted file).
+7. `existing_file_changed`: a changed path existed at the base (a modified or deleted file). The paths left out of the
+   count are `wb.ledger_rel` and what `ProductionGuard._production` ignores (`__pycache__`, `.pytest_cache`,
+   `.mypy_cache` and `.ruff_cache` entries and `.pyc` files).
 8. `not_a_test_module`: a changed path is not a test module (below).
 9. `no_test_file`: no changed path is left.
 10. `too_many_files`: more than 50 paths, or paths longer than 8,000 bytes together.
@@ -192,7 +194,7 @@ prefixes ids with a project name only when a project filter is on) gives ids tha
 green fails with `red tests still failing: <ids>` on every attempt, and the frozen tests cannot change. D4 rule 4
 catches an id that does not map to a listed file, which is the common form. For the rest, D7 detects it at green's
 first attempt, records it, and the reason of D7 tells the person. There is no redo-red path (non-goal), so the way out
-is `l4 restart`.
+is a person's answer to a question that names the test file, or `l4 restart`.
 
 ### D6. Ledger and log (L4-IMP-120)
 
@@ -235,8 +237,10 @@ is much more often green's own code, and then the switch costs only the saving.
 
 The reason. When the red of the task was targeted and the attempt fails with a regressed set or an id missing, the
 reason gets one suffix after the existing ones (`; failed again on a re-run (L4-IMP-105): ...`): `; the red step of
-this task ran only its new test files (L4-IMP-122): if no code can make these tests pass, a person decides: fix the new
-test files, or l4 restart`. The text is only a reason: the structured `regressed` marker of L4-IMP-105 is not parsed
+this task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass, report status
+blocked with a question that names the test file`. A person's answer to such a question unfreezes the named file for
+green (L4-IMP-015), which is the way out for the task; `l4 restart` is the way out of a unit whose agent never asks.
+The text is only a reason: the structured `regressed` marker of L4-IMP-105 is not parsed
 from it. The attempt fails as today, so the loss is bounded by `implementer.max_task_attempts` and the unit's
 escalation, and it is never silent: the reason, the escalation text and the event name the cause.
 
@@ -272,8 +276,8 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 ## Risks / Trade-offs
 
 - A new test file that breaks an old test by interaction is found at green, not at red, and green cannot repair a
-  frozen file. The task burns its attempts with a reason that says why, and a person restarts the unit or fixes the
-  files. This is the price of the saving and the reason the key is off by default.
+  frozen file. The task burns its attempts with a reason that tells the agent to ask a question that names the file, and
+  a person answers it or restarts the unit. This is the price of the saving and the reason the key is off by default.
 - A targeted command whose ids differ from the whole suite's fails every green of the unit; D4 rule 4 and D7 limit it
   to the first task. The runbook says to run both commands once and compare ids before the key is set.
 - A repository whose targeted command never completes pays a short extra run per red step.

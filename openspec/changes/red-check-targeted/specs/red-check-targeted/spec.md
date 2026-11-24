@@ -140,18 +140,19 @@ hold, tested in this order, and SHALL otherwise run the whole suite exactly as w
 L4-IMP-121); the task names no existing test that red may change (`named_tests`) and is no reopened task with stale
 tests (`stale_tests`); the base report has no collection error (`base_collection_errors`: `baseline` refuses one, so
 this never fires today); the step added no stub (`stubs`: `RedScope.stub_files` and `stubs` are empty); red scope put
-nothing back (`restored`: `RedScope.restored` is empty); every path the step changed, less the run's ledger, did not
-exist at the base (`existing_file_changed`); each of them is a test module (`not_a_test_module`: it matches
-`tdd.test_globs` and no glob of `tdd.test_support_globs` or `tdd.runner_config_files`, and the verifier's support
-rule, `is_support_file`, applied to the file in the work tree, does not call it a support file); at least one is left
-(`no_test_file`); there are at most 50 of them and 8,000 bytes of paths (`too_many_files`); and none starts with `-`
-or holds a control character (`odd_path`). The choice SHALL be made for each step from these rules only: no model
-output and no clock. With `full`, the rules SHALL not run and nothing SHALL be recorded. A Python repository SHALL get
-the same rules and no others: a step that adds a stub is not eligible, and since L4-IMP-002 keeps additive stubs in
-production `.py` files, most Python red steps run the whole suite. [V, in one TypeScript consumer plan of seven units
-66 red-step runs of the whole suite took about 4.9 minutes each, about 320 minutes in all, and 8 red steps failed with
-`red broke existing tests` on end-to-end stack or journey tests, probably flakes (inferred); 27 of 45 clean-tree
-baseline runs of the same plan had failing tests]
+nothing back (`restored`: `RedScope.restored` is empty); every path the step changed, less the run's ledger and the
+tool-cache and bytecode entries that the production guard ignores, did not exist at the base
+(`existing_file_changed`); each of them is a test module (`not_a_test_module`: it matches `tdd.test_globs` and no glob
+of `tdd.test_support_globs` or `tdd.runner_config_files`, and the verifier's support rule, `is_support_file`, applied
+to the file in the work tree, does not call it a support file); at least one is left (`no_test_file`); there are at
+most 50 of them and 8,000 bytes of paths (`too_many_files`); and none starts with `-` or holds a control character
+(`odd_path`). The choice SHALL be made for each step from these rules only: no model output and no clock. With `full`,
+the rules SHALL not run and nothing SHALL be recorded. A Python repository SHALL get the same rules and no others: a
+step that adds a stub is not eligible, and since L4-IMP-002 keeps additive stubs in production `.py` files, most
+Python red steps run the whole suite. [V, in one TypeScript consumer plan of seven units 66 red-step runs of the whole
+suite took about 4.9 minutes each, about 320 minutes in all, and 8 red steps failed with `red broke existing tests` on
+end-to-end stack or journey tests, probably flakes (inferred); 27 of 45 clean-tree baseline runs of the same plan had
+failing tests]
 
 #### Scenario: SCN-IMP-626 (+) A red step that adds only test modules runs only those
 - **Given** `red_check: targeted` and a red step that adds `test/pricing.test.ts` and `test/cart.test.ts`, whose tests
@@ -321,10 +322,10 @@ consumer shows one yet]
 ### Requirement: L4-IMP-122 Green says that a targeted red may be the cause.
 An attempt of a task whose red was targeted that fails with a regressed set, or with a red test missing from the
 report, SHALL end its reason with `; the red step of this task ran only its new test files (L4-IMP-122): if no change
-of the code can make these tests pass, a person decides: fix the new test files, or l4 restart`, after any suffix of
-L4-IMP-105. The attempt fails as it does today, so the loss is bounded by `implementer.max_task_attempts` and the
-unit's escalation, and the cause is named in the reason, the escalation and `task.red_check_disabled`. A task whose
-red was not targeted gets no suffix. The structured marker of L4-IMP-105 SHALL NOT be read from the text.
+of the code can make these tests pass, report status blocked with a question that names the test file`, after any
+suffix of L4-IMP-105. The attempt fails as it does today, so the loss is bounded by `implementer.max_task_attempts`
+and the unit's escalation, and the cause is named in the reason, the escalation and `task.red_check_disabled`. A task
+whose red was not targeted gets no suffix. The structured marker of L4-IMP-105 SHALL NOT be read from the text.
 
 #### Scenario: SCN-IMP-640 (−) A regression in green after a targeted red records the switch and says why
 - **Given** a task whose red was targeted and a green whose whole run fails `tests.test_db::test_rows` (it passed in
