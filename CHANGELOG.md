@@ -6,6 +6,36 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Added
+- `gates.test.red_check` (`full`, the default, or `targeted`) lets a red step run only the test files it added. Red's job
+  is to add failing tests, and its test gate ran the whole suite anyway: in one TypeScript consumer plan of seven units
+  66 red steps ran the whole suite, about 4.9 minutes each and about 320 minutes in all, and 8 red steps failed with `red
+  broke existing tests` on end-to-end stack or journey tests that were probably flakes (that is inferred, not proven).
+  With `targeted` and a `gates.test.targeted` command that holds `{files}` as a word of its own, a red step that only
+  added new test modules (no stub, nothing put back by red scope, no named or stale test, no changed existing file, no
+  support file, at most 50 files) runs that command with its files, as the gate `test-targeted`, and judges the new
+  tests against the base report with their results added. The step runs the whole suite instead, in the same step and as
+  before, when the targeted run is not complete: no report, a collection error, an old test ran, a file owns no test or a
+  test no file, or a new test passes or is skipped. The ledger says which: `task.red_ok` has `check` and `files`, and
+  `task.red_check_full{why, detail}` says why a step of a `targeted` configuration ran the whole suite. A targeted
+  command that times out fails the attempt, with no whole run. A `targeted` configuration without a `{files}` word, with
+  `{grep}` or with `{files}` inside another word does not load (exit 2); `{grep}` is not supported. Green, the near-pass
+  carry, the next task's baseline and verification are unchanged: they still run the whole suite and read the measured
+  baseline. The key is off by default, because a targeted red moves where a new test file that breaks an old test by
+  interaction shows, from red to green. **Upgrade:** 0.4.60 does not load the key (`extra: forbid`): move the pin first,
+  then set the key, and remove it before you move the pin back. Run the targeted and the whole command once and compare
+  the test ids they print before you set it (L4-CFG-007, L4-GAT-007..009, L4-IMP-117..120).
+- After a targeted red, a green whose whole run still fails a test that passed in the base report (after its re-run),
+  or reports no result for a red test, records `task.red_check_disabled` once, and every later red step of the unit and
+  of its fix units runs the whole suite (`task.red_check_full{why: unit_switched}`). `l4 retry` and `l4 resume` keep the
+  switch, and `l4 restart`, which starts a new ledger, reads the key again. The failed attempt's reason ends with `; the
+  red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass,
+  report status blocked with a question that names the test file`. The red files are frozen in green, so a task whose
+  red files really broke an old test cannot be repaired by green: an answer that names the file unfreezes it (L4-IMP-015),
+  `l4 restart` starts over. This names the cause and ends the saving for the unit (L4-IMP-121, L4-IMP-122).
+
 ## 0.4.60 (2026-11-23)
 
 ### Added
