@@ -61,7 +61,7 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
 
 ## 4. The switch (L4-IMP-121, L4-IMP-122; D7)
 
-- [ ] 4.1 Write the tests first in a new `tests/unit/implementer/test_tdd_green_red_check.py`: SCN-IMP-640 (a regressed
+- [x] 4.1 Write the tests first in a new `tests/unit/implementer/test_tdd_green_red_check.py`: SCN-IMP-640 (a regressed
   base-passing test that fails on the run and on the re-run: `task.red_check_disabled{why: regressed}` and the
   suffix after L4-IMP-105's), SCN-IMP-641 (passes on the re-run: nothing), SCN-IMP-642 (a later red step and a fix-unit
   red run the whole suite with `why: unit_switched`; `l4 retry` and `l4 resume` keep it; a restarted unit's new ledger
@@ -69,18 +69,18 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   1.2 whose red ran whole, in a unit whose task 1.1 was targeted: the switch is recorded and the reason has no suffix),
   SCN-IMP-645 (once), SCN-IMP-647 (a unit whose `task.red_ok` events have no `check`: no record, no suffix), SCN-IMP-646 (verification's gate runs are the commands of 0.4.60: assert on the verifier's gate
   specs, not on a full round). Run the file and see the new tests fail.
-- [ ] 4.2 Then add the record and the suffix to `run_green` after the step's own re-run (D7), reading the unit's
+- [x] 4.2 Then add the record and the suffix to `run_green` after the step's own re-run (D7), reading the unit's
   ledger through `_ledger_events` (the unit-wide trigger for `regressed`, the task's own `red.check` for `ids_missing`
   and for the suffix). Run the file of 4.1, then `tests/unit/implementer/test_tdd_green.py`,
   `test_attempt_renewal.py` and `test_loop.py`, one at a time.
 
 ## 5. Docs and the check
 
-- [ ] 5.1 `docs/SPEC.md` holds the requirements, the scenarios, change-table row 144, the key in section 3.2 and the
+- [x] 5.1 `docs/SPEC.md` holds the requirements, the scenarios, change-table row 144, the key in section 3.2 and the
   records in section 12.1. Check them against the code and tell the orchestrator where they differ; do not edit
   `docs/SPEC.md`, `CHANGELOG.md`, `docs/runbook.md` or the skill. Run `uv run --frozen python scripts/check_spec.py
   docs/SPEC.md`.
-- [ ] 5.2 Add `tests/unit/docs/test_red_check_targeted_docs.py` in the style of `test_readiness_entry_and_actor_docs.py`:
+- [x] 5.2 Add `tests/unit/docs/test_red_check_targeted_docs.py` in the style of `test_readiness_entry_and_actor_docs.py`:
   the SPEC holds each ID once as a requirement and in a scenario, the runbook and the skill name `red_check`, and no
   file of the change names a version number of the release.
-- [ ] 5.3 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+- [x] 5.3 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
