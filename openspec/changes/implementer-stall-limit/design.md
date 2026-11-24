@@ -128,7 +128,7 @@ fix_unit=...)`, as `_silent_before` does, and is true when an event of this task
 - `agent.idle` with `as_limit` true, or with no `as_limit` and `silent` true (a 0.4.60 silent stop);
 - `agent.time_limit` with `as_limit` true.
 
-The count is one for the three kinds together. Reasons to share it: the point of the rule is that a task cannot go
+Decided: the budget stays one stall limit per task window, shared across the three kinds (it is not one per kind). Reasons: the point of the rule is that a task cannot go
 through every profile of the chain parking, whichever way each profile stalls, and the cost of a stall is one step on a
 profile, not the kind of stall. A stall that was not a limit (`as_limit` false) does not count toward it, so a task's
 second stall is a failed attempt and its third is too. The window is the one of L4-IMP-075: a checkpoint of the task
@@ -225,7 +225,8 @@ others are spent), a silent stop now ends in `WaitingCapacity` (the unit parks, 
 stalled profile's cool-down, and the task goes on after it with its remaining attempts), where 0.4.60 handed the step to
 a spent profile and the task halted on `max_task_attempts` (exit 13) with attempts left on the profile before it. This
 is the rule of L4-IMP-087 ("with no usable profile left the unit waits for capacity") applied to a profile that cannot
-take the step, and it is an open question for the delegate. When the adapter found its own limit on the run, the signal is the
+take the step. Decided: the change is accepted, so a silent stop whose only other profiles are spent parks (exit 12)
+instead of halting (exit 13). When the adapter found its own limit on the run, the signal is the
 adapter's and carries no veto: that path is the genuine limit's, as before. `seed_attempts` is in `loop.py`, which imports
 `tdd.py`; the closure is built where both are visible, which is why the plan is a field of the workbench. The veto is a
 callable on a frozen dataclass and must not reach a file: checked at 0.4.60, nothing calls `dataclasses.asdict` on a
@@ -240,7 +241,8 @@ of a profile that is slow, not dead), then `for_role` finds nothing and the unit
 that uses the same `(tool, model)` would skip it for that time. A failed attempt costs at most `escalate_after` tries and
 moves the task by L4-IMP-017 as before.
 
-A silent stop keeps its 0.4.60 behaviour and does not need `replaceable`: it did nothing, the profile is demonstrably not
+Decided: the replacement check does not apply to a silent stop. A silent stop keeps its 0.4.60 behaviour, apart from the
+spent veto above, and does not need `replaceable`: it did nothing, the profile is demonstrably not
 working, and the park when nothing else is usable is the rule of L4-IMP-087. Residual risk: a profile that is not cooling
 and that `can_replace` accepts can still fail its probe in `for_role`; then the unit parks, as it does for a silent stop.
 It is named in the risks.
@@ -267,7 +269,8 @@ It is named in the risks.
 
 ### D7. The cool-down (L4-AVL-014)
 
-A stall's signal has no reset time, so `cooldown_until` gives `availability.default_cooldown` (30m). That is the silent
+Decided: a `time` stall cools the profile; it does not only move the task. A stall's signal (of any of the three kinds,
+the `time` kind included) has no reset time, so `cooldown_until` gives `availability.default_cooldown` (30m). That is the silent
 stop's, it needs no key, and it fits the evidence: after one idle stop the same profile went silent again in 9 of 12
 tries within the next attempt, so a profile should be left alone for longer than one attempt (10 minutes of idle plus the
 work around it); `credits_cooldown` (24h) is for an account that has no credit left, not for a profile that stalled. A deployment that
