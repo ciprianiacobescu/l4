@@ -17,7 +17,11 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   holds no part of the command, checked with a marker word in it), SCN-CFG-11 (a bad `targeted` with `full` loads),
   SCN-CFG-12 (`-k 'slow or fast'` loads). Run it and see the new tests fail.
 - [ ] 1.2 Then add `red_check: Literal["full", "targeted"] = "full"` and a `model_validator(mode="after")` to
-  `UnitGate` in `src/l4/config/schema.py` (D1, `ValueFree`). Run the file, then `tests/unit/config/test_loader.py`.
+  `UnitGate` in `src/l4/config/schema.py` (D1, `ValueFree`). Run the file, then `tests/unit/config/test_loader.py`. The
+  reference configuration of `docs/SPEC.md` section 3.2 already shows `red_check`, so these fail until this step is done
+  and must pass after it: `tests/unit/config/test_schema.py::test_version_only_file_yields_full_defaults`,
+  `tests/unit/config/test_schema.py::test_reference_config_validates_with_placeholder_commit` and
+  `tests/unit/docs/test_delegate_docs.py::test_the_reference_configuration_has_the_delegate_section_and_profiles`.
 
 ## 2. The pure parts (L4-GAT-007, L4-GAT-008, L4-GAT-009, L4-IMP-117; D2-D5)
 
