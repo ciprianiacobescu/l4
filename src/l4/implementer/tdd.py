@@ -2362,6 +2362,7 @@ def run_green(
     reason, named = why
     if reason:
         reason += suffix  # `; failed again on a re-run (...)` or `; its re-run was not usable`, or nothing
+        reason += _targeted_red_effect(wb, task, red, attempt, why, gate)  # L4-IMP-121, L4-IMP-122
     hung = gate_hung(gate) if reason else []
     excerpt = excerpter(wb)(gate.report, named) if reason and named and gate.report is not None else ""
     if hung:
@@ -2420,6 +2421,49 @@ def run_green(
     wb.emit("task.green_committed", task=task.key, base=base, sha=sha)  # contract C22
     wb.push()
     return GreenOutcome("ok", sha=sha)
+
+
+REGRESSED_AFTER_TARGETED = (
+    "; the red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make these "
+    "tests pass, report status blocked with a question that names the test file"
+)
+MISSING_AFTER_TARGETED = (
+    "; the red step of this task ran only its new test files (L4-IMP-122): the whole suite reports these tests under "
+    "other ids than the targeted command did, so no change of the code can make them pass: report status blocked and "
+    "say so; a person fixes gates.test.targeted and runs l4 restart"
+)
+MAX_DISABLED_TESTS = 20
+
+
+def _targeted_red_effect(
+    wb: Workbench, task: Task, red: RedOutcome, attempt: int, why: GreenWhy, gate: GateResult
+) -> str:
+    """What a failed green attempt says about a targeted red (L4-IMP-121, L4-IMP-122). A regressed test after green's
+    own re-run, in a unit whose ledger holds a targeted red, or a red test of a targeted red that the whole run does not
+    report at all, records `task.red_check_disabled` once for the unit: its later red steps run the whole suite. The
+    reason gets one suffix when this task's own red was targeted. Driven by the ledger, never by the configuration: a
+    unit whose key was set back to `full` still has its earlier targeted reds. The text of a reason is never read."""
+    report = gate.report
+    gone: list[str] = []
+    if why.regressed:
+        kind, ids = "regressed", list(why.regressed)
+    elif red.check == "targeted" and report is not None and why[0].startswith("red tests still failing"):
+        gone = [i for i in why[1] if i not in report.tests]
+        kind, ids = "ids_missing", gone
+    else:
+        return ""
+    if not ids:
+        return ""
+    events = _ledger_events(wb)
+    if (kind == "ids_missing" or red_check.unit_targeted(events)) and not red_check.unit_switched(events):
+        assert red.manifest is not None
+        wb.emit(
+            "task.red_check_disabled", task=task.key, attempt=attempt, why=kind, tests=sorted(ids)[:MAX_DISABLED_TESTS],
+            red_sha=red.manifest.red_sha,
+        )  # fmt: skip
+    if red.check != "targeted":
+        return ""
+    return REGRESSED_AFTER_TARGETED if kind == "regressed" else MISSING_AFTER_TARGETED
 
 
 _FAILED_GATE = re.compile(r"^(lint|typecheck) gate `", re.MULTILINE)
