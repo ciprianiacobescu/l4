@@ -6,6 +6,7 @@ get their models when their consumer lands (see OPAQUE_SECTIONS). Not modelled y
 """
 
 import re
+import shlex
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -214,6 +215,39 @@ class UnitGate(_Strict):
     _reports_inside = field_validator("reports")(_relative_paths)
     format: Literal["junit", "playwright-json", "pytest-json", "tap"] = "junit"
     targeted: str = ""
+    red_check: Literal["full", "targeted"] = "full"  # how a red step runs its tests (L4-CFG-007)
+
+    @model_validator(mode="after")
+    def _targeted_command_holds_the_files(self) -> "UnitGate":
+        """L4-CFG-007: with `red_check: targeted`, `targeted` is one command with one `{files}` word. The messages are
+        fixed texts: the command is never part of one. With `full` the command is not read."""
+        if self.red_check != "targeted":
+            return self
+        fix = "set gates.test.targeted to the test command with the one word {files} where the test files go"
+        if not self.targeted.strip():
+            raise ValueFree(f"gates.test.red_check is targeted but gates.test.targeted is empty: {fix}")
+        try:
+            words = shlex.split(self.targeted)
+        except ValueError:
+            raise ValueFree(
+                f"gates.test.targeted does not split into words (an unbalanced quote), and gates.test.red_check is "
+                f"targeted: {fix}"
+            ) from None
+        if any("{grep}" in w for w in words):
+            raise ValueFree(
+                f"gates.test.targeted holds {{grep}}, which is not supported by gates.test.red_check targeted: {fix}"
+            )
+        if any("{files}" in w and w != "{files}" for w in words):
+            raise ValueFree(
+                "gates.test.targeted holds {files} inside a longer word, and gates.test.red_check is targeted: "
+                "{files} must be a word of its own, as it becomes several arguments"
+            )
+        if (found := words.count("{files}")) != 1:
+            raise ValueFree(
+                f"gates.test.targeted holds {{files}} {found} times, and gates.test.red_check is targeted needs it "
+                f"exactly once: {fix}"
+            )
+        return self
 
 
 class ServeCfg(_Strict):

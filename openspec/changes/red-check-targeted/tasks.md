@@ -12,11 +12,11 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
 
 ## 1. The key and its load rule (L4-CFG-007; D1)
 
-- [ ] 1.1 Write the tests first in a new `tests/unit/config/test_gates_red_check.py`: SCN-CFG-08 (loads, and the
+- [x] 1.1 Write the tests first in a new `tests/unit/config/test_gates_red_check.py`: SCN-CFG-08 (loads, and the
   default is `full`), SCN-CFG-09 (exit 2 with the two key names), SCN-CFG-10 (one configuration per command; the message
   holds no part of the command, checked with a marker word in it), SCN-CFG-11 (a bad `targeted` with `full` loads),
   SCN-CFG-12 (`-k 'slow or fast'` loads). Run it and see the new tests fail.
-- [ ] 1.2 Then add `red_check: Literal["full", "targeted"] = "full"` and a `model_validator(mode="after")` to
+- [x] 1.2 Then add `red_check: Literal["full", "targeted"] = "full"` and a `model_validator(mode="after")` to
   `UnitGate` in `src/l4/config/schema.py` (D1, `ValueFree`). Run the file, then `tests/unit/config/test_loader.py`. The
   reference configuration of `docs/SPEC.md` section 3.2 already shows `red_check`, so these fail until this step is done
   and must pass after it: `tests/unit/config/test_schema.py::test_version_only_file_yields_full_defaults`,
