@@ -2309,7 +2309,7 @@ def _run_without(wb: Workbench, sha: str, saved: Mapping[str, tuple[bytes, int]]
             except (UnsafeFile, OSError):
                 exact = False
         if not exact:
-            wb.git.run("checkout", sha, "--", *saved)
+            wb.git.run("checkout", sha, "--", *(f":(literal){path}" for path in saved))
     return gate, exact
 
 

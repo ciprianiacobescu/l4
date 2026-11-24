@@ -307,6 +307,7 @@ def test_scn_imp_650_a_collection_error_names_a_red_file_by_its_path_or_its_modu
 
 
 def test_scn_imp_650_the_named_files_are_sorted_once_and_only_the_reds():
-    errors = ["test/new.test.ts", "tests/test_old.py", "tests/test_new.py", "tests.test_new"]
+    errors = ["tests/test_new.py", "tests/test_old.py", "test/new.test.ts", "tests.test_new"]  # not in sorted order
     assert collection_names(errors, RED_FILES) == ["test/new.test.ts", "tests/test_new.py"]
+    assert collection_names(errors[::-1], frozenset(RED_FILES)) == ["test/new.test.ts", "tests/test_new.py"]
     assert collection_names([], RED_FILES) == [] and collection_names(errors, ()) == []

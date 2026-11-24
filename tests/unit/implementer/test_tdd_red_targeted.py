@@ -527,8 +527,11 @@ def test_scn_imp_649_a_put_back_that_is_not_exact_falls_back_and_records_the_swi
 def test_scn_imp_649_the_switch_of_a_resume_is_recorded_once(make_bench):
     bench, out = breaking_red(make_bench)
     edit_red_ok(bench, files=["tests/test_not_there.py"])
-    assert resume_red(bench.wb, TASK) is not None and resume_red(bench.wb, TASK) is not None
+    assert resume_red(bench.wb, TASK) is not None
     assert len(bench.events("task.red_check_disabled")) == 1
+    edit_red_ok(bench, files=["tests/test_not_there.py"])  # the ledger restore undid the hand edit
+    assert resume_red(bench.wb, TASK) is not None  # the second resume falls back for the same reason
+    assert [e["why"] for e in bench.events("task.red_check_disabled")] == ["resume_files"]
 
 
 def test_scn_imp_649_the_files_are_back_when_the_whole_run_is_stopped(make_bench):
@@ -638,3 +641,150 @@ def test_scn_imp_630_a_reopened_task_with_stale_tests_runs_the_whole_suite(make_
     assert fake.names[0] == "test" and "test-targeted" not in fake.names
     [event] = bench.events("task.red_check_full")
     assert event["why"] == "stale_tests"
+
+
+# --- the put-back, the files a resume finds, and the paths git is given ----------------------------------------------
+
+
+def _commit_file(wb, rel: str, data: bytes, mode: int = 0o644) -> str:
+    """Add `rel` in a commit of its own on the unit's branch and give the commit."""
+    path = wb.worktree / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    path.chmod(mode)
+    wb.git.run("add", "--", rel)
+    wb.git.run("commit", "-q", "-m", f"add {rel}")
+    return wb.git.rev_parse("HEAD")
+
+
+def test_scn_imp_649_the_fallback_restore_names_its_files_literally(make_bench, monkeypatch):
+    """A red file whose name holds glob characters must not bring a neighbour back from the red commit."""
+    bench, out = breaking_red(make_bench)
+    wb = bench.wb
+    _commit_file(wb, "tests/test_a.py", b"x = 1\n")
+    sha = _commit_file(wb, "tests/test_[a].py", b"y = 2\n")
+    neighbour = wb.worktree / "tests" / "test_a.py"
+    neighbour.write_bytes(b"x = 'edited after the red commit'\n")
+
+    def broken(*args, **kwargs):  # FAKE: the put-back cannot write the file
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tdd, "_write_file", broken)
+    _gate, exact = tdd._run_without(wb, sha, {"tests/test_[a].py": (b"y = 2\n", 0o644)})
+    assert exact is False
+    assert (wb.worktree / "tests" / "test_[a].py").read_bytes() == b"y = 2\n"  # restored from the red commit
+    assert neighbour.read_bytes() == b"x = 'edited after the red commit'\n"  # the neighbour is not a match
+
+
+def test_scn_imp_649_a_file_that_is_present_but_modified_is_left_as_it_is(make_bench):
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    edited = path.read_bytes() + b"# a person's edit\n"
+    path.write_bytes(edited)  # work in progress: the resume sets it aside for its runs and puts it back
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.check == "targeted"
+    assert path.read_bytes() == edited  # only a missing file is brought back from the red commit
+    path.write_bytes(edited)
+    tdd._restore_missing(bench.wb, out.sha, [BREAKING])  # the file is there: not touched
+    assert path.read_bytes() == edited
+
+
+def _commit_mode(wb, mode: int) -> None:
+    """A person's commit after the red that makes the red's file `mode` (a mode change of the head)."""
+    path = wb.worktree / BREAKING
+    path.chmod(mode)
+    wb.git.run("add", "--", BREAKING)
+    wb.git.run("commit", "-q", "-m", "a person changes the mode of the red's file")
+
+
+def test_scn_imp_649_an_executable_red_file_comes_back_with_its_bytes_and_its_mode(make_bench):
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    _commit_mode(bench.wb, 0o755)
+    before = path.read_bytes()
+    seen: list[bool] = []
+    FakeGates(bench, before={"baseline": lambda: seen.append(path.exists())})
+    resumed = resume_red(bench.wb, TASK)
+    assert seen == [False] and resumed is not None  # measured without the file
+    assert resumed.base_report.tests[PRE].status == "passed"
+    assert path.read_bytes() == before and path.stat().st_mode & 0o7777 == 0o755
+    assert bench.events("task.red_check_disabled") == []
+
+
+@pytest.mark.parametrize(
+    "wrong",
+    [
+        lambda data, mode: (data + b"# stray\n", mode),  # the bytes differ
+        lambda data, mode: (data, mode ^ 0o111),  # the mode differs
+    ],
+    ids=["bytes", "mode"],
+)
+def test_scn_imp_649_a_put_back_with_other_bytes_or_another_mode_falls_back(make_bench, monkeypatch, wrong):
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    _commit_mode(bench.wb, 0o755)
+    before = path.read_bytes()
+    real = tdd._write_file
+    monkeypatch.setattr(tdd, "_write_file", lambda root, rel, data, mode: real(root, rel, *wrong(data, mode)))
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.check == "targeted"
+    [event] = bench.events("task.red_check_disabled")
+    assert event["why"] == "resume_put_back" and event["red_sha"] == out.sha
+    assert path.read_bytes() == before  # git put the red commit's bytes back
+    assert path.stat().st_mode & 0o7777 == 0o644  # and its mode: the red commit holds the file as 0644
+
+
+def _resume_with_files_changed(make_bench, change):
+    bench, out = breaking_red(make_bench)
+    change(bench.wb, bench.wb.worktree / BREAKING)
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.check == "targeted"
+    assert [e["why"] for e in bench.events("task.red_check_disabled")] == ["resume_files"]
+    return bench, resumed
+
+
+def test_scn_imp_649_a_red_file_that_is_a_symlink_falls_back(make_bench):
+    def link(wb, path):  # a person's commit after the red turns the file into a link
+        path.unlink()
+        path.symlink_to("test_pricing.py")
+        wb.git.run("add", "--", BREAKING)
+        wb.git.run("commit", "-q", "-m", "a person links the red's file")
+
+    bench, resumed = _resume_with_files_changed(make_bench, link)
+    assert (bench.wb.worktree / BREAKING).is_symlink()  # left as the person had it
+
+
+def test_scn_imp_649_a_red_file_that_cannot_be_read_falls_back(make_bench):
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root reads any file")
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    path.chmod(0o000)
+    try:
+        assert tdd._red_files_present(bench.wb, out.sha, bench.wb.git.rev_parse(f"{out.sha}~1"), [BREAKING]) is None
+    finally:
+        path.chmod(0o644)
+
+
+def test_scn_imp_649_a_red_file_that_a_person_edited_after_the_red_commit_falls_back(make_bench):
+    def edit(wb, path):
+        wb.git.run("config", "user.name", "x")
+        path.write_bytes(path.read_bytes() + b"# edited later\n")
+        wb.git.run("add", "--", BREAKING)
+        wb.git.run("commit", "-q", "-m", "a person edits the red's file")
+
+    bench, resumed = _resume_with_files_changed(make_bench, edit)
+    assert (bench.wb.worktree / BREAKING).read_bytes().endswith(b"# edited later\n")
+
+
+def test_scn_imp_649_a_red_file_that_is_empty_is_not_one_a_resume_leaves_out(make_bench):
+    """The code treats an empty blob like an unreadable one: no files-absent run, today's rebuild."""
+    bench, out = breaking_red(make_bench)
+    wb = bench.wb
+    parent = wb.git.rev_parse("HEAD")
+    sha = _commit_file(wb, "tests/test_empty.py", b"")
+    assert tdd._red_files_present(wb, sha, parent, ["tests/test_empty.py"]) is None
+    sha = _commit_file(wb, "tests/test_full.py", b"z = 3\n")
+    assert tdd._red_files_present(wb, sha, f"{sha}~1", ["tests/test_full.py"]) is not None
