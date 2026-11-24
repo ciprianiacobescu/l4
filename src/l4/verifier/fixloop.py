@@ -12,11 +12,12 @@ own `questions.md`, and no clarifier: a human answers. A fix unit is an OpenSpec
 
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+from l4.agents.base import STALL_KINDS
 from l4.agents.factory import Selected
 from l4.ci.unfixed import CiHistory, ci_history
 from l4.clarifier.actor import answer_actor
@@ -27,7 +28,7 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.held_patch import NearPass
-from l4.implementer.loop import Escalate, EscalationRequest, run_task
+from l4.implementer.loop import Escalate, EscalationRequest, run_task, stall_plan_for
 from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
 from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, clip_subject, make_workbench
@@ -314,7 +315,15 @@ def _section(ctx: HookContext, fix: UnitRef, ids: Sequence[str]) -> str | None:
     )
 
 
-def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: Selected | None = None) -> Workbench:
+def _child_workbench(
+    ctx: HookContext,
+    fix: UnitRef,
+    iteration: int,
+    selected: Selected | None = None,
+    retried: Container[str] = frozenset(),
+) -> Workbench:
+    """`retried`: the tasks of this fix unit that already moved after a limit. A stall of one of them is not a limit of
+    its profile (L4-IMP-115): the second limit parks the unit on a path that discards nothing."""
     s = ctx.services
     current = ctx.shared.get("implementer")  # the orchestrator's `_select`: the profile in use after any fallback
     if selected is None:
@@ -324,7 +333,7 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: S
     family = family_of(ctx)
     # the parent and every sibling fix unit are the harness's while this one runs; the running one is `unit_dir`
     others = tuple(u.path.resolve().relative_to(root).as_posix() for u in family.units() if u.name != fix.name)
-    return make_workbench(
+    wb = make_workbench(
         cfg=ctx.cfg, app=s.app, ref=fix, provider=family, worktree=s.worktree, git=s.git,
         ledger=s.ledger, sandbox=s.sandbox, selected=selected, iteration=iteration, push=ctx.push,
         event_context={"fix_unit": fix.name}, extra_unit_dirs=others, family_glob=f"{parent_rel}-fix-*",
@@ -333,10 +342,23 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: S
         ),
         ledger_rel=ledger_path(s.ref.path, s.app.run_id).resolve().relative_to(root).as_posix(),
     )  # fmt: skip
+    veto = ctx.shared.get("task_veto")
+    wb.stall_plan = stall_plan_for(
+        wb, s.factory, task_veto=veto if veto is not None else (lambda key: None),
+        movable=lambda key: key not in retried and "fall_back" in ctx.shared,
+    )  # fmt: skip
+    return wb
 
 
 def _fall_back(
-    ctx: HookContext, wb: Workbench, fix: UnitRef, exc: RoleLimit, task: str, iteration: int, on: str | None = None
+    ctx: HookContext,
+    wb: Workbench,
+    fix: UnitRef,
+    exc: RoleLimit,
+    task: str,
+    iteration: int,
+    on: str | None = None,
+    retried: Container[str] = frozenset(),
 ) -> Workbench:
     """Contract C21: a limit in a fix task goes through the orchestrator (`ctx.shared["fall_back"]`, its
     `switch_profile`), which cools the profile down and selects the next one of the chain, so the run's profiles,
@@ -349,16 +371,18 @@ def _fall_back(
     wb.discard_changes()
     previous = on or wb.selected.profile_name
     ctx.shared["fall_back"](exc.result, task)
-    fresh = _child_workbench(ctx, fix, iteration)
+    fresh = _child_workbench(ctx, fix, iteration, retried=retried)
     fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
     kind = limit.kind if limit is not None else exc.result.status
     fresh.previous_attempt = PreviousAttempt(
-        previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind == "silent" else None
+        previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind in STALL_KINDS else None
     )
     return fresh
 
 
-def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str, str]) -> Escalate | None:
+def _escalation(
+    ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str, str], retried: Container[str] = frozenset()
+) -> Escalate | None:
     """The hook of `run_task` for a fix unit's task (fix-unit-escalate D2): the orchestrator's selection step
     (`ctx.shared["escalate"]`) picks the next usable profile, and the task's child workbench is rebuilt on it, with the
     baselines carried over and the earlier failures told to the new profile. `moved` records the profile each task
@@ -372,7 +396,7 @@ def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str,
         chosen = choose(request)
         if isinstance(chosen, str):
             return chosen
-        fresh = _child_workbench(ctx, fix, iteration, selected=chosen)
+        fresh = _child_workbench(ctx, fix, iteration, selected=chosen, retried=retried)
         moved[request.task] = chosen.profile_name
         fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
         fresh.previous_attempt = PreviousAttempt(
@@ -396,11 +420,11 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
     marker = read_fix_marker(fix.path) if fix is not None else None
     if fix is None or marker is None or marker.parent != s.ref.id:
         return _halt(ctx, f"the fix unit {name} is not a fix unit of {s.ref.id}", fix_unit=name)
-    wb = _child_workbench(ctx, fix, state.iteration)
     retried: set[str] = set()  # tasks already moved to another profile after a limit
+    wb = _child_workbench(ctx, fix, state.iteration, retried=retried)
     carries: dict[str, NearPass] = {}  # task -> the near pass the limit cut short, for its next profile (L4-IMP-100)
     moved: dict[str, str] = {}  # task -> the profile it moved to (fix-unit-escalate D2)
-    escalate = _escalation(ctx, fix, state.iteration, moved)
+    escalate = _escalation(ctx, fix, state.iteration, moved, retried)
     while True:
         if _reenter(ctx, fix) and "answers_recorded" in ctx.shared:
             ctx.shared["answers_recorded"]()  # the mirror drops `l4:needs-answers` before the chore's agent runs
@@ -437,7 +461,7 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             retried.add(task.key)
             if exc.carry is not None:
                 carries[task.key] = exc.carry
-            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key))
+            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key), retried)
             continue
         finally:
             moved.pop(task.key, None)

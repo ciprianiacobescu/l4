@@ -151,3 +151,54 @@ def test_a_fix_tasks_limit_hands_the_carry_it_started_from_to_the_task_on_the_ne
     assert run.code == 0, run.triggers()
     fix_calls = [carry for _, carry in carries[-2:]]
     assert fix_calls == [None, marker]
+
+
+# --- implementer-stall-limit: a stall of a fix task (L4-IMP-115) ---
+
+
+def test_a_fix_tasks_first_idle_stall_moves_it_and_discards_its_work(run_l4, valid_spec, fake_clock):
+    """SCN-IMP-614."""
+    stalled = Step(idle_s=600, status="timeout", tool_calls=6, writes={"leftover.txt": "half"})
+    run = run_l4([red_step(), noqa_green(), stalled, chore_fix(), judge()], **TWO)
+    assert run.code == 0, run.triggers()
+    [record] = [e for e in run.events("agent.idle") if e.get("fix_unit") == FIX_UNIT]
+    assert (record["kind"], record["as_limit"]) == ("idle", True) and record["discarded_files"] == 1
+    [limit] = run.events("availability.limit")
+    assert limit.get("fix_unit") == FIX_UNIT and limit["kind"] == "idle"
+    [cooldown] = run.events("availability.cooldown")
+    assert (cooldown["profile"], cooldown["kind"]) == ("impl", "idle")
+    [fallback] = run.events("availability.fallback")
+    assert (fallback["from"], fallback["to"], fallback["reason"]) == ("impl", "impl-b", "idle")
+    assert not [e for e in run.events("task.attempt_failed") if e.get("fix_unit") == FIX_UNIT]
+    retried = run.adapter.requests[3].prompt
+    assert 'limit="idle"' in retried and "went idle: no output for 10m after 6 tool calls" in retried
+    assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
+
+
+def test_a_fix_tasks_first_time_limit_stall_moves_it(run_l4, valid_spec, fake_clock):
+    run = run_l4([red_step(), noqa_green(), Step(status="timeout"), chore_fix(), judge()], **TWO)
+    assert run.code == 0, run.triggers()
+    [record] = [e for e in run.events("agent.time_limit") if e.get("fix_unit") == FIX_UNIT]
+    assert record["as_limit"] is True
+    [fallback] = run.events("availability.fallback")
+    assert (fallback["from"], fallback["to"], fallback["reason"]) == ("impl", "impl-b", "time")
+    assert 'limit="time"' in run.adapter.requests[3].prompt
+
+
+@pytest.mark.parametrize("stall", [Step(status="timeout"), Step(idle_s=600, status="timeout", tool_calls=2)])
+def test_a_fix_task_that_already_moved_does_not_park_the_unit_on_a_stall(run_l4, valid_spec, fake_clock, stall):
+    """SCN-IMP-615: impl-c could take the step, but the fix loop moves a task once and parks the unit on a second limit
+    and that path discards nothing, so the stall is a failed attempt, cools nothing and the task goes on."""
+    run = run_l4(
+        [red_step(), noqa_green(), limited(), replace(stall, writes={"leftover.txt": "half"}), chore_fix(), judge()],
+        **THREE,
+    )
+    assert run.code == 0, run.triggers()
+    [record] = [e for e in run.events("agent.idle") + run.events("agent.time_limit") if e.get("fix_unit") == FIX_UNIT]
+    kind = record.get("kind", "time")
+    assert record["as_limit"] is False and record["reason"] == f"{kind}: no other profile can take the step"
+    assert [e["profile"] for e in run.events("availability.cooldown")] == ["impl"]  # the usage limit's alone
+    assert len(run.events("availability.fallback")) == 1
+    [failed] = [e for e in run.events("task.attempt_failed") if e.get("fix_unit") == FIX_UNIT]
+    assert failed["profile"] == "impl-b"
+    assert "leftover.txt" not in run.raw(run.tdd.origin, "ls-tree", "-r", "--name-only", BRANCH)
