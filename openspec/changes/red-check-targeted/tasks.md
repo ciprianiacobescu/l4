@@ -1,5 +1,5 @@
 Read `design.md` first; it names the code each decision touches (D1-D9). Requirements: L4-CFG-007, L4-GAT-007..009,
-L4-IMP-117..122 (`docs/SPEC.md`), scenarios SCN-CFG-08..12, SCN-GAT-12..20 and SCN-IMP-626..646. Run single test files
+L4-IMP-117..122 (`docs/SPEC.md`), scenarios SCN-CFG-08..12, SCN-GAT-12..20 and SCN-IMP-626..648. Run single test files
 only (`uv run --frozen pytest <file> -q -p no:cacheprovider`), never a whole directory, never two runs at once, and never
 a wait loop on `pgrep`.
 
@@ -49,7 +49,8 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   in the baseline and a whole-suite report that would fail it: no verdict about it), SCN-IMP-634 (each reason of
   `classify_red` and of the criteria checks gives the text a `full` step gives), SCN-IMP-635 (`RedOutcome.base_report` is
   the baseline), SCN-IMP-636 (`resume_red` reads `check` from `task.red_ok`, and a 0.4.60 event gives `full`), SCN-IMP-637
-  (the vacuity check, with a HEAD stub), SCN-IMP-638 and SCN-IMP-639. Also assert that `confirmed_by_base_run` is never
+  (the vacuity check, with a HEAD stub), SCN-IMP-638, SCN-IMP-639 and SCN-IMP-648 (a resumed targeted red: the base
+  holds the broken old test as failing, green's regressed set is empty, nothing is recorded). Also assert that `confirmed_by_base_run` is never
   called with the targeted run's `seconds`. Run the file and see the new tests fail.
 - [ ] 3.2 Then change `run_red` in `src/l4/implementer/tdd.py`: after `changed = wb.changed_files()` call `choose`
   (with `changed_paths` for the existence), run `test-targeted` instead of `test` when it says so, call `tampered`, and
@@ -64,11 +65,13 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   base-passing test that fails on the run and on the re-run: `task.red_check_disabled{why: regressed}` and the
   suffix after L4-IMP-105's), SCN-IMP-641 (passes on the re-run: nothing), SCN-IMP-642 (a later red step and a fix-unit
   red run the whole suite with `why: unit_switched`; `l4 retry` and `l4 resume` keep it; a restarted unit's new ledger
-  does not), SCN-IMP-643 (`ids_missing`), SCN-IMP-644 (no switch after a whole-suite red; a `task.red_ok` with no `check`),
-  SCN-IMP-645 (once), SCN-IMP-646 (verification's gate runs are the commands of 0.4.60: assert on the verifier's gate
+  does not), SCN-IMP-643 (`ids_missing`, with the suffix for a missing id and no suggestion of an unfreeze), SCN-IMP-644 (task
+  1.2 whose red ran whole, in a unit whose task 1.1 was targeted: the switch is recorded and the reason has no suffix),
+  SCN-IMP-645 (once), SCN-IMP-647 (a unit whose `task.red_ok` events have no `check`: no record, no suffix), SCN-IMP-646 (verification's gate runs are the commands of 0.4.60: assert on the verifier's gate
   specs, not on a full round). Run the file and see the new tests fail.
 - [ ] 4.2 Then add the record and the suffix to `run_green` after the step's own re-run (D7), reading the unit's
-  ledger through `_ledger_events`. Run the file of 4.1, then `tests/unit/implementer/test_tdd_green.py`,
+  ledger through `_ledger_events` (the unit-wide trigger for `regressed`, the task's own `red.check` for `ids_missing`
+  and for the suffix). Run the file of 4.1, then `tests/unit/implementer/test_tdd_green.py`,
   `test_attempt_renewal.py` and `test_loop.py`, one at a time.
 
 ## 5. Docs and the check

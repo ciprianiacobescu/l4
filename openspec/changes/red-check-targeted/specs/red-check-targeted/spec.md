@@ -232,14 +232,15 @@ targeted run as it stops any gate. The step's duration is the sum of its runs, a
 
 ### Requirement: L4-IMP-119 A targeted red changes what no later reader of the red step sees.
 `RedOutcome.base_report` SHALL stay the measured baseline, so green judges with it as before (`green_failures` against
-the baseline, the red ids from `new_ids`). A targeted red SHALL NOT change what these read: the near-pass carry; a
-resumed red, whose base report `resume_red` still measures with a new whole run at the red commit; the next task's
-baseline, which is green's report and never red's; and verification, which reads `task.red_ok` (`tests`, `frozen`,
-`criteria`, `notes`) and the red commit and runs its steps 1 and 3 on the whole suite. Inside red, a test that the
-targeted run did not run SHALL be judged by its base status: `red broke existing tests` and `no new test: existing
-tests were changed` cannot fire for it, and the checks that read passing old tests (`passing_now`,
+the baseline, the red ids from `new_ids`). A targeted red SHALL NOT change what these read: the near-pass carry; the
+next task's baseline, which is green's report and never red's; and verification, which reads `task.red_ok` (`tests`,
+`frozen`, `criteria`, `notes`) and the red commit and runs its steps 1 and 3 on the whole suite. Inside red, a test
+that the targeted run did not run SHALL be judged by its base status: `red broke existing tests` and `no new test:
+existing tests were changed` cannot fire for it, and the checks that read passing old tests (`passing_now`,
 `unchanged_on_base`, the proofs of earlier reds) read base statuses. The duration of the targeted run SHALL never
-bound a whole-suite run.
+bound a whole-suite run. A resumed red measures its base report with a whole run at the red commit (`resume_red`), so
+for a targeted red that base holds an old test that the red files break as failing, and the regressed set of green
+(L4-IMP-121) does not see it: this is a limit, and verification's whole-suite steps are its backstop.
 
 #### Scenario: SCN-IMP-635 (+) Green judges with the baseline after a targeted red
 - **Given** a task whose red was targeted
@@ -252,6 +253,14 @@ bound a whole-suite run.
 - **When** verification runs its steps 1 and 3
 - **Then** both run the whole suite with the same commands as for a unit of 0.4.60, and an old test that fails at head
   is a finding as it is today
+
+#### Scenario: SCN-IMP-648 (+) A resumed targeted red hides an old test its files break from green, and verification sees it
+- **Given** a run killed after a targeted red commit whose new test file breaks `tests.test_db::test_rows` only when
+  the whole suite runs, and a resumed red whose base report is measured at the red commit
+- **When** the next run resumes at green and green commits
+- **Then** the base report holds the test as failing, green's regressed set is empty, no `task.red_check_disabled` is
+  recorded, and verification's whole-suite steps report the test, which passed at the merge base, as a finding as they
+  do today
 
 ### Requirement: L4-IMP-120 The ledger names the red check that ran and why the whole suite ran.
 The gate of a targeted run is `gate.finished{name: "test-targeted"}`. `task.red_ok` of a step of a `targeted`
@@ -283,17 +292,19 @@ later job.
   the keys and events
 
 ### Requirement: L4-IMP-121 A regression after a targeted red switches the unit back to full red runs.
-When green's whole-suite run of a task whose red was targeted (`RedOutcome.check` is `targeted`) still holds, after
-green's own re-run (L4-IMP-105), a regressed test (a test that was not new and passed in the red step's base report:
-`GreenWhy.regressed`), or fails `red tests still failing` for a red test that is missing from the run's report, the
-step SHALL record `task.red_check_disabled{task, attempt, why, tests, red_sha}` once for the unit: `why` is
-`regressed` or `ids_missing`, and `tests` holds at most 20 ids. Every later red step of the unit and of its fix units
-SHALL then run the whole suite and record `task.red_check_full{why: unit_switched}`. The switch SHALL last as long as
-the unit's ledger: `l4 retry` and `l4 resume` keep it, and `l4 restart`, which starts a new ledger, reads the key
-again. The record SHALL be made also when green's own code broke the test: both causes call for the same safe action.
-Green and verification stay whole-suite in every case. [I, a new test file can break an old test by interaction (a
-shared database, a port, a module-level mock, a snapshot directory) that only a whole run shows; no ledger of a
-consumer shows one yet]
+When green's whole-suite run in a unit whose ledger holds a `task.red_ok` with `check: targeted` (of any task, fix
+units included) still holds, after green's own re-run (L4-IMP-105), a regressed test (a test that was not new and
+passed in the red step's base report: `GreenWhy.regressed`), or when green of a task whose own red was targeted
+(`RedOutcome.check` is `targeted`) fails `red tests still failing` for a red test that is missing from the run's
+report, the step SHALL record `task.red_check_disabled{task, attempt, why, tests, red_sha}` once for the unit: `why`
+is `regressed` or `ids_missing`, `tests` holds at most 20 ids, and `red_sha` is the task's red commit. Every later red
+step of the unit and of its fix units SHALL then run the whole suite and record `task.red_check_full{why:
+unit_switched}`. The switch SHALL last as long as the unit's ledger: `l4 retry` and `l4 resume` keep it, and `l4
+restart`, which starts a new ledger, reads the key again. The record SHALL be made also when green's own code broke
+the test: both causes call for the same safe action. The unit-wide trigger is on purpose: an interaction that depends
+on order or on a shared port can first show in a later task's green. Green and verification stay whole-suite in every
+case. [I, a new test file can break an old test by interaction (a shared database, a port, a module-level mock, a
+snapshot directory) that only a whole run shows; no ledger of a consumer shows one yet]
 
 #### Scenario: SCN-IMP-641 (+) A regression that passes on green's re-run records nothing
 - **Given** the green of SCN-IMP-640 whose re-run passes the test
@@ -307,25 +318,43 @@ consumer shows one yet]
 - **Then** each step before the restart runs the gate `test` with `task.red_check_full{why: unit_switched}`; after `l4
   restart` the new ledger has no record, so the key is read again
 
-#### Scenario: SCN-IMP-643 (−) A red test missing from green's report records the switch
+#### Scenario: SCN-IMP-643 (−) A red test missing from green's report records the switch and names the command
 - **Given** a task whose red was targeted, whose red id `test/a.test.ts::x` is not in green's whole report (the runner
   names it otherwise), and no failing base test
 - **When** green judges its gate
-- **Then** the attempt fails with `red tests still failing: test/a.test.ts::x` and the suffix of L4-IMP-122, and
-  `task.red_check_disabled{why: ids_missing}` is recorded
+- **Then** the attempt fails with `red tests still failing: test/a.test.ts::x` and the suffix of L4-IMP-122 for a
+  missing id (the targeted command names the tests differently; a person fixes `gates.test.targeted` and runs `l4
+  restart`), and `task.red_check_disabled{why: ids_missing}` is recorded
+
+#### Scenario: SCN-IMP-644 (+) A regression in a later task whose own red ran whole still records the switch
+- **Given** a unit whose task 1.1 has `task.red_ok{check: targeted}`, and a task 1.2 whose red ran the whole suite
+  (`task.red_ok{check: full}`) and whose green has the failure of SCN-IMP-640
+- **When** green of task 1.2 judges its gate
+- **Then** `task.red_check_disabled{task: 1.2, why: regressed}` is recorded and the reason has no suffix of
+  L4-IMP-122, since the red of task 1.2 was not targeted
 
 #### Scenario: SCN-IMP-645 (+) The switch is recorded once
 - **Given** a unit with `task.red_check_disabled` and a green that fails again after a regression
 - **When** green judges its gate
 - **Then** no second `task.red_check_disabled` is recorded
 
+#### Scenario: SCN-IMP-647 (−) A unit with no targeted red records no switch
+- **Given** a unit whose `task.red_ok` events have no `check` (a unit of 0.4.60) or `check: full`, in a `targeted`
+  configuration, and a green with the failure of SCN-IMP-640
+- **When** green judges its gate
+- **Then** no `task.red_check_disabled` is recorded and the reason has no suffix of L4-IMP-122
+
 ### Requirement: L4-IMP-122 Green says that a targeted red may be the cause.
-An attempt of a task whose red was targeted that fails with a regressed set, or with a red test missing from the
-report, SHALL end its reason with `; the red step of this task ran only its new test files (L4-IMP-122): if no change
-of the code can make these tests pass, report status blocked with a question that names the test file`, after any
-suffix of L4-IMP-105. The attempt fails as it does today, so the loss is bounded by `implementer.max_task_attempts`
-and the unit's escalation, and the cause is named in the reason, the escalation and `task.red_check_disabled`. A task
-whose red was not targeted gets no suffix. The structured marker of L4-IMP-105 SHALL NOT be read from the text.
+An attempt of a task whose own red was targeted that fails with a regressed set SHALL end its reason with `; the red
+step of this task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass, report
+status blocked with a question that names the test file`. One that fails with `red tests still failing` for a red test
+that is missing from the report SHALL end it with `; the red step of this task ran only its new test files
+(L4-IMP-122): the whole suite reports these tests under other ids than the targeted command did, so no change of the
+code can make them pass: report status blocked and say so; a person fixes gates.test.targeted and runs l4 restart`.
+The suffix follows any suffix of L4-IMP-105. The attempt fails as it does today, so the loss is bounded by
+`implementer.max_task_attempts` and the unit's escalation, and the cause is named in the reason, the escalation and
+`task.red_check_disabled`. A task whose own red was not targeted gets no suffix, whatever the unit's other tasks did.
+The structured marker of L4-IMP-105 SHALL NOT be read from the text.
 
 #### Scenario: SCN-IMP-640 (−) A regression in green after a targeted red records the switch and says why
 - **Given** a task whose red was targeted and a green whose whole run fails `tests.test_db::test_rows` (it passed in
@@ -333,10 +362,5 @@ whose red was not targeted gets no suffix. The structured marker of L4-IMP-105 S
 - **When** green judges its gate
 - **Then** `task.red_check_disabled{why: regressed, tests: [tests.test_db::test_rows]}` is recorded, and the attempt
   fails with the reason of 0.4.60, the suffix of L4-IMP-105 and `; the red step of this task ran only its new test
-  files (L4-IMP-122): ...`
-
-#### Scenario: SCN-IMP-644 (−) A regression after a whole-suite red records no switch
-- **Given** a task whose red ran the whole suite (not targeted, or a fallback) and a green with the failure of
-  SCN-IMP-640
-- **When** green judges its gate
-- **Then** no `task.red_check_disabled` is recorded and the reason has no suffix of L4-IMP-122
+  files (L4-IMP-122): if no change of the code can make these tests pass, report status blocked with a question that
+  names the test file`

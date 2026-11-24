@@ -3,7 +3,7 @@
 Read at 0.4.60 (663cd6d5). Every claim of the stream brief was re-checked; the three line numbers that differ are marked.
 
 - `src/l4/config/schema.py:216` `UnitGate.targeted: str = ""`; `docs/SPEC.md:800` documents it as `{files}` / `{grep}` for
-  "red/green runs". No code reads it (`grep -rn "\.targeted" src` is empty). `schema.py:168` `TddCfg`, 207-217 `UnitGate`.
+  "red/green runs". No code reads it (`grep -rn "\.targeted" src` is empty). `schema.py:168` `TddCfg`, 210-217 `UnitGate`.
   `L4Config` is `extra: forbid` (`_Strict`), and a custom validator raises `ValueFree` so that a message never holds a
   configured value (`schema.py:53`).
 - `src/l4/implementer/tdd.py:1634` `run_red`. Its order: `baseline` (1637), the agent step (1650), `enforce_red_scope`
@@ -31,7 +31,7 @@ Read at 0.4.60 (663cd6d5). Every claim of the stream brief was re-checked; the t
   (the log line, `red_new_failing`), `orchestrator.py:261` (idle detection, any name), `delegate/prompt.py:524` (the
   newest failing gate's excerpt, any name). `_count_gate_run` (`workbench.py:469`) counts only the names `baseline`
   and `test` (L4-IMP-099): the new name `test-targeted` is not counted, and an idle floor is only ever a maximum.
-- `implementer/test_locate.py:30` `file_of_id(test_id, paths, preferred)` maps a report id to one of the repository's
+- `implementer/test_locate.py:26` `file_of_id(test_id, paths, preferred)` maps a report id to one of the repository's
   paths (a path, a dotted path, a dotted Python module, a path's end), and gives None when it cannot or when several
   paths fit and `preferred` does not choose.
 - `verifier/support_base.py:110` `is_support_file(git, cfg, path, rev)`: a path of `tdd.test_support_globs`, a `.py`
@@ -188,13 +188,20 @@ After red:
 - **Verification** reads `task.red_ok` (`tests`, `frozen`, `criteria`, `notes`), the red commit, and runs steps 1 and 3
   on the whole suite.
 - **The next task's baseline** (`reused_baseline`) reuses green's report (`keep_tested`), never red's.
+- **A resumed red** (`resume_red`, 2142) rebuilds its base report from a new whole run at the red commit, with the new ids
+  taken out. For a targeted red that run holds the red files, so an old test that they break is in the rebuilt base as
+  failing: it is not in green's regressed set, and green commits with no record of it (a full red would have failed
+  before its commit). This is a limit. Verification's steps 1 and 3 run the whole suite and compare with the merge base,
+  so they report the test. Measuring the base at the red commit's parent instead would need a second checkout and a gate
+  run in `resume_red` for a case that needs a run killed between two commits; it is left out and asked of the delegate.
 
 Id stability. A targeted command that names the new tests differently from the whole suite (for example a runner that
 prefixes ids with a project name only when a project filter is on) gives ids that green's whole run does not hold, so
 green fails with `red tests still failing: <ids>` on every attempt, and the frozen tests cannot change. D4 rule 4
 catches an id that does not map to a listed file, which is the common form. For the rest, D7 detects it at green's
-first attempt, records it, and the reason of D7 tells the person. There is no redo-red path (non-goal), so the way out
-is a person's answer to a question that names the test file, or `l4 restart`.
+first attempt, records it, and its reason tells the agent and the person what is wrong. An unfreeze does not help here
+(the tests are right, the command names them differently). There is no redo-red path (non-goal), so the way out is to
+fix `gates.test.targeted` and `l4 restart`.
 
 ### D6. Ledger and log (L4-IMP-120)
 
@@ -217,12 +224,20 @@ A targeted red can miss one thing: a new test file that breaks an old test by in
 module-level mock, a snapshot directory). Green's whole run then shows an old, base-passing test failing. Green cannot
 fix it: the red files are frozen. So the harness must say what happened, loudly, and stop doing it.
 
-In `run_green`, after the step's own re-run (2292-2301), when `why.regressed` is not empty, or when `why[0]` starts
-with `red tests still failing` and at least one of its ids is missing from `gate.report.tests` (not failing: absent),
-and the red of this task has `check: targeted` (`red.check`): the step reads the unit's ledger (`_ledger_events`, the
-unit and its fix units share it). If it holds no `task.red_check_disabled`, the step records
+In `run_green`, after the step's own re-run (2292-2301), the step reads the unit's ledger (`_ledger_events`, the unit
+and its fix units share it) and decides:
 
-`task.red_check_disabled{task, attempt, why: "regressed" | "ids_missing", tests: [...], red_sha}` (at most 20 ids).
+- `regressed`: `why.regressed` is not empty, and the ledger holds a `task.red_ok` with `check: targeted` (any task of
+  the unit or of its fix units, whichever red ran targeted). The trigger is the unit and not the task on purpose: an
+  interaction that depends on order or on a shared port can first show in a later task's green, whose own red may have
+  run whole after a fallback;
+- `ids_missing`: `why[0]` starts with `red tests still failing`, at least one of its ids is missing from
+  `gate.report.tests` (absent, not failing), and the red of this task has `check: targeted` (`red.check`).
+
+If the ledger holds no `task.red_check_disabled` yet, the step records
+
+`task.red_check_disabled{task, attempt, why: "regressed" | "ids_missing", tests: [...], red_sha}` (at most 20 ids;
+`red_sha` is the task's red commit).
 
 Every later `choose` call sees it (D2 rule 1) and runs the whole suite with `task.red_check_full{why:
 "unit_switched"}`. It stays for the life of the unit and its fix units: `l4 retry` and `l4 resume` keep the ledger, so
@@ -235,14 +250,23 @@ puts in `regressed` (`base.ids_with("passed")`, minus the superseded ones). Whet
 code that broke it is not decided here: both give the same cheap, safe action (later reds run whole). A green regression
 is much more often green's own code, and then the switch costs only the saving.
 
-The reason. When the red of the task was targeted and the attempt fails with a regressed set or an id missing, the
-reason gets one suffix after the existing ones (`; failed again on a re-run (L4-IMP-105): ...`): `; the red step of
-this task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass, report status
-blocked with a question that names the test file`. A person's answer to such a question unfreezes the named file for
-green (L4-IMP-015), which is the way out for the task; `l4 restart` is the way out of a unit whose agent never asks.
-The text is only a reason: the structured `regressed` marker of L4-IMP-105 is not parsed
-from it. The attempt fails as today, so the loss is bounded by `implementer.max_task_attempts` and the unit's
-escalation, and it is never silent: the reason, the escalation text and the event name the cause.
+The reason. When the own red of the task was targeted and the attempt fails with a regressed set or a missing id, the
+reason gets one suffix after the existing ones (`; failed again on a re-run (L4-IMP-105): ...`), by `why`:
+
+- `regressed`: `; the red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make
+  these tests pass, report status blocked with a question that names the test file`. A person's answer to such a
+  question unfreezes the named file for green (L4-IMP-015), which is the way out for the task. If the agent never asks,
+  `l4 restart` is the way out.
+- `ids_missing`: `; the red step of this task ran only its new test files (L4-IMP-122): the whole suite reports these
+  tests under other ids than the targeted command did, so no change of the code can make them pass: report status
+  blocked and say so; a person fixes gates.test.targeted and runs l4 restart`. An unfreeze is no help here, so the text
+  does not suggest one.
+
+A task whose own red was not targeted gets no suffix, also when the unit's switch is recorded for it. The text is only a
+reason: the structured `regressed` marker of L4-IMP-105 is not parsed from it. The attempt fails as today, so the loss
+is bounded by `implementer.max_task_attempts` and the unit's escalation, and it is never silent: the reason, the
+escalation text and the event name the cause. Whether the suffix should be addressed to the agent at all is a question
+for the delegate (most green regressions are green's own code, and a delegate's answer can grant an unfreeze).
 
 Why green only, and not a chore: a fix, tests or refactor chore has no red step of its own in the task, and its
 regressions are its own. Why not a redo of red: a red commit is frozen state that verification and the criteria proofs
@@ -270,7 +294,8 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 - **L4-IMP-118**: the guards (`tampered`) run after each run; green and verification stay whole-suite, so a unit never
   passes on a targeted check alone.
 - **L4-IMP-121, L4-IMP-122**: what a targeted red misses ends at green with a recorded cause and a switch, not in
-  silence.
+  silence, except for one case: a run killed between a targeted red commit and its green resumes with a base that
+  already shows the broken old test as failing (D5). Verification's whole-suite steps are the backstop there.
 - Never a person-only action by an agent: nothing here activates, accepts or answers anything.
 
 ## Risks / Trade-offs
@@ -281,5 +306,6 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 - A targeted command whose ids differ from the whole suite's fails every green of the unit; D4 rule 4 and D7 limit it
   to the first task. The runbook says to run both commands once and compare ids before the key is set.
 - A repository whose targeted command never completes pays a short extra run per red step.
+- A resumed targeted red has no regression record for an old test its files broke (D5); verification reports it.
 - Old tests are judged at red by their base status, not their head status. That is the saving, and verification and
   green run them.
