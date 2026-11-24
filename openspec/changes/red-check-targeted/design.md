@@ -225,7 +225,7 @@ fix `gates.test.targeted` and `l4 restart`.
 
 ### D7. A regression after a targeted red (L4-IMP-121, L4-IMP-122)
 
-A targeted red can miss one thing: a new test file that breaks an old test by interaction (a shared database, a port, a
+A targeted red can miss a new test file that breaks an old test by interaction (a shared database, a port, a
 module-level mock, a snapshot directory). Green's whole run then shows an old, base-passing test failing. Green cannot
 fix it: the red files are frozen. So the harness must say what happened, loudly, and stop doing it.
 
@@ -304,8 +304,8 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 
 - **L4-CFG-007**: a bad `targeted` stops the load; it never runs a wrong command.
 - **L4-IMP-117**: a rule only ever sends a step to the whole suite, so a doubtful step is judged as today.
-- **L4-GAT-007**: no shell reads a path, a path that could be an option is refused, and the run is bounded by
-  `gates.timeout`.
+- **L4-GAT-007**: no shell reads a path, a path that could be an option (`-`) or an argument file (`@`) is refused, and
+  the run is bounded by `gates.timeout`.
 - **L4-GAT-009**: a targeted run that is anything but complete is replaced by the whole suite in the same step; a new
   test that does not fail never skips the pre-satisfied proofs.
 - **L4-GAT-008, L4-IMP-119**: the overlay keeps each old test's measured baseline status and adds only failing new
@@ -348,7 +348,8 @@ the red commit, and the files are back before `resume_red` returns. A red that w
   to the first task. The runbook says to run both commands once and compare ids before the key is set.
 - A repository whose targeted command never completes pays a short extra run per red step.
 - A resumed targeted red removes its files for one whole run (D10): a kill inside that run leaves them removed in the
-  work tree. The next resume sets that tree aside as work in progress (`at_clean_head`), and green's `restore_frozen`
-  puts the red files back from the red commit before its gate (inferred from the code, not run with a kill).
+  work tree, and `at_clean_head` would set that deletion aside and put it back after the run. `_restore_missing` puts
+  each listed file that the red commit holds and the work tree lacks back from the red commit before `resume_red`
+  returns (tested by deleting a red file and resuming), so green's freeze does not report the gap as tampering.
 - Old tests are judged at red by their base status, not their head status. That is the saving, and verification and
   green run them.

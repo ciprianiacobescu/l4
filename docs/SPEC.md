@@ -2969,8 +2969,10 @@ regressed set (L4-IMP-121). It SHALL do so only when each file is a regular file
 own bytes, did not exist at the red commit's parent, and no other path of the red commit is anything but the unit's own
 folder or a tool cache. When any of that fails, or a file is not back exactly (git then restores it from the red
 commit), `resume_red` SHALL fall back to a whole run at the red commit, as for a whole red, and SHALL record
-`task.red_check_disabled` with `why` `resume_files` or `resume_put_back` (L4-IMP-121). The tamper guards and the test
-freeze are unchanged: the freeze reads the red commit, and the files are back before green starts. A red that was not
+`task.red_check_disabled` with `why` `resume_files` or `resume_put_back` (L4-IMP-121). The tamper guards and the test freeze are unchanged: the freeze reads the red commit, and the files are back before
+green starts. A run killed inside the files-absent run leaves them removed; `resume_red` then puts each listed file
+that the red commit holds and the work tree lacks back from the red commit before it returns, so the freeze does
+not report it as tampering. A red that was not
 targeted is measured at the red commit as before.
 
 **L4-IMP-120 The ledger names the red check that ran and why the whole suite ran.** The gate of a targeted run is

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from l4.agents.fake import Step
+from l4.deadline import DeadlineReached
 from l4.gates.junit import TestCase
 from l4.implementer import red_check as red_check_module
 from l4.implementer import tdd
@@ -528,6 +529,81 @@ def test_scn_imp_649_the_switch_of_a_resume_is_recorded_once(make_bench):
     edit_red_ok(bench, files=["tests/test_not_there.py"])
     assert resume_red(bench.wb, TASK) is not None and resume_red(bench.wb, TASK) is not None
     assert len(bench.events("task.red_check_disabled")) == 1
+
+
+def test_scn_imp_649_the_files_are_back_when_the_whole_run_is_stopped(make_bench):
+    """A soft deadline stops the gate inside the files-absent run (a retry or a resume starts again from there)."""
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    before, mode = path.read_bytes(), path.stat().st_mode
+
+    def stop() -> None:
+        assert not path.exists()  # the run really was on the tree without the file
+        raise DeadlineReached("during", during="gate", gate="baseline")
+
+    FakeGates(bench, before={"baseline": stop})
+    with pytest.raises(DeadlineReached):
+        resume_red(bench.wb, TASK)
+    assert path.read_bytes() == before and path.stat().st_mode == mode
+
+
+def test_scn_imp_649_files_left_removed_by_a_killed_run_are_back_when_the_resume_returns(make_bench):
+    bench, out = breaking_red(make_bench)
+    path = bench.wb.worktree / BREAKING
+    before = path.read_bytes()
+    path.unlink()  # what a kill inside the files-absent run leaves in the work tree
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.base_report.tests[PRE].status == "passed"
+    assert path.read_bytes() == before  # not left to the freeze, which would call it tampering
+    assert bench.events("task.red_check_disabled") == [] and bench.events("guard.test_tamper") == []
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        [BREAKING, BREAKING],  # a duplicate
+        ["./" + BREAKING],  # not the path git lists
+        ["tests/../" + BREAKING],  # a path that climbs, and comes back
+        ["/" + BREAKING],  # an absolute path
+    ],
+)
+def test_scn_imp_649_a_record_with_a_path_that_is_not_a_plain_relative_one_falls_back(make_bench, listed):
+    bench, out = breaking_red(make_bench)
+    edit_red_ok(bench, files=listed)
+    resumed = resume_red(bench.wb, TASK)
+    assert resumed is not None and resumed.base_report.tests[PRE].status == "failed"  # the files stayed in place
+    assert [e["why"] for e in bench.events("task.red_check_disabled")] == ["resume_files"]
+
+
+def test_scn_imp_649_a_record_with_more_files_than_a_targeted_step_may_have_falls_back(make_bench, monkeypatch):
+    bench = bench_of(make_bench, [two_files()])
+    out = run_red(bench.wb, TASK, attempt=1)
+    assert out.status == "ok" and out.files == ("tests/test_a.py", "tests/test_b.py")
+    monkeypatch.setattr(red_check_module, "MAX_FILES", 1)
+    assert resume_red(bench.wb, TASK) is not None
+    assert [e["why"] for e in bench.events("task.red_check_disabled")] == ["resume_files"]
+
+
+def test_scn_imp_649_the_commit_may_hold_tool_caches_and_the_ledger_folder_of_a_fix_unit(make_bench):
+    """`_red_files_present` against a commit that holds the red's file, a tool cache and the run's ledger only."""
+    bench, out = breaking_red(make_bench)
+    git, wb = bench.wb.git, bench.wb
+    cache = wb.worktree / "tests" / "__pycache__" / "test_x.cpython-312.pyc"
+    cache.parent.mkdir(exist_ok=True)
+    cache.write_bytes(b"\0")
+    git.run("add", "-f", "--", "tests/__pycache__")
+    git.run("commit", "-q", "-m", "a tool cache")
+    parent = git.rev_parse(f"{out.sha}~1")
+    held = tdd._red_files_present(wb, git.rev_parse("HEAD"), parent, [BREAKING])
+    assert held is not None and list(held) == [BREAKING]  # the cache and the ledger are not the red's files
+    elsewhere = replace(wb.ref, path=wb.worktree / "elsewhere")  # a fix unit: the ledger is the parent's
+    wb.ref = elsewhere
+    assert tdd._red_files_present(wb, git.rev_parse("HEAD"), parent, [BREAKING]) is not None
+    git.run("commit", "-q", "--allow-empty", "-m", "nothing")
+    (wb.worktree / "tests" / "test_extra.py").write_text("x = 1\n")
+    git.run("add", "tests/test_extra.py")
+    git.run("commit", "-q", "-m", "a file that the record does not name")
+    assert tdd._red_files_present(wb, git.rev_parse("HEAD"), parent, [BREAKING]) is None
 
 
 # --- SCN-IMP-630: the task's own text and a reopened task reach the choice from run_red --------------------------

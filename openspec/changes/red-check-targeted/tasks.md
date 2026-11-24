@@ -49,8 +49,9 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   in the baseline and a whole-suite report that would fail it: no verdict about it), SCN-IMP-634 (each reason of
   `classify_red` and of the criteria checks gives the text a `full` step gives), SCN-IMP-635 (`RedOutcome.base_report` is
   the baseline), SCN-IMP-636 (`resume_red` reads `check` from `task.red_ok`, and a 0.4.60 event gives `full`), SCN-IMP-637
-  (the vacuity check, with a HEAD stub), SCN-IMP-638, SCN-IMP-639 and SCN-IMP-648 (a resumed targeted red: the base
-  holds the broken old test as failing, green's regressed set is empty, nothing is recorded). Also assert that `confirmed_by_base_run` is never
+  (the vacuity check, with a HEAD stub), SCN-IMP-638 and SCN-IMP-639 (the ledger). The first version of SCN-IMP-648
+  (a resumed targeted red whose base holds the broken old test as failing, so that green's regressed set is empty and
+  nothing is recorded) was reversed in 6.1: the base is measured without the red's files. Also assert that `confirmed_by_base_run` is never
   called with the targeted run's `seconds`. Run the file and see the new tests fail.
 - [x] 3.2 Then change `run_red` in `src/l4/implementer/tdd.py`: after `changed = wb.changed_files()` call `choose`
   (with `changed_paths` for the existence), run `test-targeted` instead of `test` when it says so, call `tampered`, and

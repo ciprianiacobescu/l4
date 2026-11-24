@@ -2272,6 +2272,21 @@ def _red_files_present(wb: Workbench, sha: str, parent: str, listed: Any) -> dic
     return saved
 
 
+def _restore_missing(wb: Workbench, sha: str, listed: Any) -> None:
+    """A run killed inside the files-absent run leaves the red's files removed, and `at_clean_head` sets that work in
+    progress aside and back. Put each listed file that the red commit holds and the work tree lacks back from the red
+    commit, so that green's freeze does not report them as tampering. Never touches a file that is present."""
+    if not isinstance(listed, list):
+        return
+    for path in listed:
+        if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+            continue
+        if (wb.worktree / path).exists() or (wb.worktree / path).is_symlink():
+            continue
+        if wb.git.run("cat-file", "-e", f"{sha}:{path}", check=False).returncode == 0:
+            wb.git.run("checkout", sha, "--", f":(literal){path}")
+
+
 def _write_file(root: Path, rel: str, data: bytes, mode: int) -> None:
     write_inside(root, rel, data, mode=mode)
 
@@ -2325,6 +2340,8 @@ def resume_red(wb: Workbench, task: Task) -> RedOutcome | None:
     new_ids = frozenset(fold_subtest_id(str(i)) for i in event.data.get("tests", []))  # an older run: L4-GAT-006
     targeted = event.data.get("check") == "targeted"  # L4-IMP-120: a missing key is `full`
     gate, why = _resume_base(wb, sha, base, event.data, targeted)
+    if targeted:
+        _restore_missing(wb, sha, event.data.get("files"))
     if why and not red_check.unit_switched(ledger):  # L4-IMP-121: fail safe, once for the unit
         wb.emit("task.red_check_disabled", task=task.key, attempt=0, why=why, tests=[], red_sha=sha)
     if gate.report is None or gate.report.collection_errors:

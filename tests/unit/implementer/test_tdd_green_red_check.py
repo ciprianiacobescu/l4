@@ -291,8 +291,13 @@ def no_report(out):
 
 
 def timed_out(out):
-    """FAKE: a whole run that hit `gates.timeout`."""
+    """FAKE: a whole run that hit `gates.timeout` and wrote no report."""
     return replace(out, report=None, status="fail", timed_out=True, reason="gate test timed out after 5s")
+
+
+def timed_out_with_report(out):
+    """FAKE: a whole run that hit `gates.timeout` after it wrote a complete report (the timeout alone decides)."""
+    return replace(out, status="fail", timed_out=True, reason="gate test timed out after 5s")
 
 
 def test_scn_imp_650_a_collection_error_that_names_a_file_of_the_red_records_the_switch_and_says_why(make_bench):
@@ -346,6 +351,14 @@ def test_scn_imp_651_a_whole_run_that_times_out_after_a_targeted_red_records_the
     FakeGates(bench, change={"test": timed_out})
     done = run_green(bench.wb, TASK, out, attempt=1)
     assert done.status == "failed" and "L4-IMP-122" not in done.reason
+    assert [e["why"] for e in disabled(bench)] == ["green_no_report"]
+
+
+def test_scn_imp_651_a_timeout_with_a_report_after_a_targeted_red_records_the_switch(make_bench):
+    bench, out = targeted_red(make_bench, green_step())
+    FakeGates(bench, change={"test": timed_out_with_report})
+    done = run_green(bench.wb, TASK, out, attempt=1)
+    assert done.status == "failed" and done.reason == "gate test timed out after 5s"
     assert [e["why"] for e in disabled(bench)] == ["green_no_report"]
 
 
