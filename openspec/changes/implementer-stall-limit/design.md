@@ -134,8 +134,9 @@ profile, not the kind of stall. A stall that was not a limit (`as_limit` false) 
 second stall is a failed attempt and its third is too. The window is the one of L4-IMP-075: a checkpoint of the task
 (`task.red_committed`, `task.green_committed`, `task.done`), `unit.retried`, `unit.resumed` and `unit.restarted` end
 it. A `task.attempts_renewed` (L4-IMP-104) does not: an answer renews attempts, and the stall limit is not an attempt.
-So between two checkpoints a task has at most one stall limit, and at most three in all (red, green, and a chore's
-single step each have a window of their own). Every other stall is a failed attempt, bounded by L4-IMP-075 and
+So between two checkpoints a task has at most one stall limit. A task with a red and a green phase has two windows, the red
+one ending at its red commit and the green one at the task's close, so at most two in all; a chore has one, so at most one.
+A retry, a resume or a restart opens new windows. Every other stall is a failed attempt, bounded by L4-IMP-075 and
 L4-IMP-094 as before.
 
 ### D4. What the next profile starts from (L4-IMP-113)
@@ -144,7 +145,8 @@ The chain, from the code above, for each exit of a stall that is a limit:
 
 1. **The step's own cleanup** (`agent_step` 1138-1157) runs before the stall is decided, for every status: scratch
    dropped; `revert_protected` resets HEAD to `base` (`reset --mixed`), which drops a commit the agent made, and puts
-   every protected path back to `base`, the frozen tests and the red tests among them; gate configuration, Python
+   every protected path back to `base` (the contract files, the unit's directories and `odd.forbidden_paths`: `ProtectedSet.match`,
+   `protected.py:122`; test files are not in it); gate configuration, Python
    encodings and the ledger are restored; an environment directory that differs is removed and setup builds it again.
 2. **The records.** `changed = sorted(p for p in wb.changed_files() if p != wb.ledger_rel)` is read here, after step 1, so
    it is what the step leaves uncommitted. `discarded_files` is its length and `discarded_paths` its first 20.
@@ -167,8 +169,10 @@ So the state is HEAD (the red commit for a green step, the unit's head for a red
 except the near pass, protected paths at `base`. Red's scope check, its test-tamper guards, the production guard, green's
 freeze of the red tests and every gate run after an `ok` step (`run_red` 1657, `run_green` after 2268, `run_single`
 after 3760): a stalled step has no result and reaches none of them, and nothing of it is committed, so nothing needs
-them. The next profile's step passes through all of them as any step does. The freeze is held by step 1 as well as by the
-discard.
+them. The next profile's step passes through all of them as any step does. The freeze of the red tests is not held by
+step 1: test files are not protected paths, and `restore_frozen` (`tdd.py:2279`, `3568`, `3785`) runs after an `ok` step only.
+A stalled step's edit of a frozen test therefore stays in the tree until step 3's `discard_changes` removes it, and that
+discard is what keeps the freeze: no edit of the stalled step survives to be committed or read as the step's result.
 
 Nothing is lost silently: the ledger records how many files and which (up to 20) the step left; the agent's redacted event
 stream is published under `.l4-out/agent/<run>/`; `wip.snapshot{shas}` names the snapshots of the step (the WIP ref that
@@ -216,9 +220,19 @@ by a move of this run (`orchestrator.py:1342`), so a stall that follows no move 
 <m>)`. `agent_step` puts it on the stall's signal (`LimitSignal.veto`, a field outside equality and repr), and
 `switch_profile` adds it to the task's own veto when it asks `Factory.on_limit` (`asked`). Both loops reach
 `switch_profile`, so this is one change. It applies to the three kinds: for a silent stop it is a protection that 0.4.60
-lacks, and nothing else about the silent stop changes. When the adapter found its own limit on the run, the signal is the
+lacks, and nothing else about the silent stop changes. One outcome differs: when the veto refuses every other profile (the
+others are spent), a silent stop now ends in `WaitingCapacity` (the unit parks, exit 12, `retry_after` the end of the
+stalled profile's cool-down, and the task goes on after it with its remaining attempts), where 0.4.60 handed the step to
+a spent profile and the task halted on `max_task_attempts` (exit 13) with attempts left on the profile before it. This
+is the rule of L4-IMP-087 ("with no usable profile left the unit waits for capacity") applied to a profile that cannot
+take the step, and it is an open question for the delegate. When the adapter found its own limit on the run, the signal is the
 adapter's and carries no veto: that path is the genuine limit's, as before. `seed_attempts` is in `loop.py`, which imports
-`tdd.py`; the closure is built where both are visible, which is why the plan is a field of the workbench.
+`tdd.py`; the closure is built where both are visible, which is why the plan is a field of the workbench. The veto is a
+callable on a frozen dataclass and must not reach a file: checked at 0.4.60, nothing calls `dataclasses.asdict` on a
+`LimitSignal`; the probe cache writes its fields by name (`availability/probes.py:385`, `_limit_json`); `_record_limit`
+(`orchestrator.py:960`) and `fixloop._fall_back` (339-355) write `tool`, `kind`, `source` and `excerpt` by name; the cool-down
+registry takes the kind and source strings. The field has `compare=False` and `repr=False`, so equality, hashing and logs
+are unchanged.
 
 Why `replaceable`: with no alternative, the limit would cool the only profile that can work (a stall is often the first sign
 of a profile that is slow, not dead), then `for_role` finds nothing and the unit parks for `default_cooldown` (30m, above

@@ -51,8 +51,8 @@ Verified at 0.4.60 (663cd6d5):
 
 Non-goals: a configurable agent time limit; editing a consumer's role chain; any other role (judges, the verifier agent,
 the clarifier, the delegate, the spec writer) and any other status of an implementer step (`error`, `max_turns`,
-`budget`, `permission_blocked`); a new configuration key; changing the silent stop's behaviour (it keeps parking when no
-profile is usable); keeping the stalled step's edits for the next profile.
+`budget`, `permission_blocked`); a new configuration key; changing the silent stop's rules (it keeps parking when no
+profile is usable; it gains only the spent veto below); keeping the stalled step's edits for the next profile.
 
 ## Capabilities
 
@@ -73,7 +73,7 @@ requirement; none changes for a chain of one profile or for a task's second stal
   the progress line), L4-IMP-087 (the closing "SHALL count as before" sentence), L4-AVL-003, L4-AVL-005 and L4-AVL-006
   (`kind: silent` is one of three stall kinds).
 - The `agent.idle` record of §12.1 and the `idle_timeout` comment of the configuration reference.
-- SCN-IMP-202, SCN-IMP-204, SCN-IMP-427, SCN-IMP-428 and SCN-IMP-545 now name the case in which the stop counts (one
+- SCN-IMP-202, SCN-IMP-204, SCN-IMP-427, SCN-IMP-428, SCN-IMP-538 and SCN-IMP-545 now name the case in which the stop counts (one
   profile, or the task's second stall). SCN-IMP-426, SCN-IMP-438 and SCN-IMP-540 are unchanged.
 
 ## Impact

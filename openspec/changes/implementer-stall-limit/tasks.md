@@ -21,7 +21,7 @@ reads `docs/runbook.md` and must stay green.
   - SCN-IMP-619: a judge, a verifier-agent call, a clarifier call and a delegate call that time out make no stall;
   - the reasons `idle: already once for this task`, `time: already once for this task` and `silent: already once for this
     task` (SCN-IMP-438 unchanged);
-  - the amended SCN-IMP-202, SCN-IMP-204, SCN-IMP-427, SCN-IMP-428 and SCN-IMP-545 (a chain of one, or the task's second
+  - the amended SCN-IMP-202, SCN-IMP-204, SCN-IMP-427, SCN-IMP-428, SCN-IMP-538 and SCN-IMP-545 (a chain of one, or the task's second
     stall), and the old tests that assert an idle stop after a tool call or a time-limit stop is a failed attempt on a
     two-profile chain: change each to the case the spec now names.
   Run the files and see the new tests fail.

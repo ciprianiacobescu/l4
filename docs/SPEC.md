@@ -3533,14 +3533,16 @@ writer SHALL keep their own rules.
 
 **L4-IMP-113 The next profile starts from a defined state, and nothing of the stalled step is committed or carried.** When a stall is a limit, the harness SHALL put the work tree back before the next profile's step, by the paths that every
 limit takes. The step's own cleanup SHALL run first and for every status: scratch dropped, HEAD reset to the commit the
-step began on (a commit the agent made is dropped), every protected path put back to that commit (the frozen and red
-tests among them), gate configuration, Python source encodings and the ledger restored, and a changed environment
+step began on (a commit the agent made is dropped), every protected path put back to that commit (the contract files, the
+unit's directories and `odd.forbidden_paths`; test files are not in that set), gate configuration, Python source encodings and the ledger restored, and a changed environment
 removed. Then `discard_changes` SHALL return every tracked file to HEAD, remove untracked and ignored files (the harness's
 own directories and the ledger kept) and delete the unit's work-in-progress ref. A red commit SHALL stay. The harness
 SHALL hand on only the near pass (L4-IMP-100) that the stalled step began from, as `RoleLimit.carry`, so that the next
 profile's green step starts from that patch and never from the stalled agent's edits. Nothing of the stalled step SHALL
 be committed, and no guard or gate SHALL treat it as a result. The next profile's step SHALL pass through every guard and
-gate of an agent step (L4-IMP-002, L4-IMP-048 and the green freeze) as any step does. Setup and the baseline
+gate of an agent step (L4-IMP-002, L4-IMP-048 and the green freeze) as any step does: those that guard the red tests
+run after an `ok` step only, so a stalled step's edit of a frozen or red test is removed by the discard and by nothing else, and
+the freeze holds because nothing of that step survives. Setup and the baseline
 SHALL run again before it. The attempt number of that step SHALL be the stalled step's again, as after any limit, and
 its agent logs SHALL be kept next to the stalled step's. The stall's record SHALL say how many files the step left
 uncommitted and name the first 20, so that the work that was discarded is not lost silently. When no profile can take
@@ -3560,7 +3562,8 @@ or an `agent.time_limit` with `as_limit` true. A stall that was not a limit SHAL
 
 **L4-IMP-115 A stall that cannot move stays a failed attempt, and it moves nothing it should not.** A stall of kind `idle` or `time` SHALL be a limit only when a profile can replace this one (`Factory.can_replace`,
 L4-AVL-015), asked through `Workbench.stall_plan(task, phase)`, which the owner of the workbench sets; a workbench with
-none SHALL apply the chain-length test only. A silent stop (L4-IMP-087) SHALL be a limit with no such check. In a fix
+none SHALL apply the chain-length test only. A silent stop (L4-IMP-087) SHALL be a limit with no such check; when the spent veto below refuses every other profile it
+waits for capacity (exit 12) instead of halting on a spent profile. In a fix
 unit a stall of kind `idle` or `time` SHALL NOT be a limit for a task that has already moved after a limit in this run,
 because the fix loop moves a task once and parks the unit on its second limit, and that path discards nothing
 (L4-IMP-113). Every stall that is a limit SHALL ask its fallback to refuse each profile that is spent for the task's phase
@@ -14251,7 +14254,7 @@ scenario is a spec defect (§26).
 - **Then** its idle limit is 632 s (1.5 × 381, plus 60, rounded up); a claude-code step in the same run has 300 s
 
 #### SCN-IMP-538 (−) An opencode agent silent beyond the raised limit is stopped and told why · L4-IMP-099, L4-IMP-024
-- **Given** the step of SCN-IMP-537, whose agent made tool calls and then printed nothing for 632 s
+- **Given** the step of SCN-IMP-537 with one profile in `roles.implementer` (with a second profile the stop is a stall limit, SCN-IMP-602), whose agent made tool calls and then printed nothing for 632 s
 - **When** the watchdog stops it
 - **Then** `agent.idle` holds `limit_s: 632`, `raised_by: {gate: "baseline", seconds: 381}` and `silent: false`, and the
   attempt fails with `the agent showed no activity for 10m (implementer.idle_timeout 5m, raised to the longest gate run
@@ -14650,11 +14653,11 @@ scenario is a spec defect (§26).
   its time limit (30m)`)
 
 #### SCN-IMP-604 (+) The next profile starts from HEAD, and the discarded work is recorded · L4-IMP-113
-- **Given** a green step on `free` that edited three files, one of them a frozen red test, and was stopped as a stall
+- **Given** a green step on `free` that edited a frozen red test, two source files and `AGENTS.md`, and was stopped as a stall
 - **When** the next profile's step starts
-- **Then** `guard.violation` shows the frozen test put back, `agent.idle` or `agent.time_limit` has `discarded_files: 2` and
-  `discarded_paths` with the two other paths, the work tree holds no change, the red commit is still the branch's head, and
-  nothing of the stalled step is in a commit
+- **Then** `guard.violation` shows `AGENTS.md` put back by the step's cleanup, `agent.idle` or `agent.time_limit` has
+  `discarded_files: 3` and `discarded_paths` with the test and the two source files, the work tree holds no change, the frozen test
+  has the content of the red commit, the red commit is still the branch's head, and nothing of the stalled step is in a commit
 
 #### SCN-IMP-605 (+) A near pass is handed on, not the stalled edits · L4-IMP-113, L4-IMP-100
 - **Given** green attempt 1 on `free` that passed every test and failed only its lint gate (a near pass), and attempt 2 on
@@ -14702,11 +14705,11 @@ scenario is a spec defect (§26).
   are recorded, no profile is cooled, and the unit does not park
 
 #### SCN-IMP-612 (+) A stall limit adds nothing to the escalation or the attempt count · L4-IMP-114, L4-IMP-017
-- **Given** `roles.implementer: [free, glm]`, `escalate_after: 2`, `max_task_attempts: 3`, and one stall limit of the task
-  on `free`
+- **Given** `roles.implementer: [free, glm, sonnet]`, `escalate_after: 2`, `max_task_attempts: 3`, and one stall limit of the
+  task on `free`
 - **When** `glm`'s step fails twice
-- **Then** `free` has no failed attempt, `glm` has two and moves the phase by L4-IMP-017 to the next profile after it, and the
-  stall limit is no `implementer.escalated`
+- **Then** `free` has no failed attempt, `glm` has two and the phase moves by L4-IMP-017 to `sonnet`, and the stall limit is
+  no `implementer.escalated`
 
 #### SCN-IMP-613 (−) The soft deadline wins, and a step that does not fit is not started · L4-IMP-115, L4-IMP-067, L4-IMP-068
 - **Given** an armed soft deadline, and in turn a step that the deadline stops while the agent has been idle for 12
