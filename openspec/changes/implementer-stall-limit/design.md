@@ -55,10 +55,11 @@ Evidence is in the proposal.
 
 ## Goals / Non-Goals
 
-**Goals:** an implementer step that stalls on a profile moves to another profile instead of spending the task's
+**Goals:** an implementer step that stalls on a profile moves to a later profile instead of spending the task's
 attempts on it, once per task window; the next profile starts from a state that is defined and that every guard of
 L4-IMP-002 and the green freeze still hold on; nothing about a verdict, a person-only action or the attempt bounds
-changes; a stall that cannot move stays a failed attempt, so the change never parks a unit that would have retried.
+changes; a stall that cannot move stays a failed attempt, so the change parks a unit that would have retried only when the profile that
+can take the step fails a probe that was not cached (D5, Risks).
 
 **Non-Goals:** the ones in the proposal.
 
@@ -76,13 +77,14 @@ In `agent_step`, after the cleanup and the two records, in this order: the soft 
   wall-clock limit inside the 5 s grace keeps the idle mark, so it is `idle` or `silent`, never `time`.
 - `time`: `watch.stopped_idle_s` is None: the 1800 s limit stopped the step.
 
-An adapter that found a limit on the run keeps it (`run if run.limit is not None`, as for a silent stop), so the
-cool-down is that limit's. A stall is a limit of its profile (`as_limit`) when the chain holds more than one profile
+An adapter that found a limit on the run keeps it (as for a silent stop), with the spent veto of D5 added to it
+(`replace(run.limit, veto=veto)`, never the forward constraint), so the cool-down is that limit's and the step never goes to
+a spent profile. A stall is a limit of its profile (`as_limit`) when the chain holds more than one profile
 (`len(wb.cfg.roles.implementer) > 1`, the silent stop's test, so a chain of one is a failed attempt as today), the task
-has not used its stall limit (D3), and, for kinds `idle` and `time`, a profile can replace this one (D5). Otherwise the
+has not used its stall limit (D3), and, for kinds `idle` and `time`, a profile after this one in the chain can take the step (D5). Otherwise the
 stop is a failed attempt, with the reason it has today and, when it is a stall that could not move, a `reason` in its
 record. The raise is `RoleLimit(run, carried)` with a `LimitSignal(tool, model, kind, None, source, excerpt)` that also carries the
-spent veto of D5:
+vetoes of D5 (the spent veto, and for kinds `idle` and `time` the forward constraint):
 `source` is `run.idle` for `silent` and `idle`, and `run.timeout` for `time`; the `excerpt` is `no output for <limit>`
 for `silent` (unchanged), `no output for <limit> after <n> tool calls` for `idle` (`no output for <limit>` when the
 reader did not count), and `the agent step reached its time limit (<limit>)` for `time`, where `<limit>` is the idle
@@ -96,7 +98,8 @@ delegate and the spec writer never reach it, and no status other than `timeout` 
 ### D2. The records (L4-IMP-116)
 
 `agent.idle` keeps every field it has and gains optional ones: `kind` (`silent` or `idle`), `as_limit` (bool),
-`discarded_files` and `discarded_paths` (D4). `silent` keeps its meaning for 0.4.60 readers: it is true exactly when the
+`discarded_files` and `discarded_paths` (D4); `tool_calls`, which every record had, is now optional: it is left out when no
+stream reader counted (the `command` adapter). `silent` keeps its meaning for 0.4.60 readers: it is true exactly when the
 kind is `silent` and `as_limit` is true. `agent.idle` is still written only when the idle rule fired, before
 `agent.finished`. A new event `agent.time_limit{task, phase, attempt, profile, limit_s, tool_calls?, as_limit, reason?,
 discarded_files?, discarded_paths?}` is written for a `time` stall, before `agent.finished`; `limit_s` is `timeout_s`, and
@@ -186,28 +189,44 @@ done.near_pass`, None); a limit hands it on. A failed attempt tells the next att
 previous-attempt block (D2).
 
 The fix loop's second limit of a task (`fixloop.py:431-435`) cools the profile and raises with no `discard_changes`. The
-stalled step's edits and WIP ref would stay, and a later run could restore them (`refs/l4/wip`, L4-IMP-100). A stall
-never takes that path: D6.
+stalled step's edits and WIP ref would stay, and a later run could restore them (`refs/l4/wip`, L4-IMP-100). A stall of
+kind `idle` or `time` never takes that path: D5 makes it a failed attempt for a task that already moved. A silent stop in a
+fix task that already moved does take it: it is a limit with no replacement check (L4-IMP-087), so it parks the unit, as in
+0.4.60.
 
 ### D5. A profile must be able to replace this one, and the fallback must not pick a spent one (L4-IMP-115, L4-AVL-015)
 
 `Workbench.stall_plan` is a new optional field, `Callable[[Task, str], StallPlan] | None`, that the owner of the workbench
 sets (`None`, a bench in a unit test, means the chain-length test only and no veto). `StallPlan(replaceable: bool, veto:
-Constraint)`. `agent_step` asks it once per stall, with the task and the step's phase (`role`: `red`, `green` or `single`).
+Constraint, forward: Constraint)`. `agent_step` asks it once per stall, with the task and the step's phase (`role`: `red`, `green` or `single`).
 
-**replaceable.** A new `Factory.can_replace(selected, constraints) -> bool` reads the cool-down registry and
-`roles.implementer`, sends no probe, records nothing, and is true when the chain lists a profile `p` other than `selected`
-such that:
+**replaceable.** A new `Factory.can_replace(selected, constraints) -> bool` reads the cool-down registry, the probe cache and
+`roles.implementer`, sends no probe, records nothing, and is true when the chain lists a profile `p` AFTER `selected` (a stall
+moves forward only, below) such that:
 
 - the cool-down key of `p` (`cooldown_key`, `(tool, model)`) differs from the key of `selected`, because recording the
   stall's cool-down cools every profile with that key, so a profile that shares it cannot take the step;
 - `p` is not cooling now (`cooldowns.cooling`);
+- the probe cache holds no failed ladder for `p` (`FallbackSelector.cached_failure`, which reads the cache only): the
+  selection would skip such a profile without a probe (L4-AVL-005), so it is no replacement either;
 - every constraint of the request, the task's veto (L4-IMP-094) and the `veto` below among them, accepts `p`.
 
 A stall of kind `idle` or `time` is a limit only when `replaceable` is true. `Orchestrator._workbench` sets a closure that
 builds the selection the way `switch_profile` does (the task's own selection, or the run's) and calls `can_replace`.
 `fixloop._child_workbench` sets one that also says not replaceable for an `idle` or `time` stall of a task already in
 `retried` (the fix loop moves a task once after a limit and parks the unit on a second: D4).
+
+**Decided: a stall of kind `idle` or `time` moves forward only.** The chain is ordered from cheap to strong, so a stall of the
+strongest usable profile must not send the task back to a weaker one, and must not cool, for the judges that share its
+`(tool, model)`, a model that was only slow. The stall limit may hand the step only to a profile that comes after the stalled
+one in `roles.implementer` and passes every other check of `can_replace` (its own cool-down key, not cooling, no failed probe
+in the cache, the constraints, the spent veto). A stall on the last usable profile is therefore a failed attempt, as today.
+Two parts, one rule: `can_replace` looks at the profiles after `selected` only, and `Factory.later_than(selected)` is a
+constraint that refuses `selected` and every profile before it, which the fallback of the stall asks, because that fallback
+selects from the chain's start (the veto below). `StallPlan.forward` carries it and `StallPlan.refusing(kind)` joins it to the
+spent veto for `idle` and `time`; the `silent` kind keeps its 0.4.60 selection (no replacement check, no forward
+constraint). A stall of the run's profile still moves the run's profile, now always forward. The stalled profile is the
+step's own (`wb.selected`): after an escalation or a move it is the profile the task runs on, not the first of the chain.
 
 **veto.** A limit fallback selects again from the top of the chain (`Factory.on_limit`, `factory.py:360`), so it can hand
 the step to a profile that has used all its attempts of the phase. `_run_task` then ends the task at once
@@ -227,7 +246,8 @@ a spent profile and the task halted on `max_task_attempts` (exit 13) with attemp
 is the rule of L4-IMP-087 ("with no usable profile left the unit waits for capacity") applied to a profile that cannot
 take the step. Decided: the change is accepted, so a silent stop whose only other profiles are spent parks (exit 12)
 instead of halting (exit 13). When the adapter found its own limit on the run, the signal is the
-adapter's and carries no veto: that path is the genuine limit's, as before. `seed_attempts` is in `loop.py`, which imports
+adapter's, with the spent veto added and not the forward constraint: it is a genuine limit that the stall kept, so it may go
+to any profile that is not spent, and it never goes to a spent one. `seed_attempts` is in `loop.py`, which imports
 `tdd.py`; the closure is built where both are visible, which is why the plan is a field of the workbench. The veto is a
 callable on a frozen dataclass and must not reach a file: checked at 0.4.60, nothing calls `dataclasses.asdict` on a
 `LimitSignal`; the probe cache writes its fields by name (`availability/probes.py:385`, `_limit_json`); `_record_limit`
@@ -243,8 +263,9 @@ moves the task by L4-IMP-017 as before.
 
 Decided: the replacement check does not apply to a silent stop. A silent stop keeps its 0.4.60 behaviour, apart from the
 spent veto above, and does not need `replaceable`: it did nothing, the profile is demonstrably not
-working, and the park when nothing else is usable is the rule of L4-IMP-087. Residual risk: a profile that is not cooling
-and that `can_replace` accepts can still fail its probe in `for_role`; then the unit parks, as it does for a silent stop.
+working, and the park when nothing else is usable is the rule of L4-IMP-087. Residual risk: a profile that is not cooling,
+whose probe is not cached and that `can_replace` accepts can still fail its probe in `for_role` (a profile never probed, or a
+transient failure, which is never cached); then the unit parks, as it does for a silent stop.
 It is named in the risks.
 
 ### D6. Interplay (L4-IMP-115)
@@ -264,8 +285,10 @@ It is named in the risks.
 - **In-run wait (L4-AVL-011).** A stall cools for `default_cooldown` (30m); `wait_in_run` is 5m by default, so the run does
   not wait for it. D5 keeps the case in which every other profile is cooling from reaching it.
 - **A chain of one profile** is a failed attempt as today (the test is `len(roles.implementer) > 1`). So is an eval cell.
-- **The fix loop** moves a fix task once after a limit. A stall in a fix task is a limit only when the task has not moved
-  (D5), and then the first move is as in D4; otherwise it is a failed attempt.
+- **The fix loop** moves a fix task once after a limit. A stall of kind `idle` or `time` in a fix task is a limit only when
+  the task has not moved (D5), and then the first move is as in D4; otherwise it is a failed attempt. The set of tasks that
+  moved reaches every workbench the loop builds for the task, the one of an escalation too. A silent stop keeps 0.4.60: a
+  second limit parks the unit.
 
 ### D7. The cool-down (L4-AVL-014)
 
@@ -315,7 +338,11 @@ A consumer moves its pin from 0.4.60 while units are in flight.
   a tool call. The limit is raised for the longest gate run, so a test run does not trigger it.
 - An agent that finished its edits and hung before it exited is a `time` stall; the next profile redoes the work. That is
   cost, not a wrong result: the old path also threw the step away.
-- A profile that D5 accepts can still fail its probe, and the unit parks with `retry_after` as for a silent stop.
+- A profile that D5 accepts can still fail its probe, and the unit parks with `retry_after` as for a silent stop. `can_replace`
+  reads the probe cache, so a profile whose hello failed and was cached is no replacement; a profile never probed, or one
+  whose failure was transient, is not known to fail until the fallback probes it.
+- A stall on the last usable profile of the chain is a failed attempt even when an earlier profile is usable again: the
+  chain runs cheap to strong, and the move is forward only (D5).
 - A cool-down is keyed `(tool, model)`: two profiles with the same adapter and model cool together, and D5 does not count
   one as the other's replacement.
 - The attempt number of the step after a stall is reused, as after every limit; a reader that assumes one `step.started`

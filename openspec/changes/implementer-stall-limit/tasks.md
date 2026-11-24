@@ -1,5 +1,5 @@
 Read `design.md` first (D1-D9). Requirements: L4-IMP-112..116 and L4-AVL-014..015 (`docs/SPEC.md`), scenarios
-SCN-IMP-602..621 and SCN-AVL-37..43, and the amended text and scenarios the proposal lists. Run single test files only
+SCN-IMP-602..625 and SCN-AVL-37..45, and the amended text and scenarios the proposal lists. Run single test files only
 (`uv run --frozen pytest <file> -q -p no:cacheprovider`), never a whole directory, never two runs at once, and never a
 wait loop on `pgrep`. Use the fake adapter's `Step` (`tool_calls`, `stream_reader`, a `timeout` status) and the bench of
 `tests/unit/implementer/test_liveness_step.py` for the step, `tests/unit/implementer/test_loop.py` (`make_bench`) for the
@@ -35,7 +35,7 @@ reads `docs/runbook.md` and must stay green.
 ## 2. The next profile starts from a defined state (L4-IMP-113, D4)
 
 - [x] 2.1 Write the tests first, in `tests/unit/implementer/test_stall_limit.py` and the orchestrator's limit tests:
-  SCN-IMP-604 (edits discarded, a frozen test put back by the step's cleanup, `discarded_files` and `discarded_paths`, the
+  SCN-IMP-604 (edits discarded, a frozen test that the step edited removed by the discard, `discarded_files` and `discarded_paths`, the
   red commit kept, nothing committed), SCN-IMP-605 (the near pass handed on, the stalled edits not), SCN-IMP-606 (a red
   stall), and the same through the fix loop's first move. Run them and see the new ones fail.
 - [x] 2.2 Then make `orchestrator._fall_back`, `switch_profile` (`detail` for the three kinds, `orchestrator.py:1255`) and
@@ -67,7 +67,20 @@ reads `docs/runbook.md` and must stay green.
 
 ## 5. Checks
 
-- [x] 5.1 `docs/SPEC.md` holds L4-IMP-112..116, L4-AVL-014..015, SCN-IMP-602..621, SCN-AVL-37..43, change-table row 143 and
+- [x] 5.1 `docs/SPEC.md` holds L4-IMP-112..116, L4-AVL-014..015, SCN-IMP-602..625, SCN-AVL-37..45, change-table row 143 and
   the amended text of the proposal's list. Check them against the code and tell the orchestrator where they differ; do not
   edit `docs/SPEC.md`, `CHANGELOG.md` or `docs/runbook.md`. Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 5.2 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 6. Review round (D5, D6)
+
+- [x] 6.1 A stall of kind `idle` or `time` moves forward only (SCN-IMP-623, SCN-IMP-624, SCN-IMP-625, SCN-AVL-44):
+  `Factory.later_than`, `can_replace` over the profiles after the stalled one, `StallPlan.forward` and
+  `StallPlan.refusing`, a test for each of a middle profile, the last profile and an earlier usable profile.
+- [x] 6.2 An adapter's own limit that a stall kept carries the spent veto (SCN-IMP-616, SCN-IMP-625).
+- [x] 6.3 `can_replace` treats a profile with a cached failed probe as no replacement (SCN-AVL-45); the residual risk stays in
+  the design's Risks.
+- [x] 6.4 `tool_calls` of `agent.idle` is optional in `docs/SPEC.md` and the runbook; the runbook says that a stall's cool-down
+  covers the profile's tool and model for every role.
+- [x] 6.5 Tests for the mutants that survived: the fix task's `retried` set reaching an escalation's workbench, the in-run
+  wait keeping the spent veto, and at most 20 `discarded_paths`.

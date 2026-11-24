@@ -15,12 +15,12 @@ stop is not silent, because the reader saw at least one tool call or the adapter
 mark is not set, so the agent's wall-clock limit of 1800 s stopped the step. An idle stop that crosses the wall-clock
 limit inside the 5-second grace after its SIGINT keeps the idle mark, so it is `silent` or `idle`. A stall SHALL be a
 limit of its profile (L4-AVL-006) and no failed attempt when all of these hold: `roles.implementer` lists more than one
-profile; the task has no earlier stall limit in its window (L4-IMP-114); and, for kinds `idle` and `time`, a profile can
-replace this one (L4-IMP-115). Then the harness SHALL record the stall as L4-IMP-116 says, raise a limit whose kind is
+profile; the task has no earlier stall limit in its window (L4-IMP-114); and, for kinds `idle` and `time`, a profile after
+this one in `roles.implementer` can take the step (L4-IMP-115). Then the harness SHALL record the stall as L4-IMP-116 says, raise a limit whose kind is
 the stall's kind (L4-AVL-014), and go on as after any limit: no `task.attempt_failed`, nothing toward
 `implementer.escalate_after` or `implementer.max_task_attempts` (L4-IMP-017), the profile cooled, the task going on on
 the next usable profile in a new session, and the next task starting there when the stalled profile was the run's.
-A limit that the adapter itself found on the run SHALL be kept as it is. The soft deadline's cancel and every status
+A limit that the adapter itself found on the run SHALL be kept as it is, with the spent veto of L4-IMP-115 added. The soft deadline's cancel and every status
 other than `timeout` SHALL be handled as before. A stall that does not meet all of the conditions SHALL fail the
 attempt as before, with the reason it has today; its record SHALL carry `as_limit: false` and, when L4-IMP-114 or
 L4-IMP-115 is why it did not move, the reason they name (L4-IMP-116). This
@@ -62,8 +62,9 @@ writer SHALL keep their own rules.
 - **Given** `roles.implementer: [free, glm]` and a step on `free` that ends with status `timeout` after the adapter read a
   rate limit with a reset time from its stream
 - **When** the step ends
-- **Then** `availability.limit` and `availability.cooldown` carry that limit's kind and reset time, not the stall's, and
-  `agent.idle` or `agent.time_limit` still records the stall
+- **Then** `availability.limit` and `availability.cooldown` carry that limit's kind and reset time, not the stall's, the
+  limit refuses the profiles that are spent for the phase (L4-IMP-115), and `agent.idle` or `agent.time_limit` still
+  records the stall
 
 #### Scenario: SCN-IMP-619 (−) Another role's time-out is not a stall
 - **Given** a judge, a verifier-agent writer, a clarifier and a delegate call that each time out, with a second profile in
@@ -87,8 +88,9 @@ the freeze holds because nothing of that step survives. Setup and the baseline
 SHALL run again before it. The attempt number of that step SHALL be the stalled step's again, as after any limit, and
 its agent logs SHALL be kept next to the stalled step's. The stall's record SHALL say how many files the step left
 uncommitted and name the first 20, so that the work that was discarded is not lost silently. When no profile can take
-the step and the unit parks, the tree SHALL already be clean at HEAD. A stall SHALL NOT be a limit on a path that raises
-without discarding (L4-IMP-115, a fix task's second move).
+the step and the unit parks, the tree SHALL already be clean at HEAD. A stall of kind `idle` or `time` SHALL NOT be a limit on a path that
+raises without discarding (L4-IMP-115, a fix task's second move); a silent stop in a fix task that already moved keeps the
+rule of 0.4.60 and parks the unit on that path (L4-IMP-087).
 
 #### Scenario: SCN-IMP-604 (+) The next profile starts from HEAD, and the discarded work is recorded
 - **Given** a green step on `free` that edited a frozen red test, two source files and `AGENTS.md`, and was stopped as a stall
@@ -161,16 +163,22 @@ or an `agent.time_limit` with `as_limit` true. A stall that was not a limit SHAL
   as L4-IMP-087 says
 
 ### Requirement: L4-IMP-115 A stall that cannot move stays a failed attempt, and it moves nothing it should not
-A stall of kind `idle` or `time` SHALL be a limit only when a profile can replace this one (`Factory.can_replace`,
-L4-AVL-015), asked through `Workbench.stall_plan(task, phase)`, which the owner of the workbench sets; a workbench with
+A stall of kind `idle` or `time` SHALL be a limit only when a profile after this one in `roles.implementer` can take the
+step (`Factory.can_replace`, L4-AVL-015), asked through `Workbench.stall_plan(task, phase)`, which the owner of the workbench sets; a workbench with
 none SHALL apply the chain-length test only. A silent stop (L4-IMP-087) SHALL be a limit with no such check; when the spent veto below refuses every other profile it
-waits for capacity (exit 12) instead of halting on a spent profile. In a fix
+waits for capacity (exit 12) instead of halting on a spent profile. A stall of kind `idle` or `time` SHALL move forward
+only: it SHALL hand the step only to a profile after the stalled one in `roles.implementer` that passes every other check
+of `can_replace` (its own cool-down key, not cooling, no failed probe in the cache, the constraints, the spent veto), and
+its fallback SHALL refuse the stalled profile and every earlier one (`Factory.later_than`, carried as `StallPlan.forward`),
+because the chain runs from cheap to strong and a stall of the strongest usable profile must not send the task back to a
+weaker one and cool the model that the judges share with it. A stall on the last usable profile is therefore a failed
+attempt, with the reason below. A silent stop keeps its selection from the chain's start. In a fix
 unit a stall of kind `idle` or `time` SHALL NOT be a limit for a task that has already moved after a limit in this run,
 because the fix loop moves a task once and parks the unit on its second limit, and that path discards nothing
 (L4-IMP-113). Every stall that is a limit SHALL ask its fallback to refuse each profile that is spent for the task's phase
 (its failed attempts of the phase in the task's window are at least `implementer.max_task_attempts`), also when no move of
-this run has set the veto of L4-IMP-094: a fallback that handed the step to a spent profile would end the task at once with
-`max_task_attempts` while a profile before it has attempts left. A stall that is a limit SHALL go through the same fallback
+this run has set the veto of L4-IMP-094, and also when the adapter's own limit was kept (L4-IMP-112): a fallback that handed
+the step to a spent profile would end the task at once with `max_task_attempts` while a profile before it has attempts left. A stall that is a limit SHALL go through the same fallback
 as every limit, so that: the move asks with that veto and the task's veto and never takes a spent profile, and may take a
 profile that has used its share; the run's profile follows the fallback as for any limit (`switch_profile`); the failure counts, `seed_attempts` and the attempt window (L4-IMP-075, L4-IMP-104) are unchanged, so a
 stall limit is no failed attempt and no renewal; the soft deadline (L4-IMP-067, L4-IMP-068) wins over a stall, and the
@@ -192,6 +200,27 @@ the reason `<kind>: no other profile can take the step`.
 - **When** the limit is handled
 - **Then** `availability.fallback` goes from `free` to `sonnet`, `glm`'s step is never started, and the task does not halt on
   `max_task_attempts`
+
+#### Scenario: SCN-IMP-623 (+) A stall on a middle profile moves to a later one, never to an earlier usable one
+- **Given** `roles.implementer: [free, glm, sonnet]`, a task that moved from `free` to `glm` after `free` stalled in red,
+  `free`'s cool-down over by the time `glm` runs the green step, and that green step reaching the agent's limit
+- **When** the step ends
+- **Then** `availability.fallback` goes from `glm` to `sonnet`, not back to `free`, which is usable and comes first in the
+  chain, and no attempt fails
+
+#### SCN-IMP-624 (−) A stall on the last profile is a failed attempt, though an earlier profile is usable · L4-IMP-115, L4-AVL-015
+- **Given** `roles.implementer: [free, glm]`, the task on `glm` after a stall of `free` whose cool-down is over, and a green
+  step on `glm` that reaches the agent's limit
+- **When** the step ends
+- **Then** `agent.time_limit{as_limit: false, reason: "time: no other profile can take the step"}` and `task.attempt_failed`
+  are recorded, no profile is cooled, `free` is not asked to take the step, and the task goes on on `glm`
+
+#### Scenario: SCN-IMP-625 (+) A silent stop keeps its selection, and an adapter's own limit never reaches a spent profile
+- **Given** the chain of SCN-IMP-624 and, in turn, a green step on `glm` stopped with no tool call, and a green step on `glm`
+  that ends `timeout` after the adapter read a rate limit, with `free` spent for the green phase in the second case
+- **When** each limit is handled
+- **Then** the silent stop goes back to `free`, as in 0.4.60; the adapter's limit keeps its kind and reset time and does not
+  hand the step to the spent `free`
 
 #### Scenario: SCN-IMP-613 (−) The soft deadline wins, and a step that does not fit is not started
 - **Given** an armed soft deadline, and in turn a step that the deadline stops while the agent has been idle for 12
@@ -264,11 +293,14 @@ entry of kind `idle` or `time` SHALL load in a reader that does not know the kin
 - **When** it is read by `CooldownRegistry` and printed by `l4 probe`
 - **Then** both entries load, cool their profiles, and show their kinds
 
-### Requirement: L4-AVL-015 A stall is a limit only when a profile with another cool-down key can take the step
-`Factory.can_replace(selected, constraints)` SHALL be true when `roles.implementer` lists a profile other than `selected` whose
-cool-down key (`(tool, model)`) differs from the key of `selected`, that is not cooling in the registry, and that every
+### Requirement: L4-AVL-015 A stall is a limit only when a later profile with another cool-down key can take the step
+`Factory.can_replace(selected, constraints)` SHALL be true when `roles.implementer` lists a profile AFTER `selected` whose
+cool-down key (`(tool, model)`) differs from the key of `selected`, that is not cooling in the registry, whose probe in the
+cache has not failed (the selection would skip it without a probe, L4-AVL-005), and that every
 constraint of the request accepts (the task's veto of a spent profile and the spent veto of L4-IMP-115 among them). It SHALL send no probe and record
-nothing. A stall of kind `idle` or `time` SHALL be a limit only when it is true (L4-IMP-115). When it is true and the
+nothing. `Factory.later_than(selected)` SHALL be the constraint that refuses `selected` and every profile before it in the
+chain, which the fallback of a stall of kind `idle` or `time` asks (L4-IMP-115), so that a stall moves forward only. A
+profile that was never probed, or whose failure was transient, is still a candidate. A stall of kind `idle` or `time` SHALL be a limit only when it is true (L4-IMP-115). When it is true and the
 fallback still finds no usable profile (every candidate fails its probe), the unit SHALL park as it does for any limit:
 `waiting_capacity`, exit 12, with `retry_after` the earliest end of a cool-down in the chain (L4-AVL-007), and the tree is
 already clean (L4-IMP-113). A stall's cool-down is longer than `availability.wait_in_run` under the defaults, so the run
@@ -298,3 +330,17 @@ SHALL NOT wait for it unless a deployment sets `wait_in_run` and `wait_in_run_ma
 - **When** the limit is handled
 - **Then** `free` cools for `default_cooldown`, the work tree is clean at HEAD, no in-run wait happens, and the unit parks
   with exit 12 and `retry_after` the end of that cool-down
+
+#### Scenario: SCN-AVL-44 (+) `can_replace` looks only forward, and the fallback of a stall asks for it
+- **Given** `roles.implementer: [free, glm, sonnet]`, all usable and none cooling
+- **When** `can_replace` is asked for a stall on `glm` and on `sonnet`, and `later_than` is put on the selection that follows
+  a stall of `glm`
+- **Then** it is true for `glm` (`sonnet` follows) and false for `sonnet` although `free` and `glm` are usable, and the
+  selection refuses `free` and `glm` (`earlier: <name> is not after <stalled> in the chain`)
+
+#### SCN-AVL-45 (−) A profile whose cached probe failed is no replacement · L4-AVL-015, L4-AVL-005
+- **Given** `roles.implementer: [free, glm]`, `glm` not cooling with a cached failed hello (the model answered wrongly), and
+  a `time` stall on `free`
+- **When** `can_replace` is asked
+- **Then** it is false and no probe is sent, so the stall is a failed attempt with `time: no other profile can take the
+  step`; a profile never probed, or whose failure was transient and so not cached, is still a candidate

@@ -29,7 +29,7 @@ Verified at 0.4.60 (663cd6d5):
 
 ## What Changes
 
-- An implementer step that stalls is a limit of its profile when another profile can take the step, and no failed
+- An implementer step that stalls is a limit of its profile when a profile after it can take the step, and no failed
   attempt. A stall is one of three kinds: `silent` (an idle stop with no tool call: L4-IMP-087, unchanged), `idle` (an
   idle stop after at least one tool call, or from an adapter with no stream reader) and `time` (the agent's 1800 s
   limit). The profile cools for `availability.default_cooldown`, its cached hello is cleared, the task goes on on the
@@ -39,9 +39,12 @@ Verified at 0.4.60 (663cd6d5):
   files were discarded (L4-IMP-113).
 - A task has one stall limit per attempt window, across the three kinds. The next stall of the task, on any profile,
   is a failed attempt as before. A 0.4.60 silent stop in the window counts as the first (L4-IMP-114).
-- A stall of kind `idle` or `time` is a limit only when a profile with another cool-down key is not cooling and is
-  not refused by the task's veto, and, in a fix unit, when the fix task has not already moved. Otherwise it is a failed
-  attempt as today, so a stall never cools the last profile that can work or parks a fix unit (L4-IMP-115, L4-AVL-015).
+- A stall of kind `idle` or `time` is a limit only when a profile after the stalled one in `roles.implementer`, with another
+  cool-down key, is not cooling, has no failed probe in the cache and is not refused by the task's veto, and, in a fix unit,
+  when the fix task has not already moved. It moves forward only: the fallback refuses the stalled profile and every earlier
+  one, so a stall of the strongest usable profile is a failed attempt, as today, and never sends the task back to a weaker
+  one. Otherwise it is a failed attempt as today, so a stall never cools the last profile that can work or parks a fix unit
+  (L4-IMP-115, L4-AVL-015).
 - The fallback of every stall limit, the silent stop included, refuses a profile that is spent for the task's phase, also
   when no move of the run set L4-IMP-094's veto, because a fallback selects from the chain's start and a spent profile ends
   the task at once with `max_task_attempts` while an earlier profile has attempts left (L4-IMP-115).
@@ -79,11 +82,11 @@ requirement; none changes for a chain of one profile or for a task's second stal
 ## Impact
 
 - `src/l4/implementer/tdd.py` (`agent_step`, `_silent_before`, `_previous_attempt_block`), `src/l4/implementer/workbench.py`
-  (`Workbench.stall_plan`), `src/l4/agents/base.py` (`LimitSignal.kind`, `LimitSignal.veto`), `src/l4/agents/factory.py` (a new
-  `Factory.can_replace`), `src/l4/orchestrator.py` (`_workbench`, `switch_profile`), `src/l4/verifier/fixloop.py`
+  (`Workbench.stall_plan`), `src/l4/agents/base.py` (`LimitSignal.kind`, `LimitSignal.veto`), `src/l4/agents/factory.py` (new
+  `Factory.can_replace` and `Factory.later_than`), `src/l4/availability/fallback.py` (`FallbackSelector.cached_failure`), `src/l4/orchestrator.py` (`_workbench`, `switch_profile`), `src/l4/verifier/fixloop.py`
   (`_child_workbench`, `_fall_back`, `fix_hook`), `src/l4/progress.py` (`_agent_idle`, a new `_agent_time_limit`).
 - `docs/SPEC.md`, `docs/runbook.md`, `CHANGELOG.md`. No change to the skill.
-- Ledger: new optional fields on `agent.idle`, one new event `agent.time_limit`, two new values of `kind`. An older
+- Ledger: new optional fields on `agent.idle` (and `tool_calls`, which every record had, is now optional), one new event `agent.time_limit`, two new values of `kind`. An older
   reader ignores all of them. No configuration key, no new CLI option.
 - Behaviour: a chain of two or more profiles stops spending failed attempts on the first stall of a task and moves
   the step instead. The cost is at most one extra step per task and attempt window, and the stalled step is paid for
