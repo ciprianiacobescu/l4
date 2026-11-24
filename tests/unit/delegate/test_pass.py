@@ -320,6 +320,13 @@ def test_a_timeout_defers_then_escalates_at_the_limit(delegate_run, fake_clock):
     assert "Escalated by:** the delegate" in second.pushed(QUESTIONS)
 
 
+def test_a_delegate_timeout_is_no_implementer_stall(delegate_run):  # SCN-IMP-619
+    run = delegate_run([blocked("technical"), Step(status="timeout")])
+    assert results(run)[-1]["status"] == "deferred"
+    assert run.events("agent.time_limit") == []
+    assert [e for e in run.events("availability.cooldown") if e["kind"] in ("idle", "time")] == []
+
+
 def test_no_time_left_defers_and_asks_for_a_run(delegate_run, outcomes):  # SCN-DLG-12
     ci = {"time_budget": "30m", "soft_deadline_margin": "20m"}  # 10 minutes left, delegate.timeout is 15m
     run = delegate_run([blocked("technical")], ci=ci)

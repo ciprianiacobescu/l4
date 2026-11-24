@@ -992,7 +992,7 @@ implementer:
   include_agents_md: false         # the repository root's AGENTS.md joins the prompt as a convention (L4-IMP-051)
   max_task_attempts: 3             # the last usable profile's attempts per phase
   heartbeat: 2m                    # a log line while an agent step runs; 0 = off (L4-IMP-023)
-  idle_timeout: 10m                # stop an agent with no stdout line and no open tool call; 0 = off; a stop before any tool call with another profile in the chain is a limit of the profile (L4-IMP-024, L4-IMP-087)
+  idle_timeout: 10m                # stop an agent with no stdout line and no open tool call; 0 = off; with another profile in the chain, a stop and the agent's 30m limit are a limit of the profile once per task (L4-IMP-024, L4-IMP-087, L4-IMP-112)
   escalate_after: 2                # failed attempts of one phase on a profile before the next profile of roles.implementer takes it; 0 = never (L4-IMP-017)
   result_repair_attempts: 1        # read by no code until L4-IMP-022
   wip_snapshot_interval: 10m
@@ -3176,7 +3176,7 @@ no task moves.
 
 A failed attempt is an attempt that the implementer loop counts against `max_task_attempts`: a harness check that does
 not pass, a result failure of L4-IMP-021, or an agent run that ends with a status that is not `ok` and not a limit. It SHALL
-count against the profile that ran it. A limit (L4-AVL-006), a silent stop (L4-IMP-087, a limit of kind `silent`), a `blocked` result, the question about a frozen test
+count against the profile that ran it. A limit (L4-AVL-006), a stall that is a limit (L4-IMP-087, L4-IMP-112: kind `silent`, `idle` or `time`), a `blocked` result, the question about a frozen test
 that hangs, and a check held as inconclusive with a `harness` question (L4-IMP-063) MUST NOT count, and MUST NOT
 start an escalation.
 
@@ -3348,22 +3348,24 @@ the group when it still runs 5 seconds later, also when the agent prints lines i
 stays `timeout`. The harness MUST NOT use the run's
 `interrupt` event for this, which is the soft deadline's and gives the status `cancelled`.
 
-The harness SHALL then record `agent.idle{task, phase, attempt, profile, silent_s, tool_calls, silent, limit_s,
-raised_by?, reason?}` before `agent.finished` (`silent` is true for a silent stop, L4-IMP-087, and false otherwise;
+The harness SHALL then record `agent.idle{task, phase, attempt, profile, silent_s, tool_calls?, silent, limit_s,
+raised_by?, reason?}` before `agent.finished` (`silent` is true for a silent stop that is a limit, L4-IMP-087, and false otherwise; `kind`, `as_limit`, `discarded_files` and
+`discarded_paths` are optional, L4-IMP-116, and so is `tool_calls`, which is left out when no stream reader counted;
 `limit_s` is the idle limit that applied, in seconds; `raised_by{gate, seconds}` is set only when L4-IMP-099 raised the
 limit above `implementer.idle_timeout`; `reason` is set when the stop was the task's second silent stop), and the attempt
 SHALL fail with the reason `the agent showed no activity for <idle_timeout> (implementer.idle_timeout), so L4 stopped
 it`, or, when the limit was raised, `the agent showed no activity for <limit> (implementer.idle_timeout <idle_timeout>,
 raised to the longest gate run of this run plus a margin, because <adapter> shows no open tool call), so L4 stopped it`,
-except for a silent stop, which is a limit of its profile and no attempt (L4-IMP-087). An attempt that ends with status `timeout` without the idle mark SHALL
+except for a stall that is a limit of its profile and no attempt (L4-IMP-087, L4-IMP-112). An attempt that ends with status `timeout` without the idle mark SHALL
 fail with `the agent step reached its time limit (<limit>)`, where the limit is the step's wall-clock limit (30m).
-Both are failed attempts as before, but for a silent stop: they count against the profile for the escalation
+Both are failed attempts, but for a stall that is a limit (L4-IMP-087, L4-IMP-112): they count against the profile for the escalation
 (L4-IMP-017) and against `implementer.max_task_attempts`, and they are not limits (no cool-down). An idle stop with no
-tool call and more than one implementer profile is a silent stop and is not counted. The progress log SHALL print
+tool call and more than one implementer profile is a silent stop and is not counted; an idle stop after a tool call and a
+time-limit stop are stalls too, and each is a limit, once per task, when L4-IMP-112 says so. The progress log SHALL print
 `agent.idle` at WARNING as `task <k> <phase> attempt <n>: no activity from <profile> for <idle_timeout>; L4 stopped it
 (implementer.idle_timeout)`, or, when `raised_by` is present, `... L4 stopped it (implementer.idle_timeout, raised to
 <limit> for the longest gate run)`, with the suffix `; no tool call was made, so it is a limit of the profile, not a failed
-attempt` for a silent stop and `; <reason>, so it counts as a failed attempt` for the task's second.
+attempt` for a silent stop and `; <reason>, so it counts as a failed attempt` for the task's second; L4-IMP-116 gives the lines of the other kinds.
 
 While a tool call is open in the stream, the idle clock MUST NOT stop the agent; the step's wall-clock limit still
 applies.
@@ -3500,8 +3502,8 @@ Judges and the delegate skip a cooling profile, as for any limit. A task's secon
 `agent.idle{silent: true}` of the same task and fix unit in the task's window, whatever the profile and the run; the window is
 the one that counts attempts, so a checkpoint of the task, a retry, a resume or a restart ends it) MUST count as a failed
 attempt (`agent.idle{silent: false, reason: "silent: already once for this task"}`), so a chain whose profiles all go silent
-halts on `max_task_attempts` (exit 13) and does not park run after run. An idle stop after at least one tool call, a step that
-reaches its time limit, `implementer.idle_timeout: 0`, the deadline's cancel and every idle stop of a chain with a single
+halts on `max_task_attempts` (exit 13) and does not park run after run. L4-IMP-114 makes this count one for the three kinds
+of stall (L4-IMP-112). `implementer.idle_timeout: 0`, the deadline's cancel and every idle stop of a chain with a single
 profile SHALL count as before. Risk (named, accepted): an agent whose first tool call runs, or which thinks, for longer than
 its idle limit with nothing printed reads as silent; OpenCode (1.x and 2.x share the stream reader) reports a tool
 call only when the call ends, so a first call longer than its idle limit (L4-IMP-099: at least 1.5 times the longest
@@ -3509,6 +3511,98 @@ counted gate run of the unit run, plus 60 s) reads as silent there, at the cost 
 that profile and a move, at most once per task. [V, a consumer's run of 2026-10-29: seven implementer steps in a row on a
 reachable free profile ended by the idle watchdog with no tool call, six with 0 tokens, each after 10 minutes, and every task
 started on that profile again]
+
+**L4-IMP-112 A stall of an implementer step is a limit of its profile, not a failed attempt.** An implementer step (red, green or single, of a unit, a fix unit or a follow-up unit) whose agent run ends with status
+`timeout`, and that the soft deadline did not stop, SHALL be a *stall*, of one of three kinds. `silent`: the idle mark is
+set (L4-IMP-024), a stream reader counted, and it saw no tool call (L4-IMP-087). `idle`: the idle mark is set and the
+stop is not silent, because the reader saw at least one tool call or the adapter has no stream reader. `time`: the idle
+mark is not set, so the agent's wall-clock limit of 1800 s stopped the step. An idle stop that crosses the wall-clock
+limit inside the 5-second grace after its SIGINT keeps the idle mark, so it is `silent` or `idle`. A stall SHALL be a
+limit of its profile (L4-AVL-006) and no failed attempt when all of these hold: `roles.implementer` lists more than one
+profile; the task has no earlier stall limit in its window (L4-IMP-114); and, for kinds `idle` and `time`, a profile after
+this one in `roles.implementer` can take the step (L4-IMP-115). Then the harness SHALL record the stall as L4-IMP-116 says, raise a limit whose kind is
+the stall's kind (L4-AVL-014), and go on as after any limit: no `task.attempt_failed`, nothing toward
+`implementer.escalate_after` or `implementer.max_task_attempts` (L4-IMP-017), the profile cooled, the task going on on
+the next usable profile in a new session, and the next task starting there when the stalled profile was the run's.
+A limit that the adapter itself found on the run SHALL be kept as it is, with the spent veto of L4-IMP-115 added. The soft deadline's cancel and every status
+other than `timeout` SHALL be handled as before. A stall that does not meet all of the conditions SHALL fail the
+attempt as before, with the reason it has today; its record SHALL carry `as_limit: false` and, when L4-IMP-114 or
+L4-IMP-115 is why it did not move, the reason they name (L4-IMP-116). This
+requirement SHALL NOT apply to any other role: a judge, the verifier agent, the clarifier, the delegate and the spec
+writer SHALL keep their own rules.
+
+**L4-IMP-113 The next profile starts from a defined state, and nothing of the stalled step is committed or carried.** When a stall is a limit, the harness SHALL put the work tree back before the next profile's step, by the paths that every
+limit takes. The step's own cleanup SHALL run first and for every status: scratch dropped, HEAD reset to the commit the
+step began on (a commit the agent made is dropped), every protected path put back to that commit (the contract files, the
+unit's directories and `odd.forbidden_paths`; test files are not in that set), gate configuration, Python source encodings and the ledger restored, and a changed environment
+removed. Then `discard_changes` SHALL return every tracked file to HEAD, remove untracked and ignored files (the harness's
+own directories and the ledger kept) and delete the unit's work-in-progress ref. A red commit SHALL stay. The harness
+SHALL hand on only the near pass (L4-IMP-100) that the stalled step began from, as `RoleLimit.carry`, so that the next
+profile's green step starts from that patch and never from the stalled agent's edits. Nothing of the stalled step SHALL
+be committed, and no guard or gate SHALL treat it as a result. The next profile's step SHALL pass through every guard and
+gate of an agent step (L4-IMP-002, L4-IMP-048 and the green freeze) as any step does: those that guard the red tests
+run after an `ok` step only, so a stalled step's edit of a frozen or red test is removed by the discard and by nothing else, and
+the freeze holds because nothing of that step survives. Setup and the baseline
+SHALL run again before it. The attempt number of that step SHALL be the stalled step's again, as after any limit, and
+its agent logs SHALL be kept next to the stalled step's. The stall's record SHALL say how many files the step left
+uncommitted and name the first 20, so that the work that was discarded is not lost silently. When no profile can take
+the step and the unit parks, the tree SHALL already be clean at HEAD. A stall of kind `idle` or `time` SHALL NOT be a limit on a path that
+raises without discarding (L4-IMP-115, a fix task's second move); a silent stop in a fix task that already moved keeps the
+rule of 0.4.60 and parks the unit on that path (L4-IMP-087).
+
+**L4-IMP-114 A task has one stall limit per attempt window, whatever the kind.** A stall SHALL count as the task's stall limit when it is a limit (L4-IMP-112). When the task already has one in its window,
+a stall of any kind, on any profile and in any run, SHALL be a failed attempt: it SHALL record `agent.idle{as_limit:
+false, reason}` or `agent.time_limit{as_limit: false, reason}` with the reason `<kind>: already once for this task` and
+fail with the reason it has today, and it SHALL count against the profile for the escalation (L4-IMP-017) and against
+`implementer.max_task_attempts`. The window SHALL be the one that counts attempts (L4-IMP-075: it ends at a checkpoint of
+the task, a retry, a resume or a restart, of the same fix unit or of none). An earlier stall limit is an `agent.idle` of
+the task and fix unit with `as_limit` true, or with no `as_limit` and `silent` true (a silent stop of an earlier release),
+or an `agent.time_limit` with `as_limit` true. A stall that was not a limit SHALL NOT count as one. A
+`task.attempts_renewed` (L4-IMP-104) SHALL NOT end the window. So a chain whose profiles all stall halts on
+`max_task_attempts` (exit 13) and does not park run after run.
+
+**L4-IMP-115 A stall that cannot move stays a failed attempt, and it moves nothing it should not.** A stall of kind `idle` or `time` SHALL be a limit only when a profile after this one in `roles.implementer` can take the
+step (`Factory.can_replace`, L4-AVL-015), asked through `Workbench.stall_plan(task, phase)`, which the owner of the workbench sets; a workbench with
+none SHALL apply the chain-length test only. A silent stop (L4-IMP-087) SHALL be a limit with no such check; when the spent veto below refuses every other profile it
+waits for capacity (exit 12) instead of halting on a spent profile. A stall of kind `idle` or `time` SHALL move forward
+only: it SHALL hand the step only to a profile after the stalled one in `roles.implementer` that passes every other check
+of `can_replace` (its own cool-down key, not cooling, no failed probe in the cache, the constraints, the spent veto), and
+its fallback SHALL refuse the stalled profile and every earlier one (`Factory.later_than`, carried as `StallPlan.forward`),
+because the chain runs from cheap to strong and a stall of the strongest usable profile must not send the task back to a
+weaker one and cool the model that the judges share with it. A stall on the last usable profile is therefore a failed
+attempt, with the reason below. A silent stop keeps its selection from the chain's start. In a fix
+unit a stall of kind `idle` or `time` SHALL NOT be a limit for a task that has already moved after a limit in this run,
+because the fix loop moves a task once and parks the unit on its second limit, and that path discards nothing
+(L4-IMP-113). Every stall that is a limit SHALL ask its fallback to refuse each profile that is spent for the task's phase
+(its failed attempts of the phase in the task's window are at least `implementer.max_task_attempts`), also when no move of
+this run has set the veto of L4-IMP-094, and also when the adapter's own limit was kept (L4-IMP-112): a fallback that handed
+the step to a spent profile would end the task at once with `max_task_attempts` while a profile before it has attempts left. A stall that is a limit SHALL go through the same fallback
+as every limit, so that: the move asks with that veto and the task's veto and never takes a spent profile, and may take a
+profile that has used its share; the run's profile follows the fallback as for any limit (`switch_profile`); the failure counts, `seed_attempts` and the attempt window (L4-IMP-075, L4-IMP-104) are unchanged, so a
+stall limit is no failed attempt and no renewal; the soft deadline (L4-IMP-067, L4-IMP-068) wins over a stall, and the
+next profile's step starts only when `_check_step` lets it, with the stall limit staying recorded; and with a chain of one
+profile, in an eval cell and in every case of L4-IMP-112 that does not hold, the stall is a failed attempt as before. When
+a stall of kind `idle` or `time` is not a limit because of this requirement, its record SHALL carry `as_limit: false` and
+the reason `<kind>: no other profile can take the step`.
+
+**L4-IMP-116 A stall is recorded and told in the same words in the ledger, the log and the next prompt.** The harness SHALL record an `idle` or `silent` stall in `agent.idle`, before `agent.finished`, with the fields it has and
+the optional `kind` (`silent` or `idle`), `as_limit`, `discarded_files` and `discarded_paths` (at most 20); `silent` SHALL stay true exactly
+when the kind is `silent` and `as_limit` is true; `tool_calls` is optional there too and is left out when no reader counted. It SHALL record a `time` stall in a new `agent.time_limit{task, phase,
+attempt, profile, limit_s, tool_calls?, as_limit, reason?, discarded_files?, discarded_paths?}`, before
+`agent.finished`; `tool_calls` is left out when no reader counted. The `reason` of a stall that was not a limit is
+`<kind>: already once for this task` (L4-IMP-114) or `<kind>: no other profile can take the step` (L4-IMP-115). The excerpt of the
+limit's signal SHALL be `no output for <limit>` for `silent`, `no output for <limit> after <n> tool calls` for `idle`
+(`no output for <limit>` without a count), and `the agent step reached its time limit (<limit>)` for `time`. The
+progress log SHALL print, at WARNING, for `agent.idle` the line of L4-IMP-024 with the suffix `; <n> tool calls were made;
+it is a limit of the profile, not a failed attempt` for an `idle` stall that is a limit (`; it is a limit of the profile,
+not a failed attempt` without a count), the silent suffix of L4-IMP-087 for a silent one, and `; <reason>, so it counts as a
+failed attempt` when `reason` is set; and for `agent.time_limit` `task <k> <phase> attempt <n>: <profile> reached the time
+limit (<limit>)` with `; it is a limit of the profile, not a failed attempt` or `; <reason>, so it counts as a failed
+attempt`. The previous-attempt block of the next profile SHALL say `went silent: <detail>, so L4 stopped it`, `went idle:
+<detail>, so L4 stopped it` or `ran out of time: <detail>, so L4 stopped it`, followed by `, while working on this task`,
+with `limit` `silent`, `idle` or `time` in its attribute and `<detail>` the signal's excerpt. `docs/runbook.md` SHALL
+document these records and lines, and SHALL say that a profile whose `availability.cooldown` records of kind `idle` or
+`time` recur belongs later in `roles.implementer`, which is the consumer's choice and which the harness never changes.
 
 **L4-IMP-088** A baseline reuses the green gate run of the same tree. Within one job, the baseline of a task (the base report
 of red check 4 and of green (b), L4-IMP-002) SHALL be the report of the run's last accepted green test gate, with neither
@@ -5246,8 +5340,8 @@ exit 41 (`auth`). [V, spikes/02, spikes/05]
 **L4-AVL-003** The cool-down registry MUST record `{profile, until, kind, source, recorded_by_run}` in the runner
 cache (`$L4_CACHE/availability.json`) and as a ledger event, and selection MUST skip a cooling profile without
 spending a request. Without a reset time, `availability.default_cooldown` applies. `kind: credits` has no reset time:
-it uses `availability.credits_cooldown` (default 24h) and a doctor warning (ENV-011). `kind: silent` (L4-IMP-087) has no reset
-time either and uses `availability.default_cooldown`. For a binding OpenRouter key
+it uses `availability.credits_cooldown` (default 24h) and a doctor warning (ENV-011). `kind: silent` (L4-IMP-087), `idle` and `time` (L4-IMP-112, L4-AVL-014) have no reset
+time either and use `availability.default_cooldown`. For a binding OpenRouter key
 limit, `resets_at` is the next `limit_reset` boundary [boundary semantics U].
 
 **L4-AVL-004** Model-family limits (e.g. a Claude "Opus limit" or a Gemini Pro quota) affect one model, not the
@@ -5255,7 +5349,7 @@ tool [V, research/02; V, spikes/05: a Google free-tier 429 hit one model while s
 SHOULD list another model on the same tool before switching tools, and the registry key MUST include the model.
 
 **L4-AVL-005** Probe results are cached per `(profile, auth identity hash)` for `availability.cache_ttl`; a real run
-failure, and a silent stop (L4-IMP-087), invalidates the cache entry immediately. A failed `hello` has a class, and the class decides how long it is
+failure, and a stall that is a limit (L4-IMP-087, L4-IMP-112), invalidates the cache entry immediately. A failed `hello` has a class, and the class decides how long it is
 remembered: `limit` (a usage or rate limit) is never cached, the cool-down registry owns it; `auth` (HTTP 401 or 403, or
 authentication wording: the account, the organisation or the key refused the call) is cached for
 `availability.auth_failure_ttl` (default 2m), because a person fixes it; `transient` (a timeout, a 5xx, no result) is not
@@ -5271,7 +5365,9 @@ task's committed progress, re-selects via the chain and starts a fresh session o
 "previous attempt" context. The switch is logged as `availability.fallback` with `from`, `to`, `reason`, `resets_at`.
 An implementer step that the idle watchdog stopped with no tool call, with a later profile in the chain, is a limit of kind
 `silent` (L4-IMP-087): the profile cools for `availability.default_cooldown`, its cached hello is cleared, `reason` is
-`silent`, and nothing counts as a failed attempt; a second limit in one fix task also cools its profile before the unit parks.
+`silent`, and nothing counts as a failed attempt. An idle stop after a tool call and a time-limit stop are limits of kind `idle` and
+`time` under the conditions of L4-IMP-112 and L4-AVL-015, with the same cool-down and a `reason` that is the kind. A second limit in one
+fix task also cools its profile before the unit parks.
 A transient server error (claude: `api_error_status` 529 or 503, or `overloaded_error`) is not a limit: judge, verifier-agent
 and clarifier calls retry it in the run, 3 tries with waits of 20 s and 60 s (a wait the adapter reports replaces them,
 capped at 60 s), one `availability.transient{role, profile, status, attempt, wait_s}` per retry, and after the third try
@@ -5301,6 +5397,25 @@ it, and a unit whose other judges were back ten minutes after the park waited a 
 transient waits `default_cooldown` too: its park is not fix-only (L4-YOLO-035), so an outage does not stop the plan with
 `capacity_needs_fix`; a model that hangs at every hello is probed again at each trigger after the wait, up to the plan's
 `max_runs`. The delegate is optional and keeps L4-DLG-013.
+
+**L4-AVL-014 A stall cools its profile for the default cool-down, with its own kind.** A limit of kind `idle` or `time` (L4-IMP-112) has no reset time, so `availability.default_cooldown` SHALL apply to it, as
+it does to `silent` (L4-AVL-003): the profile's `(tool, model)` is cooled in the registry with that kind and the signal's
+source, its cached hello is cleared (L4-AVL-005), and `availability.limit{kind}`, `availability.cooldown{kind}` and
+`availability.fallback{reason: <kind>}` are recorded. `LimitSignal.kind` SHALL include `idle` and `time`. A selection
+SHALL skip the cooling profile without a request, and `l4 probe` SHALL show its kind. No key SHALL be added. A registry
+entry of kind `idle` or `time` SHALL load in a reader that does not know the kinds (the kind is any string).
+
+**L4-AVL-015 A stall is a limit only when a later profile with another cool-down key can take the step.** `Factory.can_replace(selected, constraints)` SHALL be true when `roles.implementer` lists a profile AFTER `selected` whose
+cool-down key (`(tool, model)`) differs from the key of `selected`, that is not cooling in the registry, whose probe in the
+cache has not failed (the selection would skip it without a probe, L4-AVL-005), and that every
+constraint of the request accepts (the task's veto of a spent profile and the spent veto of L4-IMP-115 among them). It SHALL send no probe and record
+nothing. `Factory.later_than(selected)` SHALL be the constraint that refuses `selected` and every profile before it in the
+chain, which the fallback of a stall of kind `idle` or `time` asks (L4-IMP-115), so that a stall moves forward only. A
+profile that was never probed, or whose failure was transient, is still a candidate. A stall of kind `idle` or `time` SHALL be a limit only when it is true (L4-IMP-115). When it is true and the
+fallback still finds no usable profile (every candidate fails its probe), the unit SHALL park as it does for any limit:
+`waiting_capacity`, exit 12, with `retry_after` the earliest end of a cool-down in the chain (L4-AVL-007), and the tree is
+already clean (L4-IMP-113). A stall's cool-down is longer than `availability.wait_in_run` under the defaults, so the run
+SHALL NOT wait for it unless a deployment sets `wait_in_run` and `wait_in_run_max_total` above it (L4-AVL-011).
 
 **L4-AVL-008** Logging: every selection MUST produce one human-readable line per considered profile and one
 structured event (`availability.selected`; a selection that finds nothing usable writes `availability.unavailable{role,
@@ -7470,7 +7585,7 @@ runs to decide the near pass.
 
 A repair proposal adds these records (L4-IMP-091, L4-VER-073): `repair_blobs` on `question.raised` of `kind: harness` with `check: repair` (`{path: [blob before, blob after]}` for each file the saved patch changes, from a temporary index of the step base with the patch applied, never from the work tree; the raise also carries the digests of the saved step, `patch_sha256` and `result_sha256`); `task.repaired` (`{task, base, files, tests, ids, proved, sha10, question, patch_sha256}`: written before the commit of a replayed repair, `proved` maps each test id to how it was proved and `sha10` ties the proof to the content of its file, `question` and `patch_sha256` are the replay's); `held.replayed` for the replay of an accepted repair (the `patch_sha256` that `task.repaired` repeats and the verifier compares, after the answer of a person by position in the ledger); and `held.accept_ignored` (`{question, task, check, by?}`: once per question, also for `check: repair` when a recorded `accept` was given by an `agent` or the `delegate`, which `by` names, because only `question.answered{by: human}` applies a repair).
 
-Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls, silent, limit_s, raised_by?, reason?}`, once for an agent that L4 stopped for silence, before `agent.finished`; `silent: true` is a silent stop, a limit of the profile that counts as no attempt, and `reason` names the task's second silent stop, which counts, L4-IMP-087), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
+Run liveness adds these records (L4-IMP-024, L4-OPS-020, L4-OBS-004): `agent.idle` (`{task, phase, attempt, profile, silent_s, tool_calls?, silent, limit_s, raised_by?, reason?, kind?, as_limit?, discarded_files?, discarded_paths?}`, once for an agent that L4 stopped for silence, before `agent.finished`; `silent: true` is a silent stop that is a limit, which counts as no attempt, `kind` is `silent` or `idle`, `as_limit` says whether the stop was a limit, `reason` names the task's second stall or the lack of a profile to replace this one, which count (L4-IMP-087, L4-IMP-112..116), and `discarded_files`/`discarded_paths` (at most 20) are the files a limit's step left uncommitted), `agent.time_limit` (`{task, phase, attempt, profile, limit_s, tool_calls?, as_limit, reason?, discarded_files?, discarded_paths?}`, once for a step that reached the agent's 1800 s limit, before `agent.finished`; L4-IMP-116), `ci_url` on `run.started` (the run's CI link, with `<forge>` in place of the host), and `red_new_failing` on the `gate.finished` of a red test gate that fails only on new tests. The heartbeat of L4-IMP-023 is a log line, not a record.
 
 Sandbox isolation adds these records (L4-SEC-036, L4-SEC-037): `env.rebuilt` (`{tree, dirs, phase, added, changed, removed, reason, declared, planted_more}`, once for a removal of an environment directory: `tree` is `worktree` or the name of another checkout, `dirs` the directories removed, `added`/`changed`/`removed` counts, `reason` one of `changed`, `created` and `unverified`, `declared` whether a lock file changed in the step, `planted_more` the paths not named below), `guard.violation` with `rule: "environment"` (`{path, rule, action: "removed", phase}`, one per planted path, at most 20 with the notices) and `guard.notice` (`{path, rule: "environment", action: "removed", phase}`: a dependency upgrade without a lock-file change, reported and not failing; it is not a guard note for the next prompt).
 
@@ -10143,6 +10258,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 140 | `attempt-window-recheck` | an answer that unfreezes a file for a task's green renews its attempts once, and a step runs its test gate once more before it fails on a few pre-existing tests. `l4.implementer.loop._renew_on_answers` (new): before a task's first green attempt in a run (a resumed red commit, before the start escalation; or a red commit of the run), the grants of `unfreeze_for` with `reason` `human_answer` or `delegate_answer` and a path, whose question no earlier `task.attempts_renewed` of the task names, record `task.attempts_renewed{task, phase, questions, failed}` and clear the green failures, reasons and `escalated_from`; a question is credited once, by a renewal or by an earlier answer `task.unfrozen` that names it; attempt numbers go on; at most 2 renewals with `failed > 0` per task after the newest retry, resume or restart (`MAX_RENEWALS`), so at most three green windows between two of them (3 x `max_task_attempts` failed attempts with one profile); `seed_attempts` clears at the event; `deadline.window` is unchanged. `l4.implementer.recheck` (new): `recheck_candidates` (1 to 5 regressed ids, failed or errored, no time-out marker, in a file neither the branch nor the step changed: `gate_repeat.untouched`, factored out of `pre_existing`), the `test-recheck` run after `tree_reset` and `gate_repeat.short_of_time` (now public), the step's guard after it, the merged report (each flaky test's case from the re-run) judged again and handed on (`keep_tested` too), `task.tests_rechecked`; `RedVerdict.regressed` and the branch of `green_failures`; red, green and the fix, tests and refactor chores, not the repair chore. `VerifyResult.step_flakes` from the ledger, the section `Pre-existing tests that passed on a task step's re-run (L4-IMP-105)` of `verification.md` and `verdict.json`'s `step_flakes`, kept by a reused round; no finding. Three times in two consumer units an accepted unfreeze left one green attempt, and three attempts in two units were lost to pre-existing tests of an e2e stack helper that failed once (L4-IMP-104, L4-IMP-105, L4-VER-082, L4-IMP-075, SCN-IMP-566..576, SCN-VER-322..323; `openspec/changes/attempt-window-recheck/`). Limits: an answer that opens nothing renews nothing; the gate runs whole; the re-run needs room before the soft deadline (`deadline.cap_s` is unchanged); a step that made a test flaky can pass its attempt, and is listed | the unit tests (`test_attempt_renewal`, `test_recheck`, `test_step_recheck`, `test_report_step_flakes`, `test_loop`, `test_gate_repeat`, `test_tdd_green`, `test_tdd_red`) |
 | 141 | `ui-carry-unchanged` | a UI criterion that the unit did not change, whose tracing tests are the base's and pass, is carried from the base instead of a step-5 gap that can only end as a hold (SLIPPABLE: it loosens L4-VER-067 for that case). `l4.verifier.ui_step.carried_from_base(gaps, trace, unchanged, file_of, changed, rejected)` (new, pure): a criterion unchanged on the base (`_Run.unchanged`, the `unchanged_ids` of step 4's baseline), `covered` with no `held` reason, every tracing test passed with `pass_to_pass`, no note, within the cap and adequate, every ignored test a passing over-cap candidate, every test file found (`ladder._carry_files`: `carry_file` over the work tree) and not among the unit's changed files; `rejected_ui_criteria(events, criteria)` (new): a criterion among `criteria` that a reviewer ever rejected, or one of its UI holds, is never carried; `carry_file(test_id, walked, paths)` (new, pure): the file of a test for the carry, found only when `file_of_id` places the id, no other file of the tree could be it, and the dotted-module walk agrees or finds no module for a file that is not `.py`. `ladder._generate_step` carries after the waiver and before the gap findings and the writer (also with no writer), records `verify.generated{status: carried, covered_by, attempts: 0}`, keeps the outcome (`GenStatus` `carried`), counts it in step 5's note and checks nothing out when every gap is waived or carried; `ui_gap_finding(carried=True)`, `unclosed_holds` and the fix planner's closed set treat it as closed (`lost_notes` is unchanged: taking `carried` would bring the hold back after step 9); `report._generated_rows` writes `carried from the base: <ids> …; a note, not a hold (L4-VER-086)`. A carry passes nothing: the judge's pass and an adequate test are still needed. A consumer's feedback follow-up that changed one web file raised UI holds for three of its merged parent's criteria that were word for word the base's and traced by passing `pass_to_pass` tests, which only the owner could answer (L4-VER-086, L4-VER-067, L4-VER-009, SCN-VER-343..349 and SCN-VER-351; `openspec/changes/ui-carry-unchanged/`). Not done: fuzzy matching of a restated scenario (a scenario with any changed word stays a new criterion); a pass-to-pass browser check of a carried criterion. Residual risk: a break of the browser side of an unchanged scenario that its base unit tests and the judge miss is no longer asked about | the unit tests (`test_ui_step`, `test_ui_flow`, `test_report_m15`, `test_resume`, `test_fixunit`) |
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
+| 143 | `implementer-stall-limit` | an implementer step that stalls on a profile, by an idle stop after a tool call or at the agent's 1800 s limit, is a limit of that profile when a later profile can take the step, once per task window, and no failed attempt. `l4.implementer.tdd.agent_step` names a stall of kind `silent` (L4-IMP-087, unchanged), `idle` (an idle mark with a tool call seen, or from an adapter with no stream reader) or `time` (status `timeout` with no idle mark), and raises `RoleLimit(run, carried)` with a `LimitSignal` of that kind (`LimitSignal.kind` gains `idle` and `time`; source `run.idle` or `run.timeout`; excerpt `no output for <t> after <n> tool calls` or `the agent step reached its time limit (<t>)`) when `roles.implementer` lists more than one profile, `_stalled_before` (replaces `_silent_before`: an `agent.idle` or `agent.time_limit` with `as_limit` true, or a 0.4.60 `agent.idle{silent: true}`, of the task and fix unit in `deadline.window`; `task.attempts_renewed` does not end the window) finds none, and, for `idle` and `time`, `StallPlan.replaceable` holds (a profile after the stalled one). `Workbench.stall_plan(task, phase)` (new optional field, set by `Orchestrator._workbench` and `fixloop._child_workbench`; the fix loop's says not replaceable for an `idle` or `time` stall of a task already in `retried`) gives a `StallPlan(replaceable, veto, forward)`: `replaceable` is `Factory.can_replace(selected, constraints)` (new: a profile AFTER `selected` in the chain with another `(tool, model)` cool-down key, not cooling, with no failed probe in the cache (`FallbackSelector.cached_failure`), accepted by the request's constraints and by the veto; no probe sent), `forward` is `Factory.later_than(selected)`, the constraint that refuses the stalled profile and every earlier one (a stall moves forward only: the chain runs from cheap to strong), which `StallPlan.refusing(kind)` joins to the veto for `idle` and `time` and not for `silent` and `veto` a `Constraint` that refuses the profiles whose failed attempts of the phase in the window (`seed_attempts`) reached `max_task_attempts`, which `agent_step` puts on the signal (`LimitSignal.veto`, outside equality and repr) and `switch_profile` adds to the task's veto, for all three kinds and for an adapter's own limit that a stall kept, because a limit fallback selects again from the chain's start and could hand the step to a spent profile, which `run_task` ends at once with `max_task_attempts`. The cool-down is `availability.default_cooldown` through the existing `cooldown_until`, the hello is cleared, `availability.limit`, `availability.cooldown` and `availability.fallback` carry the kind, and the existing `_fall_back` discards the step's work (`Workbench.discard_changes`, the red commit stays) and hands on the near pass the step began from (`RoleLimit.carry`), never the stalled edits. `agent.idle` gains optional `kind`, `as_limit`, `discarded_files` and `discarded_paths`; a new `agent.time_limit` is written before `agent.finished`; a stall that is not a limit carries `as_limit: false` and the reason `<kind>: already once for this task` or `<kind>: no other profile can take the step`. `ProgressTrace._agent_idle` gains the suffixes and `_agent_time_limit` is new; `_previous_attempt_block`, `orchestrator.switch_profile` and `fixloop._fall_back` carry the detail of all three kinds. A consumer plan with a free-profile-first chain lost 32 of 171 implementer calls, 586 agent minutes, to idle and time-limit stops that each cost an attempt; the same free profile went silent again in 9 of 12 next attempts (L4-IMP-112..116, L4-AVL-014..015, L4-IMP-017, L4-IMP-024, L4-IMP-087, L4-IMP-094, L4-IMP-100, L4-AVL-003, L4-AVL-006; `openspec/changes/implementer-stall-limit/`). Limits: a chain of one profile, the silent stop's own rule (it still parks when nothing else is usable), every other role and every other status are unchanged; a profile that `can_replace` accepts can still fail a probe it was never asked (none cached, or a transient failure) and park the unit; the stalled step's edits are not kept | the unit tests (`test_liveness_step`, `test_stall_limit`, `test_escalation`, `test_near_pass_carry`, `test_fallback` of availability, `test_fixloop_fallback`, `test_progress`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -11043,6 +11159,61 @@ scenario is a spec defect (§26).
 - **Given** one profile fails its login and another is cooling; or every profile fails its login or its binary
 - **When** the role is selected
 - **Then** `retry_after` is the cool-down's end; or the time of the park
+
+#### SCN-AVL-37 (+) A stall cools for the default cool-down, and the length is the key's · L4-AVL-014, L4-AVL-003
+- **Given** `availability.default_cooldown: 30m` and a `time` stall on `free`, then the same with `10m`
+- **When** the limit is recorded
+- **Then** the registry entry for `free` has `kind: time`, `source: run.timeout` and an end 30 minutes, then 10 minutes, after
+  the stall, and `availability.cooldown` carries the same
+
+#### SCN-AVL-38 (+) The cooled profile is skipped, and its hello is asked again afterwards · L4-AVL-014, L4-AVL-005
+- **Given** an `idle` stall on `free` whose hello was cached as passed
+- **When** a selection runs before the cool-down ends, and another after it
+- **Then** the first skips `free` with `cooling until <time> (idle); no probe sent`, and the second sends the hello again
+
+#### SCN-AVL-39 (−) With every other profile cooling, a stall is a failed attempt · L4-AVL-015, L4-IMP-115
+- **Given** `roles.implementer: [free, glm]`, `free` cooling, and an `idle` stall on `glm`
+- **When** the step ends
+- **Then** no profile is cooled, `agent.idle{as_limit: false, reason: "idle: no other profile can take the step"}` and
+  `task.attempt_failed` are recorded, and the unit does not park
+
+#### SCN-AVL-40 (−) A profile with the same cool-down key is no replacement · L4-AVL-015
+- **Given** `roles.implementer: [free-a, free-b]`, both of one adapter and one model, neither cooling, and a `time` stall on
+  `free-a`
+- **When** the step ends
+- **Then** `can_replace` is false, the stall is a failed attempt, and `free-b` is not cooled
+
+#### SCN-AVL-41 (−) A profile the task has spent is no replacement · L4-AVL-015, L4-IMP-094
+- **Given** `roles.implementer: [free, glm]`, `glm` with `max_task_attempts` failed green attempts of the task in its
+  window, and a `time` stall on `free`
+- **When** the step ends
+- **Then** the stall is a failed attempt with the reason `time: no other profile can take the step`, and nothing cools
+
+#### SCN-AVL-42 (+) A replacement that fails its probe parks the unit, with the tree clean · L4-AVL-015, L4-AVL-007, L4-AVL-011
+- **Given** `roles.implementer: [free, glm]`, `glm` not cooling and not spent but failing its hello, and a `time` stall on
+  `free`
+- **When** the limit is handled
+- **Then** `free` cools for `default_cooldown`, the work tree is clean at HEAD, no in-run wait happens, and the unit parks
+  with exit 12 and `retry_after` the end of that cool-down
+
+#### SCN-AVL-43 (+) An older reader loads the new kinds · L4-AVL-014
+- **Given** a cool-down file with entries of kind `idle` and `time`
+- **When** it is read by `CooldownRegistry` and printed by `l4 probe`
+- **Then** both entries load, cool their profiles, and show their kinds
+
+#### SCN-AVL-44 (+) `can_replace` looks only forward, and the fallback of a stall asks for it · L4-AVL-015, L4-IMP-115
+- **Given** `roles.implementer: [free, glm, sonnet]`, all usable and none cooling
+- **When** `can_replace` is asked for a stall on `glm` and on `sonnet`, and `later_than` is put on the selection that follows
+  a stall of `glm`
+- **Then** it is true for `glm` (`sonnet` follows) and false for `sonnet` although `free` and `glm` are usable, and the
+  selection refuses `free` and `glm` (`earlier: <name> is not after <stalled> in the chain`)
+
+#### SCN-AVL-45 (−) A profile whose cached probe failed is no replacement · L4-AVL-015, L4-AVL-005
+- **Given** `roles.implementer: [free, glm]`, `glm` not cooling with a cached failed hello (the model answered wrongly), and
+  a `time` stall on `free`
+- **When** `can_replace` is asked
+- **Then** it is false and no probe is sent, so the stall is a failed attempt with `time: no other profile can take the
+  step`; a profile never probed, or whose failure was transient and so not cached, is still a candidate
 
 ### 23.6.1 Agent factory contracts (FAC)
 
@@ -12015,7 +12186,7 @@ scenario is a spec defect (§26).
 - **Given** `implementer.idle_timeout: 10m`, and a red step of task 2.1 on the profile `deepseek` whose agent prints three stream lines, makes one tool call that ends, and then prints nothing with no open call
 - **When** 10 minutes pass with no line
 - **Then** the agent's process group gets SIGINT, and SIGKILL 5 seconds later if it still runs; the run's status is `timeout`; the ledger has `agent.idle{task: "2.1", phase: "red", attempt: 1, profile: "deepseek", silent_s: 600, tool_calls: …}` before `agent.finished`
-- **And** `task.attempt_failed` has the reason `the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it`, the next prompt carries it, and with `escalate_after: 2` and a second profile in `roles.implementer`, two idle attempts move the phase to the second profile (an idle stop with no tool call at all is a silent stop, SCN-IMP-426)
+- **And** with `deepseek` the only profile of `roles.implementer`, or when the stop is its task's second stall (L4-IMP-114; with a second profile and no earlier stall it is a stall limit, SCN-IMP-602), `task.attempt_failed` has the reason `the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it`, the next prompt carries it, and with `escalate_after: 2` and a second profile in `roles.implementer`, two idle attempts move the phase to the second profile (an idle stop with no tool call at all is a silent stop, SCN-IMP-426)
 
 #### SCN-IMP-203 (−) An open tool call is not idle; an OpenCode silence is · L4-IMP-024
 - **Given** `implementer.idle_timeout: 10m` and, in turn, a codex step whose stream shows `item.started` of a `command_execution` and then nothing for 12 minutes before its `item.completed`, a claude-code step with a `tool_use` block and no `tool_result` for 12 minutes, a kiro-cli step with a `tool_call` and no end for 12 minutes, and an opencode step with no line for 12 minutes
@@ -12024,7 +12195,7 @@ scenario is a spec defect (§26).
 - **And** the opencode agent is stopped at 10 minutes as in SCN-IMP-202, because its stream shows a tool call only when the call ends; with a later profile in `roles.implementer` the stop is a silent stop (SCN-IMP-426, L4-IMP-087)
 
 #### SCN-IMP-204 (−) With the watchdog off, only the time limit stops the step, with its own reason · L4-IMP-024
-- **Given** `implementer.idle_timeout: 0` and an agent that prints nothing for 20 minutes, and with the default an agent that prints one line every minute for 30 minutes
+- **Given** `implementer.idle_timeout: 0` and an agent that prints nothing for 20 minutes, and with the default an agent that prints one line every minute for 30 minutes, with one profile in `roles.implementer` (with a second profile the time-limit stop is a stall limit, SCN-IMP-603)
 - **When** the steps run
 - **Then** the first is not stopped at 20 minutes and no `agent.idle` is recorded; the second is stopped at the step's limit and its attempt fails with `the agent step reached its time limit (30m)`, with no `agent.idle`
 
@@ -13366,15 +13537,15 @@ scenario is a spec defect (§26).
 - **When** the step ends
 - **Then** `agent.idle{silent: true}`, `availability.limit{kind: silent}`, `availability.cooldown{profile: free, kind: silent}` and `availability.fallback{reason: silent}` are recorded, no `task.attempt_failed` is, the step runs again on `glm` with a note that `free` went silent, and the next task starts on `glm`
 
-#### SCN-IMP-427 (−) An idle stop after a tool call counts as before · L4-IMP-087, L4-IMP-024
-- **Given** `roles.implementer: [free, glm]` and a step that made one tool call and then went idle
+#### SCN-IMP-427 (−) An idle stop after a tool call counts when it is the task's second stall · L4-IMP-087, L4-IMP-024, L4-IMP-112
+- **Given** `roles.implementer: [free, glm]`, a task that already has a stall limit in its window, and a step that made one tool call and then went idle
 - **When** the watchdog stops it
-- **Then** `agent.idle{silent: false}` and `task.attempt_failed` are recorded and no profile cools
+- **Then** `agent.idle{silent: false, as_limit: false, reason: "idle: already once for this task"}` and `task.attempt_failed` are recorded and no profile cools; the same step of a task with no stall limit is SCN-IMP-602
 
-#### SCN-IMP-428 (−) A step that reaches its time limit counts as before · L4-IMP-087, L4-IMP-024
-- **Given** `roles.implementer: [free, glm]` and a step with no tool call that reaches the wall-clock limit of the step
+#### SCN-IMP-428 (−) A step that reaches its time limit counts when it is the task's second stall · L4-IMP-087, L4-IMP-024, L4-IMP-112
+- **Given** `roles.implementer: [free, glm]`, a task that already has a stall limit in its window, and a step with no tool call that reaches the wall-clock limit of the step
 - **When** it ends
-- **Then** it is a failed attempt with the time-limit reason, and no profile cools
+- **Then** it is a failed attempt with the time-limit reason (`agent.time_limit{as_limit: false, reason: "time: already once for this task"}`), and no profile cools; the same step of a task with no stall limit is SCN-IMP-603
 
 #### SCN-IMP-429 (−) A single profile counts its silent stops · L4-IMP-087
 - **Given** `roles.implementer: [free]` and a step stopped idle with no tool call
@@ -14107,7 +14278,7 @@ scenario is a spec defect (§26).
 - **Then** its idle limit is 632 s (1.5 × 381, plus 60, rounded up); a claude-code step in the same run has 300 s
 
 #### SCN-IMP-538 (−) An opencode agent silent beyond the raised limit is stopped and told why · L4-IMP-099, L4-IMP-024
-- **Given** the step of SCN-IMP-537, whose agent made tool calls and then printed nothing for 632 s
+- **Given** the step of SCN-IMP-537 with one profile in `roles.implementer` (with a second profile the stop is a stall limit, SCN-IMP-602), whose agent made tool calls and then printed nothing for 632 s
 - **When** the watchdog stops it
 - **Then** `agent.idle` holds `limit_s: 632`, `raised_by: {gate: "baseline", seconds: 381}` and `silent: false`, and the
   attempt fails with `the agent showed no activity for 10m (implementer.idle_timeout 5m, raised to the longest gate run
@@ -14158,7 +14329,7 @@ scenario is a spec defect (§26).
 - **Then** attempt 3 starts from the red commit in the first case, and from attempt 2's changes in the second
 
 #### SCN-IMP-545 (−) The halt names the nearest attempt · L4-IMP-100
-- **Given** a task whose green attempt 4 (claude-sonnet) was a near pass and whose attempt 5 reached the step's time limit,
+- **Given** one profile in `roles.implementer`, and a task whose green attempt 4 (claude-sonnet) was a near pass and whose attempt 5 reached the step's time limit,
   after which the profile is spent
 - **When** the task halts
 - **Then** its reason reads `task 1.1: max_task_attempts (5) reached in green; nearest: attempt 4 (claude-sonnet) passed
@@ -14485,6 +14656,171 @@ scenario is a spec defect (§26).
   `tests/test_discount.py` and says the missing check goes in a new test file, the task is not ticked and no
   `task.done{tdd: "already-done"}` is recorded; a first take with the same step fails `no tests added:`, and a retake
   whose step changes only a test-support file is still `already-done`
+
+#### SCN-IMP-602 (+) An idle stop after tool calls is a limit and the task moves on · L4-IMP-112, L4-IMP-116, L4-AVL-014
+- **Given** `roles.implementer: [free, glm]`, `escalate_after: 2`, and a green step on `free` that made 14 tool calls and
+  then printed nothing with no tool call open, while `glm` is usable
+- **When** the idle watchdog stops it after 10 minutes
+- **Then** `agent.idle{kind: idle, as_limit: true, silent: false, tool_calls: 14}`, `availability.limit{kind: idle,
+  source: run.idle}`, `availability.cooldown{profile: free, kind: idle}` and `availability.fallback{reason: idle}` are
+  recorded, and no `task.attempt_failed` is
+- **And** the step runs again on `glm` in a new session whose previous-attempt note says `free` went idle (`no output for
+  10m after 14 tool calls`), and the next task starts on `glm`
+
+#### SCN-IMP-603 (+) A time-limit stop is a limit and the task moves on · L4-IMP-112, L4-AVL-014
+- **Given** `roles.implementer: [free, glm]` and a green step on `free` that prints a line every minute and reaches the
+  agent's limit of 1800 s, while `glm` is usable
+- **When** the step ends
+- **Then** `agent.time_limit{as_limit: true, limit_s: 1800}` is recorded and no `agent.idle` is, with `availability.limit{kind:
+  time, source: run.timeout}`, `availability.cooldown{profile: free, kind: time}` and `availability.fallback{reason: time}`
+- **And** no `task.attempt_failed` is recorded, and `glm` runs the step with a note that `free` ran out of time (`the agent step reached
+  its time limit (30m)`)
+
+#### SCN-IMP-604 (+) The next profile starts from HEAD, and the discarded work is recorded · L4-IMP-113
+- **Given** a green step on `free` that edited a frozen red test, two source files and `AGENTS.md`, and was stopped as a stall
+- **When** the next profile's step starts
+- **Then** `guard.violation` shows `AGENTS.md` put back by the step's cleanup, `agent.idle` or `agent.time_limit` has
+  `discarded_files: 3` and `discarded_paths` with the test and the two source files, the work tree holds no change, the frozen test
+  has the content of the red commit, the red commit is still the branch's head, and nothing of the stalled step is in a commit
+
+#### SCN-IMP-605 (+) A near pass is handed on, not the stalled edits · L4-IMP-113, L4-IMP-100
+- **Given** green attempt 1 on `free` that passed every test and failed only its lint gate (a near pass), and attempt 2 on
+  `free`, started from that near pass, that was stopped as a stall after editing other files
+- **When** the step runs on `glm`
+- **Then** `task.near_pass_applied{from_attempt: 1}` is recorded for it, its work tree holds attempt 1's patch and none of
+  attempt 2's edits, and its prompt has the near-pass block and the previous-attempt block of the stall
+
+#### SCN-IMP-606 (+) A stalled red step leaves nothing for the next red · L4-IMP-113, L4-IMP-002
+- **Given** a red step on `free` that wrote two test files and was stopped as a stall
+- **When** `glm`'s red step starts
+- **Then** the tree holds none of the two files, red's scope check and its test-tamper guards run on `glm`'s step only, and
+  the task has no red commit until `glm`'s step passes them
+
+#### SCN-IMP-607 (−) A task's second stall counts, whatever its kind · L4-IMP-114, L4-IMP-017
+- **Given** `roles.implementer: [free, glm]`, and a task whose first stall, an idle stop on `free`, was a limit that moved it
+  to `glm`
+- **When** the step on `glm` reaches the agent's time limit
+- **Then** `agent.time_limit{as_limit: false, reason: "time: already once for this task"}` and `task.attempt_failed` with the
+  reason `the agent step reached its time limit (30m)` are recorded, and `glm` is not cooled
+
+#### SCN-IMP-608 (+) A silent stop of an earlier release is the task's first stall · L4-IMP-114, L4-IMP-087
+- **Given** a ledger written by an earlier release with `agent.idle{silent: true}` of task 1.2 in its window and no `kind`
+  or `as_limit`
+- **When** a step of task 1.2 reaches the agent's time limit
+- **Then** it is a failed attempt with the reason `time: already once for this task`
+
+#### SCN-IMP-609 (+) A checkpoint opens a new window, and a renewal does not · L4-IMP-114, L4-IMP-075, L4-IMP-104
+- **Given** a task whose red step was a stall limit, a red commit, and then a green step that stalls on its first profile
+- **When** the green step ends
+- **Then** it is a stall limit again, because `task.red_committed` ended the window; and a task whose green window holds a
+  stall limit and a `task.attempts_renewed` still has its next stall as a failed attempt
+
+#### SCN-IMP-610 (−) A chain of one profile is unchanged · L4-IMP-112, L4-IMP-087
+- **Given** `roles.implementer: [free]` and, in turn, an idle stop after a tool call and a step that reaches the agent's limit
+- **When** each ends
+- **Then** each is a failed attempt with its reason of before, no profile cools, and the record has `as_limit: false` and no
+  `reason`
+
+#### SCN-IMP-611 (−) A stall with no profile to replace it stays a failed attempt · L4-IMP-115, L4-AVL-015, L4-IMP-094
+- **Given** `roles.implementer: [free, glm, sonnet]`, `free` cooling, `sonnet` spent for the task's green phase (3 failed
+  attempts), and a step on `glm` that reaches the agent's limit
+- **When** the step ends
+- **Then** `agent.time_limit{as_limit: false, reason: "time: no other profile can take the step"}` and `task.attempt_failed`
+  are recorded, no profile is cooled, and the unit does not park
+
+#### SCN-IMP-612 (+) A stall limit adds nothing to the escalation or the attempt count · L4-IMP-114, L4-IMP-017
+- **Given** `roles.implementer: [free, glm, sonnet]`, `escalate_after: 2`, `max_task_attempts: 3`, and one stall limit of the
+  task on `free`
+- **When** `glm`'s step fails twice
+- **Then** `free` has no failed attempt, `glm` has two and the phase moves by L4-IMP-017 to `sonnet`, and the stall limit is
+  no `implementer.escalated`
+
+#### SCN-IMP-613 (−) The soft deadline wins, and a step that does not fit is not started · L4-IMP-115, L4-IMP-067, L4-IMP-068
+- **Given** an armed soft deadline, and in turn a step that the deadline stops while the agent has been idle for 12
+  minutes, and a time-limit stall that leaves 5 minutes
+- **When** each ends
+- **Then** the first is `cancelled`, writes no stall record and hands the step back (L4-IMP-068); the second is a stall
+  limit, and the next profile's step is not started (`deadline.reached{when: before}`), the stall limit counting in the
+  window of the next run
+
+#### SCN-IMP-614 (+) A fix task's first stall moves it · L4-IMP-115, L4-IMP-113
+- **Given** a fix unit whose task has not moved, `roles.implementer: [free, glm]`, and a step on `free` stopped as an idle
+  stall after tool calls
+- **When** the step ends
+- **Then** the profile cools, the fix task's work is discarded, and `glm` runs the task in a new session
+
+#### SCN-IMP-615 (−) A fix task that already moved does not park the unit on a stall · L4-IMP-115, L4-IMP-113
+- **Given** a fix task that moved from `free` to `glm` after a usage limit in this run, and a step on `glm` that reaches the
+  agent's limit
+- **When** the step ends
+- **Then** it is a failed attempt with `reason: "time: no other profile can take the step"`, nothing cools, the unit is not
+  parked, and the stalled step's work is discarded by the failed attempt's own path
+
+#### SCN-IMP-616 (−) A limit that the adapter found on a stalled run is kept · L4-IMP-112, L4-AVL-006
+- **Given** `roles.implementer: [free, glm]` and a step on `free` that ends with status `timeout` after the adapter read a
+  rate limit with a reset time from its stream
+- **When** the step ends
+- **Then** `availability.limit` and `availability.cooldown` carry that limit's kind and reset time, not the stall's, the
+  limit refuses the profiles that are spent for the phase (L4-IMP-115), and `agent.idle` or `agent.time_limit` still
+  records the stall
+
+#### SCN-IMP-617 (+) An idle stop of an adapter with no stream reader is an idle stall · L4-IMP-112, L4-IMP-024
+- **Given** `roles.implementer: [script, glm]`, where `script` is a `command` profile whose adapter has no stream reader,
+  and a step of it that prints nothing for the idle limit
+- **When** the watchdog stops it
+- **Then** `agent.idle{kind: idle, as_limit: true}` has no `tool_calls` count, `availability.limit{kind: idle}` has the
+  excerpt `no output for 10m`, and the task moves to `glm` without a failed attempt
+
+#### SCN-IMP-618 (−) An idle stop that crosses the time limit in its grace keeps its idle kind · L4-IMP-112, L4-IMP-024
+- **Given** a step whose idle rule fires in the same poll as the 1800 s limit, so that the runner sets both flags
+- **When** the step ends
+- **Then** it is an `idle` or `silent` stall by its tool-call count, `agent.idle` is recorded and `agent.time_limit` is not
+
+#### SCN-IMP-619 (−) Another role's time-out is not a stall · L4-IMP-112
+- **Given** a judge, a verifier-agent writer, a clarifier and a delegate call that each time out, with a second profile in
+  their chains
+- **When** the calls end
+- **Then** each is handled by its own rule as before, and no `agent.time_limit` and no `kind: time` cool-down is recorded
+
+#### SCN-IMP-620 (+) The records, the lines and the note name each kind · L4-IMP-116
+- **Given** one stall limit of each kind, one stall that was a second stall of its task, and one with no replacement
+- **When** the ledger, the progress log and the next prompts are read
+- **Then** each record has the fields above, each progress line has its suffix, `availability.limit` has the kind, and each
+  previous-attempt block has its sentence and attribute, with no text of the agent in any of them
+
+#### SCN-IMP-621 (+) A silent stop keeps its behaviour · L4-IMP-114, L4-IMP-087, L4-AVL-015
+- **Given** `roles.implementer: [free, glm]`, `glm` cooling, and a step on `free` stopped with no tool call
+- **When** the step ends
+- **Then** it is a silent limit as in SCN-IMP-426, with no check for a replacement, and the unit waits for capacity (exit 12)
+  as L4-IMP-087 says
+
+#### SCN-IMP-622 (+) A stall never hands the step to a spent profile · L4-IMP-115, L4-IMP-094
+- **Given** `roles.implementer: [free, glm, sonnet]`, `glm` with `max_task_attempts` failed green attempts of the task in its
+  window (from an earlier run), no move of this run, and a green step on `free` stopped as a stall
+- **When** the limit is handled
+- **Then** `availability.fallback` goes from `free` to `sonnet`, `glm`'s step is never started, and the task does not halt on
+  `max_task_attempts`
+
+#### SCN-IMP-623 (+) A stall on a middle profile moves to a later one, never to an earlier usable one · L4-IMP-115, L4-AVL-015
+- **Given** `roles.implementer: [free, glm, sonnet]`, a task that moved from `free` to `glm` after `free` stalled in red,
+  `free`'s cool-down over by the time `glm` runs the green step, and that green step reaching the agent's limit
+- **When** the step ends
+- **Then** `availability.fallback` goes from `glm` to `sonnet`, not back to `free`, which is usable and comes first in the
+  chain, and no attempt fails
+
+#### SCN-IMP-624 (−) A stall on the last profile is a failed attempt, though an earlier profile is usable · L4-IMP-115, L4-AVL-015
+- **Given** `roles.implementer: [free, glm]`, the task on `glm` after a stall of `free` whose cool-down is over, and a green
+  step on `glm` that reaches the agent's limit
+- **When** the step ends
+- **Then** `agent.time_limit{as_limit: false, reason: "time: no other profile can take the step"}` and `task.attempt_failed`
+  are recorded, no profile is cooled, `free` is not asked to take the step, and the task goes on on `glm`
+
+#### SCN-IMP-625 (+) A silent stop keeps its selection, and an adapter's own limit never reaches a spent profile · L4-IMP-115, L4-IMP-087, L4-IMP-112
+- **Given** the chain of SCN-IMP-624 and, in turn, a green step on `glm` stopped with no tool call, and a green step on `glm`
+  that ends `timeout` after the adapter read a rate limit, with `free` spent for the green phase in the second case
+- **When** each limit is handled
+- **Then** the silent stop goes back to `free`, as in 0.4.60; the adapter's limit keeps its kind and reset time and does not
+  hand the step to the spent `free`
 
 ### 23.8 Questions and clarifier (QMD, CLR)
 

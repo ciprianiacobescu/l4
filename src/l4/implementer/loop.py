@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from l4 import deadline
+from l4.agents.factory import Factory
 from l4.availability.fallback import Constraint
 from l4.config.schema import Profile, duration_seconds
 from l4.gates.collection import ledger_excerpt
@@ -43,7 +44,7 @@ from l4.implementer.tdd import (
     unfreeze_for,
 )
 from l4.implementer.unfreeze import MAX_PATHS_PER_QUESTION, NOTE_PREFIX, forbidden_note, unfreeze_note
-from l4.implementer.workbench import Workbench
+from l4.implementer.workbench import StallPlan, Workbench
 from l4.security.protected import forbidden_rule, glob_match
 from l4.specs.base import Task
 from l4.specs.fixmark import chore_findings, chore_kind, chore_retakes
@@ -455,6 +456,39 @@ def used_constraint(request: EscalationRequest, limit_after: int, limit: int) ->
 
 
 Escalate = Callable[[Workbench, EscalationRequest], Workbench | str]  # a new workbench, or why there is none
+
+
+def stall_spent_veto(wb: Workbench, task: Task, phase: str) -> Constraint:
+    """L4-IMP-115: the veto that a stall limit's fallback adds to its own. A fallback selects again from the chain's
+    start, and a profile whose failed attempts of `phase` in the task's window are at least
+    `implementer.max_task_attempts` would end the task at once while an earlier profile has attempts left."""
+    limit = wb.cfg.implementer.max_task_attempts
+    failures = seed_attempts(wb, task).failures.get(phase, {})
+    spent = tuple((name, n) for name, n in failures.items() if n >= limit)
+    request = EscalationRequest(task.key, phase, wb.selected.profile_name, (), 0, spent=spent)  # type: ignore[arg-type]
+    return spent_constraint(request, limit)
+
+
+def stall_plan_for(
+    wb: Workbench,
+    factory: Factory,
+    *,
+    task_veto: Callable[[str], Constraint | None] = lambda key: None,
+    movable: Callable[[str], bool] = lambda key: True,
+) -> Callable[[Task, str], StallPlan]:
+    """The `Workbench.stall_plan` of an owner that has a factory (L4-IMP-115, L4-AVL-015): the spent veto of the task's
+    phase, the constraint that keeps a stall of kind `idle` or `time` moving forward only, and whether a profile after
+    the stalled one with another cool-down key could take the step, which the move would ask with the task's own veto
+    as well. `movable` says whether the task may move at all (the fix loop moves a task once). Everything is read when
+    asked and nothing is recorded."""
+
+    def plan(task: Task, phase: str) -> StallPlan:
+        veto = stall_spent_veto(wb, task, phase)
+        asked = tuple(c for c in (task_veto(task.key), veto) if c is not None)
+        replaceable = movable(task.key) and factory.can_replace(wb.selected, asked)
+        return StallPlan(replaceable, veto, factory.later_than(wb.selected))
+
+    return plan
 
 
 def _has_later(wb: Workbench, profile: str) -> bool:

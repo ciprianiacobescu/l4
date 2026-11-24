@@ -41,16 +41,24 @@ class Usage:
     context_peak_percent: float | None = None  # the same as a share of the window, when the stream says
 
 
+STALL_KINDS = ("silent", "idle", "time")  # L4-IMP-112: the limits that are a profile's stall, not a quota or a login
+
+
 @dataclass(frozen=True)
 class LimitSignal:
     tool: str
     model: str | None
-    kind: Literal["usage_limit", "rate_limit", "spend_limit", "credits", "auth", "model_mismatch", "silent"]
+    kind: Literal[
+        "usage_limit", "rate_limit", "spend_limit", "credits", "auth", "model_mismatch", "silent", "idle", "time"
+    ]
     resets_at: datetime | None  # tz-aware UTC
     source: str
     raw_excerpt: str  # redacted by the caller, at most 200 characters
     window_minutes: int | None = None
     used_percent: float | None = None
+    # L4-IMP-115: a stall limit's refusal of the profiles that are spent for the task's phase. A callable: it is read
+    # by the fallback only, never written to a file, and it takes no part in equality or in a log line
+    veto: Callable[[str, Profile], str | None] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

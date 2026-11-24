@@ -25,6 +25,7 @@ from l4.agents.factory import Selected
 from l4.agents.opencode import CONFIG_DIR
 from l4.agents.opencode_provider import KEY_FILE
 from l4.agents.proc import ProcRunner
+from l4.availability.fallback import Constraint
 from l4.config.defaults import cache_root
 from l4.config.schema import L4Config, duration_seconds
 from l4.context import AppContext
@@ -60,7 +61,7 @@ from l4.sandbox.env import toolchain_env
 from l4.sandbox.envdirs import env_dirs, reset_tool_caches, tracked_env_paths
 from l4.sandbox.home import spec_paths
 from l4.security.protected import ProtectedSet, restore_protected, revert_unsnapshotted, snapshot_protected
-from l4.specs.base import SpecProvider, UnitRef
+from l4.specs.base import SpecProvider, Task, UnitRef
 from l4.state.ledger import ledger_path
 from l4.vcs.errors import GitError
 from l4.vcs.git import Git
@@ -184,6 +185,28 @@ MAX_UNSAFE_SHOWN = 5
 
 
 @dataclass(frozen=True)
+class StallPlan:
+    """What the owner of a workbench says about a stall of one of its steps (L4-IMP-115): can a later profile take the
+    step (`replaceable`), the veto of the profiles that are spent for the task's phase (`veto`), and the constraint that
+    refuses the stalled profile and every earlier one (`forward`: a stall of kind `idle` or `time` moves forward only).
+    The fallback of a stall limit adds them to its own constraints."""
+
+    replaceable: bool
+    veto: Constraint | None = None
+    forward: Constraint | None = None
+
+    def refusing(self, kind: str) -> Constraint | None:
+        """The constraint that a stall of `kind` puts on its fallback: the spent veto, and for `idle` and `time` the
+        forward one too. A silent stop keeps its 0.4.60 selection (L4-IMP-087)."""
+        if kind == "silent" or self.forward is None:
+            return self.veto
+        if self.veto is None:
+            return self.forward
+        spent, forward = self.veto, self.forward
+        return lambda name, profile: spent(name, profile) or forward(name, profile)
+
+
+@dataclass(frozen=True)
 class PreviousAttempt:
     """What the next profile is told after a limit cut a task short: who it was and which limit, never a transcript."""
 
@@ -259,6 +282,9 @@ class Workbench:
     gate_peak: tuple[str, float] | None = None  # (name, seconds) of the longest counted gate run (L4-IMP-099)
     incidents: int = 0  # `guard.violation` and `env.rebuilt` events recorded by this workbench so far (L4-IMP-088)
     previous_attempt: PreviousAttempt | None = None  # set by the orchestrator after a mid-run fallback
+    # L4-IMP-115: asked once per stall with the task and the step's phase; None (a bench) means the chain-length test
+    # only and no veto
+    stall_plan: Callable[[Task, str], StallPlan] | None = None
     event_context: Mapping[str, Any] = field(default_factory=dict)  # added to every event: a fix unit's name
     coverage_checked: bool = False  # `check_coverage_after_setup` has answered once for this workbench
     seed_checked: bool = False  # `ensure_uv_seed` has looked at this workbench's uv cache once

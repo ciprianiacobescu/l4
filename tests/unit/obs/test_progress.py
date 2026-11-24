@@ -431,6 +431,71 @@ def test_a_silent_idle_line_says_it_is_a_limit_of_the_profile(console):
     )
 
 
+def test_an_idle_stall_that_is_a_limit_says_how_many_tool_calls_were_made(console):
+    """SCN-IMP-620: the `idle` kind of L4-IMP-112, with and without a count."""
+    ProgressTrace()(
+        event(
+            "agent.idle", task="2.1", phase="green", attempt=2, profile="free", silent_s=600, tool_calls=14,
+            silent=False, kind="idle", as_limit=True, limit_s=600,
+        )
+    )  # fmt: skip
+    ProgressTrace()(
+        event(
+            "agent.idle", task="2.1", phase="green", attempt=2, profile="script", silent_s=600, silent=False,
+            kind="idle", as_limit=True, limit_s=600,
+        )
+    )  # fmt: skip
+    base = "no activity from {} for 10m; L4 stopped it (implementer.idle_timeout)"
+    assert lines(console) == [
+        f"task 2.1 green attempt 2: {base.format('free')}; 14 tool calls were made; it is a limit of the profile, "
+        "not a failed attempt",
+        f"task 2.1 green attempt 2: {base.format('script')}; it is a limit of the profile, not a failed attempt",
+    ]
+
+
+def test_an_idle_stall_that_counted_says_its_reason(console):
+    for reason in ("idle: already once for this task", "idle: no other profile can take the step"):
+        ProgressTrace()(
+            event(
+                "agent.idle", task="2.1", phase="red", attempt=3, profile="glm", silent_s=600, tool_calls=2,
+                silent=False, kind="idle", as_limit=False, reason=reason, limit_s=600,
+            )
+        )  # fmt: skip
+    assert [line.split("(implementer.idle_timeout)")[1] for line in lines(console)] == [
+        "; idle: already once for this task, so it counts as a failed attempt",
+        "; idle: no other profile can take the step, so it counts as a failed attempt",
+    ]
+
+
+def test_a_time_limit_line_is_a_warning_with_its_suffix(console):
+    """SCN-IMP-620: `agent.time_limit`, a limit of the profile, a stall that counted, and one with one profile."""
+    ProgressTrace()(
+        event("agent.time_limit", task="2.1", phase="green", attempt=1, profile="free", limit_s=1800, as_limit=True)
+    )
+    ProgressTrace()(
+        event(
+            "agent.time_limit", task="2.1", phase="green", attempt=2, profile="glm", limit_s=1800, as_limit=False,
+            reason="time: already once for this task",
+        )
+    )  # fmt: skip
+    ProgressTrace()(
+        event("agent.time_limit", task="2.1", phase="green", attempt=3, profile="glm", limit_s=1800, as_limit=False)
+    )
+    assert lines(console) == [
+        "task 2.1 green attempt 1: free reached the time limit (30m); it is a limit of the profile, "
+        "not a failed attempt",
+        "task 2.1 green attempt 2: glm reached the time limit (30m); time: already once for this task, "
+        "so it counts as a failed attempt",
+        "task 2.1 green attempt 3: glm reached the time limit (30m)",
+    ]
+
+
+def test_a_time_limit_line_is_a_warning(console):
+    logging.getLogger("l4").setLevel(logging.ERROR)
+    ProgressTrace()(event("agent.time_limit", task="2.1", phase="red", attempt=1, profile="d", limit_s=1800))
+    assert lines(console) == []
+
+
 def test_scn_obs_03_a_red_gate_with_new_failing_tests_prints_the_red_line(console):
     _debug(console)
     gate = {"name": "test", "status": "fail", "exit_code": 1, "tests": 12, "passed": 5, "failed": 7}

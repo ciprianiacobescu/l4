@@ -51,7 +51,7 @@ def test_sections_4_2_4_4_4_5_and_11_have_their_rows() -> None:  # SCN-OPS-37
     for needle in ("`LAST`", "Last activity:", "Open run:", "open_run", "last_activity"):
         assert needle in status, needle
     ledger = _flat(runbook[runbook.index("### 4.5 ") : runbook.index("### 4.6 ")])
-    for needle in ("agent.idle{task, phase, attempt, profile, silent_s, tool_calls}", "run.started.ci_url"):
+    for needle in ("agent.idle{task, phase, attempt, profile, silent_s, tool_calls?}", "run.started.ci_url"):
         assert needle in ledger, needle
     limits = _flat(runbook[runbook.index("## 11. ") : runbook.index("## 12. ")])
     assert "longer than `implementer.idle_timeout`" in limits
