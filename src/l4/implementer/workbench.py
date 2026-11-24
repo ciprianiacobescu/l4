@@ -186,12 +186,24 @@ MAX_UNSAFE_SHOWN = 5
 
 @dataclass(frozen=True)
 class StallPlan:
-    """What the owner of a workbench says about a stall of one of its steps (L4-IMP-115): can another profile take the
-    step (`replaceable`), and the veto of the profiles that are spent for the task's phase, which the fallback of a
-    stall limit adds to its own."""
+    """What the owner of a workbench says about a stall of one of its steps (L4-IMP-115): can a later profile take the
+    step (`replaceable`), the veto of the profiles that are spent for the task's phase (`veto`), and the constraint that
+    refuses the stalled profile and every earlier one (`forward`: a stall of kind `idle` or `time` moves forward only).
+    The fallback of a stall limit adds them to its own constraints."""
 
     replaceable: bool
     veto: Constraint | None = None
+    forward: Constraint | None = None
+
+    def refusing(self, kind: str) -> Constraint | None:
+        """The constraint that a stall of `kind` puts on its fallback: the spent veto, and for `idle` and `time` the
+        forward one too. A silent stop keeps its 0.4.60 selection (L4-IMP-087)."""
+        if kind == "silent" or self.forward is None:
+            return self.veto
+        if self.veto is None:
+            return self.forward
+        spent, forward = self.veto, self.forward
+        return lambda name, profile: spent(name, profile) or forward(name, profile)
 
 
 @dataclass(frozen=True)

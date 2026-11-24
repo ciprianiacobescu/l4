@@ -26,7 +26,6 @@ from l4 import deadline
 from l4.accepted import read_accepted
 from l4.agents.activity import ActivityWatch, Beat, ago, beat_text
 from l4.agents.base import STALL_KINDS, LimitSignal, PermissionPolicy, RunRequest, RunResult, denial_facts
-from l4.availability.fallback import Constraint
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
     ChoreCiStep,
@@ -157,7 +156,7 @@ from l4.implementer.test_locate import file_of_id, outside_tests, window
 from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
 from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
-from l4.implementer.workbench import PreviousAttempt, UnsafeWrite, Workbench
+from l4.implementer.workbench import PreviousAttempt, StallPlan, UnsafeWrite, Workbench
 from l4.memory.inject import Injection, inject_for_task, task_paths
 from l4.sandbox.env import build_agent_env, cache_env, gate_ci_env
 from l4.security.protected import changed_paths, glob_match, revert_protected
@@ -1080,10 +1079,10 @@ def _stall_kind(run: RunResult, watch: ActivityWatch, beat: Beat) -> Literal["si
     return "silent" if beat.counts and beat.tool_calls == 0 else "idle"  # L4-IMP-087: a reader counted none
 
 
-def _stall_decision(wb: Workbench, task: Task, role: Phase, kind: str) -> tuple[bool, str | None, Constraint | None]:
-    """(is it a limit of the profile, why not, the veto of the spent profiles) of a stall (L4-IMP-112, L4-IMP-114,
-    L4-IMP-115). A chain of one profile has nothing to move to: a failed attempt with no reason, as before. A silent
-    stop needs no replacement (L4-IMP-087); the other kinds do, when the workbench's owner can say."""
+def _stall_decision(wb: Workbench, task: Task, role: Phase, kind: str) -> tuple[bool, str | None, StallPlan | None]:
+    """(is it a limit of the profile, why not, the owner's plan) of a stall (L4-IMP-112, L4-IMP-114, L4-IMP-115). A
+    chain of one profile has nothing to move to: a failed attempt with no reason, as before. A silent stop needs no
+    replacement (L4-IMP-087); the other kinds need a later profile, when the workbench's owner can say."""
     if len(wb.cfg.roles.implementer) <= 1:
         return False, None, None
     if _stalled_before(wb, task):  # or every profile of the chain could park the task, whichever way it stalls
@@ -1091,7 +1090,7 @@ def _stall_decision(wb: Workbench, task: Task, role: Phase, kind: str) -> tuple[
     plan = wb.stall_plan(task, role) if wb.stall_plan is not None else None
     if plan is not None and kind != "silent" and not plan.replaceable:
         return False, STALL_NO_OTHER.format(kind=kind), None
-    return True, None, plan.veto if plan is not None else None
+    return True, None, plan
 
 
 def agent_step(
@@ -1193,9 +1192,9 @@ def agent_step(
                 wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
     beat = watch.snapshot(watch.clock())
     stall = _stall_kind(run, watch, beat)
-    as_limit, why, veto = False, None, None
+    as_limit, why, plan = False, None, None
     if stall is not None:
-        as_limit, why, veto = _stall_decision(wb, task, role, stall)
+        as_limit, why, plan = _stall_decision(wb, task, role, stall)
     reached = f"the agent step reached its time limit ({ago(request.timeout_s)})"
     quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
     excerpt = reached if stall == "time" else quiet
@@ -1244,12 +1243,15 @@ def agent_step(
         raise RoleLimit(run, carried)
     # a stall that is a limit of the profile: the limit path cools it and moves on, with no failed attempt
     if stall is not None and as_limit:
+        spent = plan.veto if plan is not None else None
+        if run.limit is not None:  # a limit the adapter found is kept, and never hands the step to a spent profile
+            raise RoleLimit(replace(run, limit=replace(run.limit, veto=spent)) if spent is not None else run, carried)
         signal = LimitSignal(
             wb.selected.profile.adapter or "unknown", wb.selected.profile.model, stall, None,
-            "run.timeout" if stall == "time" else "run.idle", excerpt, veto=veto,
+            "run.timeout" if stall == "time" else "run.idle", excerpt,
+            veto=plan.refusing(stall) if plan is not None else None,
         )  # fmt: skip
-        # a limit the adapter itself found on the run is kept, with no veto of ours (L4-IMP-112)
-        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=excerpt), carried)
+        raise RoleLimit(replace(run, limit=signal, detail=excerpt), carried)
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":

@@ -851,3 +851,92 @@ def test_a_replacement_that_fails_its_probe_parks_the_unit_after_the_stall_coole
         factory.on_limit(first, stall_run(tmp_path, "time"))
     assert err.value.retry_after == T0 + timedelta(minutes=30)
     assert clock.now() == T0  # nothing waited
+
+
+# --- a stall moves forward only, and a cached failed probe is no replacement (L4-AVL-015, L4-IMP-115) ---
+
+
+def _refuse(*names: str):
+    return lambda name, profile: f"refused: {name}" if name in names else None
+
+
+def _stalled_on(factory, *refused: str):
+    """The selection of the profile that is first once `refused` are out, as a step that stalled on it would hold it:
+    the request of the step carries no constraint of its own."""
+    from dataclasses import replace
+
+    from l4.agents.factory import SelectionRequest
+
+    picked = factory.for_role("implementer", "u", constraints=(_refuse(*refused),))
+    return replace(picked, request=SelectionRequest("implementer", "u"))
+
+
+def test_can_replace_looks_only_at_the_profiles_after_the_stalled_one(tmp_path):
+    """SCN-AVL-44: a stall on a middle profile can move to a later one; a stall on the last profile cannot move, though
+    every earlier profile is usable; an earlier profile is never the replacement."""
+    chain = ["codex-sol", "claude-sonnet", "claude-opus"]
+    factory, _, _, _ = can_replace_world(tmp_path, profiles=THREE_PROFILES, chain=chain)
+    middle = _stalled_on(factory, "codex-sol")
+    assert middle.profile_name == "claude-sonnet"
+    assert factory.can_replace(middle, ()) is True  # claude-opus comes after it
+    assert factory.can_replace(middle, (_refuse("claude-opus"),)) is False  # codex-sol is usable but earlier
+    last = _stalled_on(factory, "codex-sol", "claude-sonnet")
+    assert last.profile_name == "claude-opus"
+    assert factory.can_replace(last, ()) is False  # nothing comes after it
+
+
+def test_later_than_refuses_the_stalled_profile_and_every_earlier_one(tmp_path):
+    chain = ["codex-sol", "claude-sonnet", "claude-opus"]
+    factory, _, _, _ = can_replace_world(tmp_path, profiles=THREE_PROFILES, chain=chain)
+    middle = _stalled_on(factory, "codex-sol")
+    later_only = factory.later_than(middle)
+    assert [later_only(name, THREE_PROFILES[name]) is None for name in chain] == [False, False, True]
+    assert "stall moves forward only" in later_only("codex-sol", CODEX)
+
+
+def test_a_stall_fallback_asked_with_the_forward_constraint_never_picks_an_earlier_profile(tmp_path):
+    """SCN-AVL-44 at the fallback: with the forward constraint on the request the selection from the chain's start skips
+    the usable earlier profile, and with none left it waits for capacity."""
+    from dataclasses import replace
+
+    from l4.agents.factory import SelectionRequest
+
+    chain = ["codex-sol", "claude-sonnet", "claude-opus"]
+    factory, _, clock, _ = can_replace_world(tmp_path, profiles=THREE_PROFILES, chain=chain)
+    middle = _stalled_on(factory, "codex-sol")
+    forward = factory.later_than(middle)
+    asked = replace(middle, request=SelectionRequest("implementer", "u", None, (forward,)))
+    assert factory.on_limit(asked, stall_run(tmp_path, "time", CLAUDE)).profile_name == "claude-opus"
+    last = _stalled_on(factory, "codex-sol", "claude-sonnet")
+    later(clock, minutes=31)  # the stall of claude-sonnet is over, the earlier profiles are usable
+    asked = replace(last, request=SelectionRequest("implementer", "u", None, (factory.later_than(last),)))
+    with pytest.raises(WaitingCapacity):
+        factory.on_limit(asked, stall_run(tmp_path, "idle", THREE_PROFILES["claude-opus"]))
+
+
+def test_a_profile_whose_cached_probe_failed_is_no_replacement_and_no_probe_is_sent(tmp_path):
+    """The selection would skip a profile whose cached hello failed, so `can_replace` says so without a probe. A failure
+    that was never cached (a transient one, or a profile never probed) leaves the profile a candidate."""
+    failing = {"sonnet": {**healthy("sonnet")["sonnet"], "hello": ProbeResult("hello", False, {}, "wrong answer")}}
+    factory, adapter, _, _ = build(tmp_path, {**healthy("gpt-6", version="0.160.0"), **failing})
+    first = factory.for_role("implementer", "u")
+    assert first.profile_name == "codex-sol" and factory.can_replace(first, ()) is True  # sonnet never probed
+    with pytest.raises(WaitingCapacity):
+        factory.for_role("implementer", "u", constraints=(_refuse("codex-sol"),))  # sonnet fails its hello: cached
+    calls = len(adapter.calls)
+    assert factory.can_replace(first, ()) is False
+    assert len(adapter.calls) == calls
+
+
+def test_a_transient_failure_is_not_cached_so_the_profile_stays_a_candidate(tmp_path):
+    transient = {
+        "sonnet": {
+            **healthy("sonnet")["sonnet"],
+            "hello": ProbeResult("hello", False, {}, "timed out", failure_class="transient"),
+        }
+    }
+    factory, _, _, _ = build(tmp_path, {**healthy("gpt-6", version="0.160.0"), **transient})
+    first = factory.for_role("implementer", "u")
+    with pytest.raises(WaitingCapacity):
+        factory.for_role("implementer", "u", constraints=(_refuse("codex-sol"),))
+    assert factory.can_replace(first, ()) is True

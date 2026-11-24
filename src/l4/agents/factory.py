@@ -350,18 +350,37 @@ class Factory:
         self._store.probes.invalidate(selected.profile_name)
         return limit, reason, cooldown
 
+    def later_than(self, selected: Selected) -> Constraint:
+        """L4-AVL-015: the constraint that refuses `selected` and every profile before it in its role's chain. A stall
+        moves forward only: the chain runs from cheap to strong, so a stall of the strongest usable profile must not
+        send the step back to a weaker one (and cool the model that the judges share with it)."""
+        request = selected.request
+        chain: list[str] = getattr(self._cfg.roles, request.role if request is not None else "implementer")
+        stalled = selected.profile_name
+        position = chain.index(stalled) if stalled in chain else -1
+
+        def later(name: str, profile: Profile) -> str | None:
+            if name in chain and chain.index(name) <= position:
+                return f"earlier: {name} is not after {stalled} in the chain (a stall moves forward only)"
+            return None
+
+        return later
+
     def can_replace(self, selected: Selected, constraints: Sequence[Constraint] = ()) -> bool:
-        """L4-AVL-015: does the role's chain list a profile that could take the step from `selected` if it stalled? It
-        is another profile whose cool-down key differs (recording the stall cools every profile with the key of
-        `selected`, and a profile without a model is the whole tool), that is not cooling now, that the request's own
-        constraints and `constraints` accept, and that can serve the request. It sends no probe and records nothing."""
+        """L4-AVL-015: does the role's chain list a profile AFTER `selected` that could take the step from it if it
+        stalled? It is a profile whose cool-down key differs (recording the stall cools every profile with the key of
+        `selected`, and a profile without a model is the whole tool), that is not cooling now, whose cached probe has
+        not failed, that the request's own constraints and `constraints` accept, and that can serve the request. It
+        sends no probe and records nothing."""
         request = selected.request
         role = request.role if request is not None else "implementer"
         chain: list[str] = getattr(self._cfg.roles, role)
         key = cooldown_key(selected.profile_name, selected.profile)
         asked = (*(request.constraints if request is not None else ()), *constraints)
         now = self._clock.now()
-        for name in chain:
+        selector = self._selector()
+        after = chain.index(selected.profile_name) + 1 if selected.profile_name in chain else 0
+        for name in chain[after:]:
             profile = self._cfg.profiles.get(name)
             if name == selected.profile_name or profile is None:
                 continue
@@ -370,7 +389,7 @@ class Factory:
                 continue
             if request is not None and request.serves is not None and profile.adapter not in request.serves:
                 continue
-            if self._store.cooldowns.cooling(other, now) is not None:
+            if self._store.cooldowns.cooling(other, now) is not None or selector.cached_failure(name, profile):
                 continue
             if all(constraint(name, profile) is None for constraint in asked):
                 return True

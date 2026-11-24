@@ -356,12 +356,12 @@ def test_a_stall_limit_adds_nothing_to_the_escalation_counts(make_bench):
 # --- L4-IMP-115 at the step: the plan of the workbench's owner ------------------------------------------------------
 
 
-def with_plan(bench, *, replaceable: bool = True, veto=None) -> list:
+def with_plan(bench, *, replaceable: bool = True, veto=None, forward=None) -> list:
     asked: list = []
 
     def plan(task, phase):
         asked.append((task.key, phase))
-        return StallPlan(replaceable, veto)
+        return StallPlan(replaceable, veto, forward)
 
     bench.wb.stall_plan = plan
     return asked
@@ -421,13 +421,76 @@ def test_the_plan_is_not_asked_for_a_chain_of_one_or_a_second_stall(make_bench):
     assert asked == [("1.1", "red")]
 
 
-def test_an_adapters_own_limit_carries_no_veto(make_bench):
+def test_an_adapters_own_limit_carries_the_spent_veto_and_never_the_forward_one(make_bench):
+    """An adapter's own limit is a genuine limit that a stall decided to keep: it never hands the step to a spent
+    profile (the spent veto), and it is not held to the later profiles of the chain, which only a stall is."""
     throttle = LimitSignal("fake", None, "rate_limit", None, "fake.throttle", "request throttled")
     bench = make_bench([replace(idle(3), limit=throttle)], **TWO)
-    with_plan(bench, veto=lambda name, profile: "spent: test")
+    spent = lambda name, profile: "spent: test"  # noqa: E731
+    with_plan(bench, veto=spent, forward=lambda name, profile: "earlier: test")
     with pytest.raises(RoleLimit) as caught:
         run_red(bench.wb, TASK, attempt=1)
-    assert caught.value.result.limit.veto is None
+    kept = caught.value.result.limit
+    assert (kept.kind, kept.source, kept.raw_excerpt) == ("rate_limit", "fake.throttle", "request throttled")
+    assert kept.veto is spent
+
+
+def test_an_adapters_own_limit_with_no_spent_veto_is_kept_as_it_is(make_bench):
+    throttle = LimitSignal("fake", None, "rate_limit", None, "fake.throttle", "request throttled")
+    bench = make_bench([replace(timed_out(), limit=throttle)], **TWO)
+    with_plan(bench)
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    assert caught.value.result.limit is throttle
+
+
+# --- a stall moves forward only (L4-IMP-115) -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("step", [idle(3), timed_out()], ids=["idle", "time"])
+def test_an_idle_or_time_stall_asks_its_fallback_to_refuse_the_stalled_and_earlier_profiles(make_bench, step):
+    """SCN-IMP-623: the signal's veto is the spent veto and the forward constraint together."""
+    spent = lambda name, profile: "spent: test" if name == "s" else None  # noqa: E731
+    forward = lambda name, profile: "earlier: test" if name == "e" else None  # noqa: E731
+    bench = make_bench([step], **TWO)
+    with_plan(bench, veto=spent, forward=forward)
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    veto = caught.value.result.limit.veto
+    assert (veto("s", None), veto("e", None), veto("later", None)) == ("spent: test", "earlier: test", None)
+
+
+def test_a_silent_stop_is_not_held_to_the_later_profiles(make_bench):
+    """SCN-IMP-623: the silent kind keeps its 0.4.60 selection; only the spent veto rides on it."""
+    spent = lambda name, profile: "spent: test"  # noqa: E731
+    bench = make_bench([Step(idle_s=600, status="timeout")], **TWO)
+    with_plan(bench, veto=spent, forward=lambda name, profile: "earlier: test")
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    assert caught.value.result.limit.veto is spent
+
+
+def test_the_forward_constraint_alone_is_the_veto_when_nothing_is_spent(make_bench):
+    forward = lambda name, profile: "earlier: test"  # noqa: E731
+    bench = make_bench([timed_out()], **TWO)
+    with_plan(bench, veto=None, forward=forward)
+    with pytest.raises(RoleLimit) as caught:
+        run_red(bench.wb, TASK, attempt=1)
+    assert caught.value.result.limit.veto is forward
+
+
+# --- what the record names (L4-IMP-116) ---------------------------------------------------------------------------
+
+
+def test_a_limits_record_names_at_most_twenty_discarded_paths(make_bench):
+    """T12: the count is the whole count, the list is the first twenty in order."""
+    many = {f"src/pytdd/leftover_{n:02d}.py": f"N = {n}\n" for n in range(25)}
+    bench = make_bench([timed_out(writes=many)], **TWO)
+    with pytest.raises(RoleLimit):
+        run_red(bench.wb, TASK, attempt=1)
+    [record] = bench.events("agent.time_limit")
+    assert record["discarded_files"] == 25
+    assert record["discarded_paths"] == sorted(many)[:20] and len(record["discarded_paths"]) == 20
 
 
 # --- the signal's veto is no part of its identity ---------------------------------------------------------------

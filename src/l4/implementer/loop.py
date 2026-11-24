@@ -477,14 +477,16 @@ def stall_plan_for(
     movable: Callable[[str], bool] = lambda key: True,
 ) -> Callable[[Task, str], StallPlan]:
     """The `Workbench.stall_plan` of an owner that has a factory (L4-IMP-115, L4-AVL-015): the spent veto of the task's
-    phase, and whether a profile with another cool-down key could take the step, which the move would ask with the
-    task's own veto as well. `movable` says whether the task may move at all (the fix loop moves a task once).
-    Everything is read when asked and nothing is recorded."""
+    phase, the constraint that keeps a stall of kind `idle` or `time` moving forward only, and whether a profile after
+    the stalled one with another cool-down key could take the step, which the move would ask with the task's own veto
+    as well. `movable` says whether the task may move at all (the fix loop moves a task once). Everything is read when
+    asked and nothing is recorded."""
 
     def plan(task: Task, phase: str) -> StallPlan:
         veto = stall_spent_veto(wb, task, phase)
         asked = tuple(c for c in (task_veto(task.key), veto) if c is not None)
-        return StallPlan(movable(task.key) and factory.can_replace(wb.selected, asked), veto)
+        replaceable = movable(task.key) and factory.can_replace(wb.selected, asked)
+        return StallPlan(replaceable, veto, factory.later_than(wb.selected))
 
     return plan
 

@@ -273,3 +273,68 @@ def test_a_time_limit_stall_that_leaves_no_time_hands_back_and_keeps_the_stall(r
     [record] = run.events("agent.time_limit")
     assert record["as_limit"] is True
     assert run.events("task.attempt_failed") == []
+
+
+# --- a stall moves forward only (L4-IMP-115, L4-AVL-015) --------------------------------------------------------------
+
+LATER = 1860  # seconds: a step that "works" this long outlasts the 30-minute cool-down of the stall before it
+
+
+def test_a_stall_on_a_middle_profile_moves_to_a_later_one_not_to_an_earlier_usable_one(run_l4, fake_clock):
+    """SCN-IMP-623: impl stalled in red and cooled; impl-b took the task and its cool-down passed while it worked; its
+    green step then stalls, impl is usable again and comes first in the chain, and the step goes to impl-c anyway."""
+    script = [idle(3), red_step(on_start=advance(fake_clock, LATER)), timed_out(), green_step()]
+    run = run_l4(script, **CHAIN)
+    assert run.code == 0, run.triggers()
+    moves = [(e["from"], e["to"], e["reason"]) for e in run.events("availability.fallback")]
+    assert moves == [("impl", "impl-b", "idle"), ("impl-b", "impl-c", "time")]
+    assert [r.profile.vendor for r in run.adapter.requests] == ["fakeco", "otherco", "otherco", "thirdco"]
+    assert run.events("task.attempt_failed") == []
+
+
+def test_a_stall_on_the_last_profile_is_a_failed_attempt_though_an_earlier_one_is_usable(run_l4, fake_clock):
+    """SCN-IMP-624: the same, with no profile after impl-b. impl is usable again but earlier, so the stall fails the
+    attempt, nothing is cooled for it, and the task goes on on impl-b."""
+    script = [idle(3), red_step(on_start=advance(fake_clock, LATER)), timed_out(), green_step()]
+    run = run_l4(script, **ONE_OTHER)
+    assert run.code == 0, run.triggers()
+    assert [(e["from"], e["to"]) for e in run.events("availability.fallback")] == [("impl", "impl-b")]
+    [record] = run.events("agent.time_limit")
+    assert (record["profile"], record["as_limit"], record["reason"]) == (
+        "impl-b", False, "time: no other profile can take the step",
+    )  # fmt: skip
+    assert [e["profile"] for e in run.events("availability.cooldown")] == ["impl"]
+    [failure] = run.events("task.attempt_failed")
+    assert (failure["profile"], failure["reason"]) == ("impl-b", "the agent step reached its time limit (30m)")
+    assert [r.profile.vendor for r in run.adapter.requests] == ["fakeco", "otherco", "otherco", "otherco"]
+
+
+def test_a_silent_stop_still_goes_back_to_an_earlier_profile(run_l4, fake_clock):
+    """SCN-IMP-625: the silent kind keeps its 0.4.60 selection, which starts from the chain's first usable profile."""
+    script = [idle(3), red_step(on_start=advance(fake_clock, LATER)), Step(idle_s=600, status="timeout"), green_step()]
+    run = run_l4(script, **ONE_OTHER)
+    assert run.code == 0, run.triggers()
+    moves = [(e["from"], e["to"], e["reason"]) for e in run.events("availability.fallback")]
+    assert moves == [("impl", "impl-b", "idle"), ("impl-b", "impl", "silent")]
+
+
+def cool_until(tdd_repo, config: dict, name: str, until: datetime) -> None:
+    tdd_repo.write_config(**config)
+    profile = load_config(tdd_repo.repo).profiles[name]
+    AvailabilityStore(tdd_repo.cache).cooldowns.record(name, cooldown_key(name, profile), until, "usage_limit", "test")
+
+
+def test_the_wait_in_the_run_keeps_the_spent_veto_of_the_stall(run_l4, tdd_repo, raw, fake_clock):
+    """O4: impl-b is spent for red, impl-c cools for 20 minutes. The silent stop of impl finds nothing usable, the run
+    waits out impl-c's cool-down and selects again, and that selection refuses impl-b as the first one did."""
+    from datetime import timedelta
+
+    old = earlier_run(run_l4, tdd_repo, raw, fake_clock, spent_rows("impl-b"))
+    config = CHAIN | {"availability": {"wait_in_run": "30m", "wait_in_run_max_total": "1h"}}
+    cool_until(tdd_repo, config, "impl-c", fake_clock.now() + timedelta(minutes=20))
+    run = run_l4([Step(idle_s=600, status="timeout"), red_step(), green_step()], **config)
+    assert run.code == 0, run.triggers()
+    assert new_events(run, old, "availability.wait_in_run")
+    assert [r.profile.vendor for r in run.adapter.requests][1:] == ["thirdco", "thirdco"]  # impl-b never ran
+    assert run.outcome["units"][0]["profiles"]["implementer"] == "impl-c"
+    assert new_events(run, old, "breaker.tripped") == []
