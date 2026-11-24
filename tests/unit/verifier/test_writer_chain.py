@@ -374,6 +374,15 @@ def test_scn_ver_368_a_timeout_does_not_move_to_the_next_profile(run_l4, valid_s
     assert errors(run) == []  # the second profile was never asked: the script holds no step for it
 
 
+def test_a_verifier_agent_timeout_is_no_implementer_stall(run_l4, valid_spec, with_verifier):
+    """SCN-IMP-619: another role's time-out keeps its own rule; no `agent.time_limit`, no cool-down of kind `time`."""
+    config = two_writers(with_verifier)
+    run = run_l4([red_step(), green_step(), Step(status="timeout"), JUDGE], **config)
+    assert run.code == 0, run.outcome
+    assert run.events("agent.time_limit") == []
+    assert [e for e in run.events("availability.cooldown") if e["kind"] in ("idle", "time")] == []
+
+
 def test_scn_ver_368_a_twice_invalid_reply_does_not_move_either(run_l4, valid_spec, with_verifier):
     cid = audited_criterion()
     config = two_writers(with_verifier)

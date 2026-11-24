@@ -149,6 +149,8 @@ class FakeAdapter:
                 _feed(req.watch, step)
                 req.watch.stopped_idle_s = step.idle_s
             status = "timeout"
+        elif step.status == "timeout" and req.watch is not None:  # the wall-clock limit: the watch saw the stream too
+            _feed(req.watch, step)
         return RunResult(
             status=status, raw_events_path=req.raw_events_path, final_text=step.final_text,
             structured=step.structured, session_id=step.session_id,

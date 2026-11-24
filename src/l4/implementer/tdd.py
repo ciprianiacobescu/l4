@@ -25,7 +25,8 @@ from typing import Any, Literal
 from l4 import deadline
 from l4.accepted import read_accepted
 from l4.agents.activity import ActivityWatch, Beat, ago, beat_text
-from l4.agents.base import LimitSignal, PermissionPolicy, RunRequest, RunResult, denial_facts
+from l4.agents.base import STALL_KINDS, LimitSignal, PermissionPolicy, RunRequest, RunResult, denial_facts
+from l4.availability.fallback import Constraint
 from l4.ci.failing_step import (
     STEP_GATE_PREFIX,
     ChoreCiStep,
@@ -844,9 +845,10 @@ def _previous_attempt_block(
     if previous.why == "escalation":
         return _escalation_block(previous, carried) if previous.phase == phase else ()
     stopped = f"stopped on a {previous.limit_kind} limit while working on this task"
-    if previous.limit_kind == "silent":  # L4-IMP-087: it did nothing for the whole idle time
+    if previous.limit_kind in STALL_KINDS:  # L4-IMP-087, L4-IMP-116: said as it happened, never in the agent's words
+        said = {"silent": "went silent", "idle": "went idle", "time": "ran out of time"}[previous.limit_kind]
         quiet = previous.detail or f"no output for {wb.cfg.implementer.idle_timeout}"  # the raised limit, if it was
-        stopped = f"went silent: {quiet}, so L4 stopped it, while working on this task"
+        stopped = f"{said}: {quiet}, so L4 stopped it, while working on this task"
     text = (
         f"The agent before you (profile {previous.profile}) {stopped}. "
         "Its uncommitted changes were discarded; the commits already on the branch are kept. You start "
@@ -1024,7 +1026,10 @@ def _prompt(
     return text
 
 
-SILENT_AGAIN = "silent: already once for this task"
+# L4-IMP-114, L4-IMP-115: why a stall that could have been a limit of its profile stayed a failed attempt
+STALL_AGAIN = "{kind}: already once for this task"
+STALL_NO_OTHER = "{kind}: no other profile can take the step"
+MAX_DISCARDED_PATHS = 20  # L4-IMP-116: the files a stall limit's discard names in its record
 
 # L4-IMP-099: the agent's own run of a gate command, in its sandbox and under the runner's load, can take longer than
 # the harness's, so the idle limit of an adapter that cannot show an open call is the longest gate run times this, plus
@@ -1046,16 +1051,47 @@ def idle_limit(wb: Workbench, idle_s: int, step_limit_s: int) -> tuple[int, tupl
     return limit_s, (name, round(seconds)) if limit_s > idle_s else None
 
 
-def _silent_before(wb: Workbench, task: Task) -> bool:
-    """Has this task already had a silent stop (L4-IMP-087) in its window: any profile, any run of the unit? The window
-    is the one that counts attempts (`deadline.window`): a checkpoint of the task, a retry, a resume or a restart ends
-    it."""
+def _stalled_before(wb: Workbench, task: Task) -> bool:
+    """L4-IMP-114: has this task already had a stall limit in its window: any profile, any kind, any run of the unit?
+    The window is the one that counts attempts (`deadline.window`): a checkpoint of the task, a retry, a resume or a
+    restart ends it; a renewal does not. A stall limit is an `agent.idle` with `as_limit` true (or, in a ledger of an
+    earlier release that had no such field, with `silent` true: the silent stop) or an `agent.time_limit` with
+    `as_limit` true."""
     fix_unit = wb.event_context.get("fix_unit")
-    return any(
-        e.type == "agent.idle" and e.data.get("silent") is True
-        and e.data.get("task") == task.key and e.data.get("fix_unit") == fix_unit
-        for e in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit)
-    )  # fmt: skip
+    for event in deadline.window(_ledger_events(wb), task.key, fix_unit=fix_unit):
+        data = event.data
+        if data.get("task") != task.key or data.get("fix_unit") != fix_unit:
+            continue
+        if event.type == "agent.idle" and (data["as_limit"] if "as_limit" in data else data.get("silent")) is True:
+            return True
+        if event.type == "agent.time_limit" and data.get("as_limit") is True:
+            return True
+    return False
+
+
+def _stall_kind(run: RunResult, watch: ActivityWatch, beat: Beat) -> Literal["silent", "idle", "time"] | None:
+    """L4-IMP-112: the kind of the stall that ended the step, None when it was not one. The soft deadline's cancel is
+    status `cancelled`, so it never gets here. An idle stop that crossed the wall-clock limit in the grace after its
+    SIGINT keeps the idle mark and so its idle kind."""
+    if run.status != "timeout":
+        return None
+    if watch.stopped_idle_s is None:
+        return "time"
+    return "silent" if beat.counts and beat.tool_calls == 0 else "idle"  # L4-IMP-087: a reader counted none
+
+
+def _stall_decision(wb: Workbench, task: Task, role: Phase, kind: str) -> tuple[bool, str | None, Constraint | None]:
+    """(is it a limit of the profile, why not, the veto of the spent profiles) of a stall (L4-IMP-112, L4-IMP-114,
+    L4-IMP-115). A chain of one profile has nothing to move to: a failed attempt with no reason, as before. A silent
+    stop needs no replacement (L4-IMP-087); the other kinds do, when the workbench's owner can say."""
+    if len(wb.cfg.roles.implementer) <= 1:
+        return False, None, None
+    if _stalled_before(wb, task):  # or every profile of the chain could park the task, whichever way it stalls
+        return False, STALL_AGAIN.format(kind=kind), None
+    plan = wb.stall_plan(task, role) if wb.stall_plan is not None else None
+    if plan is not None and kind != "silent" and not plan.replaceable:
+        return False, STALL_NO_OTHER.format(kind=kind), None
+    return True, None, plan.veto if plan is not None else None
 
 
 def agent_step(
@@ -1155,18 +1191,35 @@ def agent_step(
                 # L4-SEC-036: what the step wrote into `.venv` or `node_modules` decides later verdicts and no guard
                 # sees it: an environment that differs from the one setup built is removed, and setup builds it again
                 wb.check_env(wb.worktree, phase=role, changed=wb.changed_files())
-    silent = False
+    beat = watch.snapshot(watch.clock())
+    stall = _stall_kind(run, watch, beat)
+    as_limit, why, veto = False, None, None
+    if stall is not None:
+        as_limit, why, veto = _stall_decision(wb, task, role, stall)
+    reached = f"the agent step reached its time limit ({ago(request.timeout_s)})"
+    quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
+    excerpt = reached if stall == "time" else quiet
+    if stall == "idle" and beat.counts:
+        excerpt += f" after {beat.tool_calls} tool calls"
+    # what the stall's record adds: its kind, whether it was a limit, why not, and what the step left
+    stalled: dict[str, Any] = {}
+    if stall is not None:
+        stalled = {"kind": stall, "as_limit": as_limit, **({"reason": why} if why else {})}
+        if as_limit:  # L4-IMP-113: after the cleanup above: what the step left uncommitted, which the move discards
+            left = sorted(p for p in wb.changed_files() if p != wb.ledger_rel)
+            stalled |= {"discarded_files": len(left), "discarded_paths": left[:MAX_DISCARDED_PATHS]}
     if watch.stopped_idle_s is not None:  # L4-IMP-024: before `agent.finished`
-        beat = watch.snapshot(watch.clock())
-        # L4-IMP-087: no tool call seen by a stream reader, and a later profile to move to (a single profile counts)
-        silent = run.status == "timeout" and beat.counts and beat.tool_calls == 0 and len(wb.cfg.roles.implementer) > 1
-        again = silent and _silent_before(wb, task)  # a task's later silent stop counts, or every profile could park it
-        silent = silent and not again
         wb.emit(
             "agent.idle", task=task.key, phase=role, attempt=attempt, profile=profile,
-            silent_s=round(watch.stopped_idle_s), tool_calls=beat.tool_calls, silent=silent, limit_s=limit_s,
+            silent_s=round(watch.stopped_idle_s), silent=as_limit and stall == "silent", limit_s=limit_s,
+            **({"tool_calls": beat.tool_calls} if beat.counts else {}),
             **({"raised_by": {"gate": raised_by[0], "seconds": raised_by[1]}} if raised_by else {}),
-            **({"reason": SILENT_AGAIN} if again else {}),
+            **stalled,
+        )  # fmt: skip
+    elif stall == "time":  # L4-IMP-116: the wall-clock limit has a record of its own, and no `agent.idle`
+        wb.emit(
+            "agent.time_limit", task=task.key, phase=role, attempt=attempt, profile=profile, limit_s=request.timeout_s,
+            **({"tool_calls": beat.tool_calls} if beat.counts else {}), **stalled,
         )  # fmt: skip
     wb.emit(
         "agent.finished", task=task.key, phase=role, status=run.status, exit_code=run.exit_code, detail=run.detail,
@@ -1189,12 +1242,14 @@ def agent_step(
         raise deadline.DeadlineReached("during", during="agent")
     if run.status in LIMIT_STATUSES:
         raise RoleLimit(run, carried)
-    if silent:  # a limit of kind `silent`: the limit path cools the profile and moves on, no failed attempt
-        quiet = f"no output for {ago(limit_s) if raised_by else impl_cfg.idle_timeout}"
+    # a stall that is a limit of the profile: the limit path cools it and moves on, with no failed attempt
+    if stall is not None and as_limit:
         signal = LimitSignal(
-            wb.selected.profile.adapter or "unknown", wb.selected.profile.model, "silent", None, "run.idle", quiet
-        )
-        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=quiet), carried)
+            wb.selected.profile.adapter or "unknown", wb.selected.profile.model, stall, None,
+            "run.timeout" if stall == "time" else "run.idle", excerpt, veto=veto,
+        )  # fmt: skip
+        # a limit the adapter itself found on the run is kept, with no veto of ours (L4-IMP-112)
+        raise RoleLimit(run if run.limit is not None else replace(run, limit=signal, detail=excerpt), carried)
     if run.status != "ok" and run.result_problem is None:
         reason = f"the agent step ended with status {run.status}: {run.detail or 'no detail'}"
         if run.status == "timeout":

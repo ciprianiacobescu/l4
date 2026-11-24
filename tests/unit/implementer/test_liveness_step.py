@@ -99,6 +99,12 @@ def _ledger_lines(bench):
     return (bench.wb.ref.path / ".l4" / "ledger" / "r-20261003T1312Z-7f3a.jsonl").read_text().splitlines()
 
 
+def _earlier_stall_limit(bench) -> None:
+    """The task's first stall, a limit that an earlier step of its window left (L4-IMP-114): a later stall of any kind
+    is a failed attempt. An `agent.time_limit`, so that the `agent.idle` records of a test are its own."""
+    bench.wb.emit("agent.time_limit", task="1.1", phase="red", attempt=1, profile="impl", limit_s=1800, as_limit=True)
+
+
 def test_a_fractional_idle_is_rounded_to_whole_seconds(make_bench):
     bench = make_bench([Step(idle_s=600.7, status="timeout")])
     run_red(bench.wb, TASK, attempt=1)
@@ -249,11 +255,13 @@ def test_a_silent_agent_is_stopped_and_idle_is_recorded(make_bench):
 
 
 def test_two_idle_attempts_move_the_phase_to_the_second_profile(make_bench):
-    """SCN-IMP-202, the escalation part: an idle attempt is a failed attempt and counts for `escalate_after`."""
+    """SCN-IMP-202, the escalation part: when the stop is the task's second stall (L4-IMP-114) it is a failed attempt
+    and counts for `escalate_after`."""
     bench = make_bench(
         [Step(idle_s=600, status="timeout", tool_calls=1)] * 2 + [red_step(), green_step()],
         implementer={"escalate_after": 2}, **TWO,
     )  # fmt: skip
+    _earlier_stall_limit(bench)
     hook = Hook()
     outcome = run_task(bench.wb, TASK, escalate=hook)
     assert outcome.status == "done"
@@ -295,24 +303,29 @@ def test_tokens_do_not_decide_a_silent_stop(make_bench):
     assert idle["silent"] is True
 
 
-def test_an_idle_stop_after_a_tool_call_counts_as_before(make_bench):
-    """SCN-IMP-427: one tool call, then idle; the chain has a second profile."""
+def test_an_idle_stop_after_a_tool_call_counts_when_it_is_the_tasks_second_stall(make_bench):
+    """SCN-IMP-427: one tool call, then idle; the chain has a second profile and the task already has a stall limit."""
     bench = make_bench([Step(idle_s=600, status="timeout", tool_calls=1), red_step(), green_step()], **TWO)
+    _earlier_stall_limit(bench)
     assert run_task(bench.wb, TASK).status == "done"
     [idle] = bench.events("agent.idle")
-    assert (idle["silent"], idle["tool_calls"]) == (False, 1)
+    assert (idle["silent"], idle["tool_calls"], idle["as_limit"]) == (False, 1, False)
+    assert idle["reason"] == "idle: already once for this task"
     [failed] = bench.events("task.attempt_failed")
     assert failed["reason"] == "the agent showed no activity for 10m (implementer.idle_timeout), so L4 stopped it"
     assert not bench.events("availability.cooldown") and not bench.events("availability.fallback")
 
 
-def test_a_step_that_reaches_its_time_limit_with_no_tool_call_counts_as_before(make_bench):
-    """SCN-IMP-428: no idle mark (the wall-clock limit), a second profile, no tool call."""
+def test_a_step_that_reaches_its_time_limit_counts_when_it_is_the_tasks_second_stall(make_bench):
+    """SCN-IMP-428: no idle mark (the wall-clock limit), a second profile, and the task already has a stall limit."""
     bench = make_bench([Step(status="timeout"), red_step(), green_step()], **TWO)
+    _earlier_stall_limit(bench)
     assert run_task(bench.wb, TASK).status == "done"
     assert not bench.events("agent.idle")
     [failed] = bench.events("task.attempt_failed")
     assert failed["reason"] == "the agent step reached its time limit (30m)"
+    [record] = bench.events("agent.time_limit")[-1:]
+    assert (record["as_limit"], record["reason"]) == (False, "time: already once for this task")
 
 
 def test_a_single_profile_counts_its_silent_stops(make_bench):
@@ -327,11 +340,13 @@ def test_a_single_profile_counts_its_silent_stops(make_bench):
 
 
 def test_a_profile_without_a_stream_reader_cannot_be_silent(make_bench):
-    """It counts no tool calls at all, so 0 says nothing: the stop counts as before."""
+    """It counts no tool calls at all, so 0 says nothing: its stop is an idle stall (SCN-IMP-617), which counts when it
+    is the task's second stall."""
     bench = make_bench([Step(idle_s=600, status="timeout", stream_reader=False), red_step(), green_step()], **TWO)
+    _earlier_stall_limit(bench)
     assert run_task(bench.wb, TASK).status == "done"
     [idle] = bench.events("agent.idle")
-    assert idle["silent"] is False
+    assert (idle["silent"], idle["kind"]) == (False, "idle")
     assert len(bench.events("task.attempt_failed")) == 1
 
 
@@ -360,8 +375,9 @@ def test_a_silent_stop_of_another_task_is_a_first_one(make_bench):
 
 
 def test_an_idle_timeout_of_zero_is_never_silent(make_bench):
-    """D3: the watchdog is off, so a timeout is the wall-clock limit."""
+    """D3: the watchdog is off, so a timeout is the wall-clock limit: a `time` stall (L4-IMP-112), no `agent.idle`."""
     bench = make_bench([Step(status="timeout")], implementer={"idle_timeout": "0"}, **TWO)
+    _earlier_stall_limit(bench)
     outcome = run_red(bench.wb, TASK, attempt=1)
     assert outcome.status == "failed" and "time limit" in outcome.reason
     assert not bench.events("agent.idle")
