@@ -796,12 +796,17 @@ new run late, and the time is the difference between your clock and the forge's.
   `why`). A `why` that repeats (`no_report`, `file_without_tests`, `existing_tests_ran`, `id_without_file`) means the
   command does not fit: fix it or set `red_check: full`. A targeted run that times out fails the attempt (a new test
   that hangs). Green and verification still run the whole suite (L4-IMP-117..120).
-- If a green of such a unit fails a test that passed in the base report, or finds no result for a red test, the harness
-  records `task.red_check_disabled`, the unit's later red steps run the whole suite, and the attempt's reason ends with
-  `; the red step of this task ran only its new test files (L4-IMP-122): ...`. The red files are frozen in green, so
-  green cannot repair a new test file that breaks an old test. If green raised a question that names the frozen test
-  file, answer it: an answer that names the file unfreezes it for green (L4-IMP-015). Otherwise `l4 restart` (a
-  restarted unit has a new ledger and reads the key again: set `red_check: full` first to keep the whole run). `l4 retry` and `l4 resume` keep the switch
+- If a green in a unit that has a targeted red fails a test that passed in the base report, or finds no result for a
+  red test of a targeted task, the harness records `task.red_check_disabled` once and the unit's later red steps run the
+  whole suite (`task.red_check_full{why: unit_switched}`). For a task whose own red was targeted the attempt's reason also
+  ends with `; the red step of this task ran only its new test files (L4-IMP-122): ...`. The red files are frozen in
+  green, so green cannot repair a new test file that breaks an old test. With the regression text, answer the question
+  that green raises about the frozen test file: an answer that names the file unfreezes it for green (L4-IMP-015);
+  without a question, `l4 restart`. With the text that says the whole suite reports the tests under other ids, fix
+  `gates.test.targeted` and `l4 restart` (an unfreeze is no help). A restarted unit has a new ledger and reads the key
+  again: set `red_check: full` first to keep the whole run. A run killed between a targeted red commit and its green
+  resumes with a base that already shows an old test the red files break as failing, and records nothing:
+  verification's whole-suite steps report it. `l4 retry` and `l4 resume` keep the switch
   (L4-IMP-121, L4-IMP-122).
 - From 0.4.58 a green attempt that passed every test and failed only its lint or type gates is a near pass
   (`task.attempt_failed` has `near_pass: true`). The next green attempt of the task in the same run starts from its

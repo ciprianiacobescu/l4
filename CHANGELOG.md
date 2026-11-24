@@ -27,14 +27,20 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
   interaction shows, from red to green. **Upgrade:** 0.4.60 does not load the key (`extra: forbid`): move the pin first,
   then set the key, and remove it before you move the pin back. Run the targeted and the whole command once and compare
   the test ids they print before you set it (L4-CFG-007, L4-GAT-007..009, L4-IMP-117..120).
-- After a targeted red, a green whose whole run still fails a test that passed in the base report (after its re-run),
-  or reports no result for a red test, records `task.red_check_disabled` once, and every later red step of the unit and
-  of its fix units runs the whole suite (`task.red_check_full{why: unit_switched}`). `l4 retry` and `l4 resume` keep the
-  switch, and `l4 restart`, which starts a new ledger, reads the key again. The failed attempt's reason ends with `; the
-  red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make these tests pass,
-  report status blocked with a question that names the test file`. The red files are frozen in green, so a task whose
-  red files really broke an old test cannot be repaired by green: an answer that names the file unfreezes it (L4-IMP-015),
-  `l4 restart` starts over. This names the cause and ends the saving for the unit (L4-IMP-121, L4-IMP-122).
+- In a unit that has a targeted red, a green whose whole run still fails a test that passed in the base report (after
+  its re-run), or reports no result for a red test of a targeted task, records `task.red_check_disabled` once, and every
+  later red step of the unit and of its fix units runs the whole suite (`task.red_check_full{why: unit_switched}`). The
+  trigger is the unit, since an interaction that depends on order can first show in a later task's green. `l4 retry` and
+  `l4 resume` keep the switch, and `l4 restart`, which starts a new ledger, reads the key again. For a task whose own red
+  was targeted, the failed attempt's reason ends with `; the red step of this task ran only its new test files
+  (L4-IMP-122): ...`: for a regression it tells the agent to report status blocked with a question that names the test
+  file (an answer that names the file unfreezes it, L4-IMP-015); for a red test that the whole suite reports under
+  another id, it says that the targeted command names the tests differently and that a person fixes
+  `gates.test.targeted` and runs `l4 restart`. The red files are frozen in green, so green cannot repair a new test file
+  that really broke an old test: this names the cause and ends the saving for the unit. **Limit:** a run killed between a
+  targeted red commit and its green resumes with a base measured at the red commit, so an old test that the red files
+  break is in that base as failing and gets no record; verification's whole-suite steps report it (L4-IMP-119,
+  L4-IMP-121, L4-IMP-122).
 
 ## 0.4.60 (2026-11-23)
 

@@ -251,9 +251,10 @@ use a label. A command needs the forge token in the environment; the project com
   - `l4 resume` and `l4:resume` still work and mean the same for `halted` and `escalated`, but start no run.
 - **A task whose reason ends `the red step of this task ran only its new test files (L4-IMP-122)`** (`red_check:
   targeted`): the new red test files may break an old test, and green cannot change them. The harness already runs the
-  unit's later red steps whole. Answer the question that names the test file (an answer that names it unfreezes it,
-  L4-IMP-015), or a person runs `l4 restart` (set `red_check: full` first to keep the whole run). Do not retry alone: it
-  repeats the failure.
+  unit's later red steps whole. With the regression text, answer the question that names the test file (an answer that
+  names it unfreezes it, L4-IMP-015), or a person runs `l4 restart`. With the text that says the whole suite reports
+  the tests under other ids, a person fixes `gates.test.targeted` and runs `l4 restart`. Set `red_check: full` first to
+  keep the whole run. Do not retry alone: it repeats the failure.
 - **Escalated with `no finding of this round can be converted into a fix task`** (`no_convertible_finding`): a retry
   alone repeats the same verdict. Give the fix that the person's rejected finding asks for as feedback first
   (`l4 feedback add --unit FW:NAME --kind behaviour --when "…" --then "…" --text "…"`, then the git lines it prints),
