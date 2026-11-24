@@ -796,18 +796,23 @@ new run late, and the time is the difference between your clock and the forge's.
   `why`). A `why` that repeats (`no_report`, `file_without_tests`, `existing_tests_ran`, `id_without_file`) means the
   command does not fit: fix it or set `red_check: full`. A targeted run that times out fails the attempt (a new test
   that hangs). Green and verification still run the whole suite (L4-IMP-117..120).
-- If a green in a unit that has a targeted red fails a test that passed in the base report, or finds no result for a
-  red test of a targeted task, the harness records `task.red_check_disabled` once and the unit's later red steps run the
-  whole suite (`task.red_check_full{why: unit_switched}`). For a task whose own red was targeted the attempt's reason also
-  ends with `; the red step of this task ran only its new test files (L4-IMP-122): ...`. The red files are frozen in
-  green, so green cannot repair a new test file that breaks an old test. With the regression text, answer the question
-  that green raises about the frozen test file: an answer that names the file unfreezes it for green (L4-IMP-015);
-  without a question, `l4 restart`. With the text that says the whole suite reports the tests under other ids, fix
-  `gates.test.targeted` and `l4 restart` (an unfreeze is no help). A restarted unit has a new ledger and reads the key
-  again: set `red_check: full` first to keep the whole run. A run killed between a targeted red commit and its green
-  resumes with a base that already shows an old test the red files break as failing, and records nothing:
-  verification's whole-suite steps report it. `l4 retry` and `l4 resume` keep the switch
-  (L4-IMP-121, L4-IMP-122).
+- If a green in a unit that has a targeted red fails a test that passed in the base report, the harness records
+  `task.red_check_disabled` once and the unit's later red steps run the whole suite (`task.red_check_full{why:
+  unit_switched}`). For a task whose own red was targeted it does the same when green finds no result for a red test,
+  when its whole run has a collection error that names a file of that red (`why: green_collection`), or when it has no
+  readable report or times out (`why: green_no_report`), and the attempt's reason ends with `; the red step of this task
+  ran only its new test files (L4-IMP-122): ...` (not for a missing report). The record is read from the unit's ledger,
+  so it is made also when you have set `red_check` back to `full`. The red files are frozen in green, so green cannot
+  repair a new test file that breaks an old test or does not collect. With the regression text or the collection text,
+  answer the question that green raises about the frozen test file: an answer that names the file unfreezes it for green
+  (L4-IMP-015); without a question, `l4 restart`. With the text that says the whole suite reports the tests under other
+  ids, fix `gates.test.targeted` and `l4 restart` (an unfreeze is no help). A restarted unit has a new ledger and reads
+  the key again: set `red_check: full` first to keep the whole run. A run that restarts a task after a deadline, a retry
+  or an answer resumes at green: it measures the base of a targeted red with the red's files removed from the work tree
+  for its one whole run (put back byte for byte), so green sees an old test that those files break. When the red commit
+  does not match its record, or the files cannot be put back exactly, it measures at the red commit as for a whole red
+  and records `task.red_check_disabled` (`why: resume_files` or `resume_put_back`, `attempt: 0`). `l4 retry` and `l4
+  resume` keep the switch (L4-IMP-119, L4-IMP-121, L4-IMP-122).
 - From 0.4.58 a green attempt that passed every test and failed only its lint or type gates is a near pass
   (`task.attempt_failed` has `near_pass: true`). The next green attempt of the task in the same run starts from its
   changes, as uncommitted changes on the red commit, also when another profile runs it, and its prompt has a
@@ -2902,8 +2907,8 @@ Risks:
 These limits make operation more difficult. Know them before you start.
 
 - With `gates.test.red_check: targeted`, a new test file that breaks an old test only when they run together shows at
-  green and not at red, and green cannot change the frozen file. The harness names the cause and runs the later red steps
-  of the unit whole, but it has no path that redoes a red commit: `l4 restart` is the way out.
+  green and not at red (also after a resume), and green cannot change the frozen file. The harness names the cause and
+  runs the later red steps of the unit whole, but it has no path that redoes a red commit: `l4 restart` is the way out.
 - One full L4 unit has run on OpenCode 2, in a container ([10.9](#109-opencode-v2)), and the adapter was checked live
   through its probe and run. Watch the `verification.md` of the first unit on a `cli_major: 2` profile in your repository.
 - Only the run that stopped a unit has the cause in its log. Later CI runs do not mention it. Read the `REASON` column

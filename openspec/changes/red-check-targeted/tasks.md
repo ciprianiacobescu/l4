@@ -1,5 +1,5 @@
 Read `design.md` first; it names the code each decision touches (D1-D9). Requirements: L4-CFG-007, L4-GAT-007..009,
-L4-IMP-117..122 (`docs/SPEC.md`), scenarios SCN-CFG-08..12, SCN-GAT-12..20 and SCN-IMP-626..648. Run single test files
+L4-IMP-117..122 (`docs/SPEC.md`), scenarios SCN-CFG-08..12, SCN-GAT-12..20 and SCN-IMP-626..652. Run single test files
 only (`uv run --frozen pytest <file> -q -p no:cacheprovider`), never a whole directory, never two runs at once, and never
 a wait loop on `pgrep`.
 
@@ -84,3 +84,21 @@ Config tests load a YAML text through `l4.config.loader` as `tests/unit/config/t
   the SPEC holds each ID once as a requirement and in a scenario, the runbook and the skill name `red_check`, and no
   file of the change names a version number of the release.
 - [x] 5.3 `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files you changed.
+
+## 6. Review round: the resumed base, the other green failures, and the gaps (L4-IMP-117, L4-IMP-119..122; D5, D7, D10)
+
+- [x] 6.1 Tests first in `tests/unit/implementer/test_tdd_red_targeted.py`: SCN-IMP-648 (a resumed targeted red measures
+  its base with the red's files absent, puts them back byte for byte and with their mode, and green sees the old test
+  and records the switch), SCN-IMP-649 (a record the red commit does not match, or a put-back that is not exact, falls
+  back to the whole run at the red commit and records `resume_files` or `resume_put_back` once), and the wiring of the
+  named-test and stale-test rules from `run_red` into `choose` (SCN-IMP-630). Then `_resume_base`, `_red_files_present`,
+  `_run_without` and `RedOutcome.files` in `src/l4/implementer/tdd.py` (D10).
+- [x] 6.2 Tests first in `tests/unit/implementer/test_tdd_green_red_check.py` and `test_red_check.py`: SCN-IMP-650 (a
+  collection error that names a file of the targeted red: `green_collection` and its suffix; another file or a whole
+  red: nothing), SCN-IMP-651 (no readable report or a timeout after a targeted red: `green_no_report`, no suffix),
+  SCN-IMP-652 (the switch from the ledger after the key was set back to `full`), a switch first seen on attempt 2, a
+  whole red with a missing id records nothing, the folder that `l4 restart` builds has no switch, SCN-IMP-639 (a ledger
+  of 0.4.60 folds; one with the new records folds as one without them), and `@` and non-ASCII bytes in
+  `red_check._odd` and the 8,000-byte limit. Then `red_check.collection_names`, `_targeted_red_effect` and `_odd`.
+- [x] 6.3 `docs/SPEC.md`, the delta spec, `design.md`, the changelog, the runbook and the skill say it (L4-IMP-117,
+  L4-IMP-119..122, SCN-IMP-648..652).

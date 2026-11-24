@@ -48,7 +48,8 @@ that the targeted red let through is seen at green, recorded, and ends the unit'
 
 **Non-Goals:** a targeted green or verification (both stay whole-suite); a path that redoes red after green finds that
 the red tests broke an old test (see D7: it is loud, and `l4 restart` is the way out); the `{grep}` placeholder; a
-doctor check (see D1); selecting tests by name; a Python step that adds a stub.
+doctor check (see D1); selecting tests by name; a Python step that adds a stub. The base of a resumed targeted red is
+not a non-goal: `resume_red` measures it without the red's files (D5, D10).
 
 ## Decisions
 
@@ -95,8 +96,9 @@ The first rule that fails gives `why`:
    `.mypy_cache` and `.ruff_cache` entries and `.pyc` files).
 8. `not_a_test_module`: a changed path is not a test module (below).
 9. `no_test_file`: no changed path is left.
-10. `too_many_files`: more than 50 paths, or paths longer than 8,000 bytes together.
-11. `odd_path`: a path starts with `-` or holds a control character.
+10. `too_many_files`: more than 50 paths, or paths longer than 8,000 bytes together (bytes of UTF-8, not characters).
+11. `odd_path`: a path starts with `-` (an option) or `@` (pytest reads `@file` as an argument file) or holds a control
+    character.
 
 A **test module** is a path that matches a glob of `tdd.test_globs`, matches no glob of `tdd.test_support_globs` or
 `tdd.runner_config_files`, and is no support file by the verifier's rule applied to the file in the work tree: for a
@@ -117,7 +119,7 @@ Fail-safe: every rule can only send a step to the whole suite, which is today's 
 `red_check.targeted_command(template, files)`: `shlex.split(template)`, the one word `{files}` replaced by the files,
 `shlex.join`. `run_gate` splits the result again, so each path is exactly one argv item: nothing in a path (a space, a
 quote, `$`) is read by a shell, because no shell runs. Files are repository-relative POSIX paths, as git lists them,
-sorted by their text. No `./` prefix (D2 refuses a path that starts with `-`, so an option cannot be injected).
+sorted by their text. No `./` prefix (D2 refuses a path that starts with `-` or `@`, so neither an option nor an argument file can be injected).
 
 The gate is `wb.run_gate("test-targeted", <that command>, reports=wb.cfg.gates.test.reports,
 note=red_note(base_report))`, in the same sandbox, with the same environment (the trace plugin, `gates.timeout`) as the
@@ -188,13 +190,12 @@ After red:
 - **Verification** reads `task.red_ok` (`tests`, `frozen`, `criteria`, `notes`), the red commit, and runs steps 1 and 3
   on the whole suite.
 - **The next task's baseline** (`reused_baseline`) reuses green's report (`keep_tested`), never red's.
-- **A resumed red** (`resume_red`, 2142) rebuilds its base report from a new whole run at the red commit, with the new ids
-  taken out. For a targeted red that run holds the red files, so an old test that they break is in the rebuilt base as
-  failing: it is not in green's regressed set, and green commits with no record of it (a full red would have failed
-  before its commit). This is a named limit, decided: `resume_red` keeps rebuilding its base from the red commit.
-  Verification's steps 1 and 3 run the whole suite and compare with the merge base, so they are the backstop and report
-  the test. Measuring the base at the red commit's parent instead would need a second checkout and a gate run in
-  `resume_red` for a case that needs a run killed between two commits; it is not built.
+- **A resumed red** (`resume_red`) runs at the start of every execution of a task (a deadline, a retry, a resume, an
+  answered question), so it is not rare, and it rebuilds its base from a whole run at the red commit. That run holds
+  the red files, so an old test that they break would already fail in the rebuilt base: green's regressed set would be
+  empty and green would commit with no record of it. The decision (reversing the first one, which called this rare):
+  `resume_red` measures a targeted red's base with the red's files absent, as the red step's own base was measured
+  (D10). Verification's steps 1 and 3 run the whole suite and compare with the merge base, and stay the backstop.
 
 Id stability. A targeted command that names the new tests differently from the whole suite (for example a runner that
 prefixes ids with a project name only when a project filter is on) gives ids that green's whole run does not hold, so
@@ -210,11 +211,14 @@ fix `gates.test.targeted` and `l4 restart`.
   `collection_errors`, `excerpt`). The progress log shows `gate test-targeted fail (...)` and the usual `red: N new
   tests fail, as intended`.
 - `task.red_ok` gains `check` (`full` or `targeted`) and, for `targeted`, `files` (at most 50). `task.red_ok` of an
-  already-satisfied task is written by a step that D4 made whole-suite, so it has `check: full`. A configuration of
-  `full` writes neither key: a ledger of 0.4.60 and a ledger of a `full` configuration are the same.
+  already-satisfied task is written by a step that D4 made whole-suite, so it has `check: full`. A red step of a `full`
+  configuration writes none of the new records, so a unit that never ran a targeted red has the ledger of 0.4.60.
+  `task.red_check_disabled` is the exception: green and `resume_red` write it from the unit's ledger, whatever the
+  configuration says at that moment (a unit whose key was set back to `full` after a targeted red still records it).
 - `task.red_check_full{task, attempt, why, detail}`, when `red_check` is `targeted` and the step ran the whole suite.
   `why` is a word of D2 or D4; `detail` is at most 300 characters (at most five paths or ids). Not written for `full`.
-- `RedOutcome.check` (`"full"` default): set by `run_red`, and by `resume_red` from the event it reads. `run_green`
+- `RedOutcome.check` (`"full"` default) and `RedOutcome.files` (empty default): set by `run_red`, and by `resume_red`
+  from the event it reads. `run_green`
   reads it, so green decides from the red commit's own record, also in a later job.
 - The CI step summary and `l4 status` keep their text. `progress._red_ok` may add `(check: targeted, N files)` to its
   line.
@@ -233,12 +237,21 @@ and its fix units share it) and decides:
   interaction that depends on order or on a shared port can first show in a later task's green, whose own red may have
   run whole after a fallback;
 - `ids_missing`: `why[0]` starts with `red tests still failing`, at least one of its ids is missing from
-  `gate.report.tests` (absent, not failing), and the red of this task has `check: targeted` (`red.check`).
+  `gate.report.tests` (absent, not failing), and the red of this task has `check: targeted` (`red.check`);
+- `green_collection`: the red of this task has `check: targeted` and the whole run's report has a collection error that
+  names a file of that red (`RedOutcome.files`, from the `task.red_ok` of the red commit: `red_check.collection_names`
+  by path or dotted module). The frozen red file does not import: a change of the code cannot fix it, as for a
+  regression;
+- `green_no_report`: the red of this task has `check: targeted` and the whole run has no readable report or timed out
+  (`gate.report is None` or `gate.timed_out`): a red file that hangs or crashes the runner gives exactly this, and green
+  cannot change it. A deadline never reaches here: it hands the step back before the verdict.
 
 If the ledger holds no `task.red_check_disabled` yet, the step records
 
-`task.red_check_disabled{task, attempt, why: "regressed" | "ids_missing", tests: [...], red_sha}` (at most 20 ids;
-`red_sha` is the task's red commit).
+`task.red_check_disabled{task, attempt, why: "regressed" | "ids_missing" | "green_collection" | "green_no_report",
+tests: [...], red_sha}` (at most 20 ids or files; none for `green_no_report`; `red_sha` is the task's red commit). The
+record is read from the unit's ledger and the task's `RedOutcome`, never from the configuration: a unit whose key was
+set back to `full` after a targeted red still records it.
 
 Every later `choose` call sees it (D2 rule 1) and runs the whole suite with `task.red_check_full{why:
 "unit_switched"}`. It stays for the life of the unit and its fix units: `l4 retry` and `l4 resume` keep the ledger, so
@@ -251,8 +264,8 @@ puts in `regressed` (`base.ids_with("passed")`, minus the superseded ones). Whet
 code that broke it is not decided here: both give the same cheap, safe action (later reds run whole). A green regression
 is much more often green's own code, and then the switch costs only the saving.
 
-The reason. When the own red of the task was targeted and the attempt fails with a regressed set or a missing id, the
-reason gets one suffix after the existing ones (`; failed again on a re-run (L4-IMP-105): ...`), by `why`:
+The reason. When the own red of the task was targeted and the attempt fails with a regressed set, a missing id or a
+collection error that names a file of the red, the reason gets one suffix after the existing ones (`; failed again on a re-run (L4-IMP-105): ...`), by `why`:
 
 - `regressed`: `; the red step of this task ran only its new test files (L4-IMP-122): if no change of the code can make
   these tests pass, report status blocked with a question that names the test file`. A person's answer to such a
@@ -261,7 +274,12 @@ reason gets one suffix after the existing ones (`; failed again on a re-run (L4-
 - `ids_missing`: `; the red step of this task ran only its new test files (L4-IMP-122): the whole suite reports these
   tests under other ids than the targeted command did, so no change of the code can make them pass: report status
   blocked and say so; a person fixes gates.test.targeted and runs l4 restart`. An unfreeze is no help here, so the text
-  does not suggest one.
+  does not suggest one;
+- `green_collection`: `; the red step of this task ran only its new test files (L4-IMP-122): if no change of the code
+  can make this file collect, report status blocked with a question that names the test file`. A person's answer that
+  names the file unfreezes it (L4-IMP-015);
+- `green_no_report`: no suffix. A missing report or a timeout names no file the agent could ask about, and the reason
+  of a gate with no readable report already says what happened.
 
 A task whose own red was not targeted gets no suffix, also when the unit's switch is recorded for it. The text is only a
 reason: the structured `regressed` marker of L4-IMP-105 is not parsed from it. The attempt fails as today, so the loss
@@ -296,9 +314,30 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 - **L4-IMP-118**: the guards (`tampered`) run after each run; green and verification stay whole-suite, so a unit never
   passes on a targeted check alone.
 - **L4-IMP-121, L4-IMP-122**: what a targeted red misses ends at green with a recorded cause and a switch, not in
-  silence, except for one case: a run killed between a targeted red commit and its green resumes with a base that
-  already shows the broken old test as failing (D5). Verification's whole-suite steps are the backstop there.
+  silence: a resumed targeted red measures its base without the red's files (D10), and a record or a put-back that does
+  not hold falls back to today's rebuild and records the switch. Verification's whole-suite steps stay the backstop.
 - Never a person-only action by an agent: nothing here activates, accepts or answers anything.
+
+### D10. The base of a resumed targeted red (L4-IMP-119, L4-IMP-121)
+
+`resume_red` calls `_resume_base`, which runs inside `at_clean_head` (the work tree is the red commit's, with the killed
+run's own work set aside). When `task.red_ok` says `check: targeted`:
+
+1. `_red_files_present` checks the record against the red commit: `files` is a non-empty list of at most 50 distinct,
+   relative POSIX paths with no `..`; the changed paths between the red commit's parent and the red commit are those
+   files, the unit's own folder (or the folder of the run's ledger, a fix unit's parent) or a tool cache; each file did
+   not exist at the parent, is a regular file of the work tree (no link at any component) and has the blob's bytes at
+   the red commit. Any failure gives `resume_files`.
+2. `_run_without` saves each file's bytes and mode, removes them with `unlink_inside`, runs the gate `baseline` with the
+   configured command, and puts each back with `write_inside` (mode kept) in a `finally`, then reads each back and
+   compares bytes and mode. A file that is not back exactly makes git restore the files from the red commit and gives
+   `resume_put_back`.
+3. With a reason, the base is today's: a whole run at the red commit, on the tree git just restored.
+
+With a reason `resume_red` records `task.red_check_disabled{attempt: 0, why, tests: [], red_sha}` once for the unit
+(fail safe: a record that does not hold is a reason to stop trusting the targeted check for the unit). The new ids are
+taken out of the report as before. The freeze and the tamper guards are unchanged: the manifest and `restore_frozen` read
+the red commit, and the files are back before `resume_red` returns. A red that was not targeted keeps today's code.
 
 ## Risks / Trade-offs
 
@@ -308,6 +347,8 @@ know the events ignores them (the ledger fold reads unknown types as plain recor
 - A targeted command whose ids differ from the whole suite's fails every green of the unit; D4 rule 4 and D7 limit it
   to the first task. The runbook says to run both commands once and compare ids before the key is set.
 - A repository whose targeted command never completes pays a short extra run per red step.
-- A resumed targeted red has no regression record for an old test its files broke (D5); verification reports it.
+- A resumed targeted red removes its files for one whole run (D10): a kill inside that run leaves them removed in the
+  work tree. The next resume sets that tree aside as work in progress (`at_clean_head`), and green's `restore_frozen`
+  puts the red files back from the red commit before its gate (inferred from the code, not run with a kill).
 - Old tests are judged at red by their base status, not their head status. That is the saving, and verification and
   green run them.

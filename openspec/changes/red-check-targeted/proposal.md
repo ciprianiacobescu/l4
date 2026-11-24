@@ -42,9 +42,14 @@ What exists at 0.4.60 (re-checked in the source at 663cd6d5):
 - The ledger names the check: `task.red_ok` gains `check` and `files`, and `task.red_check_full` says why a step of a
   `targeted` configuration ran the whole suite (L4-IMP-120).
 - When green's full run in a unit that has a targeted red, after its own re-run, still has a base-passing test failing,
-  or a red test of a targeted task is missing from green's report, the harness records `task.red_check_disabled`. The
+  or, for a task whose own red was targeted, a red test is missing from green's report, a collection error names a file
+  of that red, or the whole run has no readable report or times out, the harness records `task.red_check_disabled`. The
   unit's later red steps then run the whole suite, and green's reason says, for a task whose own red was targeted, that
-  the targeted red may be the cause and what a person does about it (L4-IMP-121, L4-IMP-122).
+  the targeted red may be the cause and what a person does about it (L4-IMP-121, L4-IMP-122). The record is read from
+  the unit's ledger, not from the key.
+- A task resumes at green whenever it starts again after its red commit, so `resume_red` measures a targeted red's base
+  with the red's files absent from the work tree for its one whole run (put back byte for byte), and falls back to the
+  whole run at the red commit, with a record, when the red commit does not match its record (L4-IMP-119, L4-IMP-121).
 
 Non-goals: a targeted green check, a path that redoes a red commit, the `{grep}` placeholder, a doctor check, a
 targeted check for a step that changes a stub (a Python red step that adds stubs runs the whole suite).
@@ -72,7 +77,7 @@ targeted check for a step that changes a stub (a Python red step that adds stubs
   (eligibility, command, usable test, report with the results added, the unit's records),
   `src/l4/implementer/tdd.py` (`run_red`, `resume_red`, `run_green`, `RedOutcome.check`),
   `src/l4/verifier/support_base.py` (the test-module rule of `is_support_file`, taken for a work-tree file).
-- `docs/SPEC.md` (L4-CFG-007, L4-GAT-007..009, L4-IMP-117..122, SCN-CFG-08..12, SCN-GAT-12..20, SCN-IMP-626..648,
+- `docs/SPEC.md` (L4-CFG-007, L4-GAT-007..009, L4-IMP-117..122, SCN-CFG-08..12, SCN-GAT-12..20, SCN-IMP-626..652,
   change-table row 144, the reference configuration, section 12.1), `docs/runbook.md`, `plugins/l4/skills/l4/`,
   `CHANGELOG.md`.
 - Ledger: `task.red_ok` gains `check` and `files`; two new events, `task.red_check_full` and `task.red_check_disabled`;
