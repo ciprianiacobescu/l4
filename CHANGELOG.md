@@ -6,6 +6,15 @@ release is the tag `src-vX.Y.Z` on `amaster`; the release commit on branch `rele
 The harness is before 1.0. Each entry says what was added, what changed in behaviour and what was fixed, so a
 consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
+## Unreleased
+
+### Changed
+- An implementer step that stalls on a profile is now a limit of that profile, not a failed attempt, once per task, when another profile can take the step. A stall is an idle stop with no tool call (a silent stop, as since 0.4.42), an idle stop after at least one tool call, or the agent's 30 minute time limit. Before, only the first counted as a limit; the other two failed the attempt, so a task spent its attempts on a profile that was stalling and moved only after `implementer.escalate_after` of them. In a consumer's plan of seven units on a chain of two free profiles and a paid one, 32 of 171 implementer calls ended in an idle stop or the time limit (586 agent minutes, about 18% of the plan's in-run time), and after one free profile's idle stop its next attempt went silent again in 9 of 12 cases. Now the profile cools for `availability.default_cooldown` (30 minutes; the registry kind is `idle` or `time`), its cached hello is cleared, the step's uncommitted work is discarded (a red commit stays, and a near pass the step began from is handed on), and the task goes on on the next usable profile in a new session; the next task starts there too. A task has one such limit per attempt window, whatever the kind: its second stall, on any profile, is a failed attempt as before, and a silent stop of an earlier release counts as the first. An idle stop after a tool call or a time-limit stop stays a failed attempt, with nothing cooled, when no other profile can take the step (every other profile is cooling, is spent for the task, or has the same adapter and model), and in a fix task that already moved after a limit, so a stall never parks a unit that would have retried. A chain of one profile, every other role and every other status are unchanged, and no key is added (L4-IMP-112..116, L4-AVL-014..015).
+- **Upgrade:** a task whose window holds failed attempts from earlier idle or time-limit stops keeps them, and its next stall may be its first stall limit. A cool-down of kind `idle` or `time` in the runner's cache is read by an older `l4` as any other kind. The new records are optional fields on `agent.idle` (`kind`, `as_limit`, `discarded_files`, `discarded_paths`) and a new event `agent.time_limit`; an older `l4` ignores them, and counts only a silent stop toward the once-per-task rule.
+
+### Added
+- `agent.time_limit` records a step that reached the agent's time limit (`task`, `phase`, `attempt`, `profile`, `limit_s`, `as_limit`, and `reason` when it counted as a failed attempt), and `agent.idle` says which kind of stall it was, whether it was a limit and how many files the step left uncommitted. The progress log has a warning line for each. The runbook tells how to read them and when to move a profile later in `roles.implementer`, which L4 never does for you (L4-IMP-116).
+
 ## 0.4.60 (2026-11-23)
 
 ### Added
