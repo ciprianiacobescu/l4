@@ -22,7 +22,8 @@ the stall's kind (L4-AVL-014), and go on as after any limit: no `task.attempt_fa
 the next usable profile in a new session, and the next task starting there when the stalled profile was the run's.
 A limit that the adapter itself found on the run SHALL be kept as it is. The soft deadline's cancel and every status
 other than `timeout` SHALL be handled as before. A stall that does not meet all of the conditions SHALL fail the
-attempt as before, with the reason it has today, and its record SHALL say why it did not move (L4-IMP-116). This
+attempt as before, with the reason it has today; its record SHALL carry `as_limit: false` and, when L4-IMP-114 or
+L4-IMP-115 is why it did not move, the reason they name (L4-IMP-116). This
 requirement SHALL NOT apply to any other role: a judge, the verifier agent, the clarifier, the delegate and the spec
 writer SHALL keep their own rules.
 
