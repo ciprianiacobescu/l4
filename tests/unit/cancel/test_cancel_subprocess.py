@@ -9,6 +9,7 @@ the job one way, and checks: the run ends with exit 16, the agent process is gon
 unit lock can be taken again.
 """
 
+import contextlib
 import http.server
 import json
 import os
@@ -134,11 +135,14 @@ class Job:
         lease.release()
 
     def kill_everything(self) -> None:
+        # a process may end between the check and the kill (the orphaned run stops itself): that is not an error
         for pid in (self.l4_pid, self.agent_pid):
             if _alive(pid):
-                os.kill(pid, signal.SIGKILL)
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
         if self.shell.poll() is None:
-            os.killpg(self.shell.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.shell.pid, signal.SIGKILL)
             self.shell.wait()
 
 
