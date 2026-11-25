@@ -135,3 +135,129 @@ def test_honest_names_that_only_look_like_the_harness_references_are_not_hits():
         assert scan.harness_references(source) == [], why
     assert scan.harness_references("def f(config):\n    return config.option.xmlpath\n")
     assert scan.harness_references("_OUTCOME_FD = []\n")
+
+
+# skip_constructs (skipped-test-hold D3): the constructs that can skip a test, keyed by (scope, unparsed text)
+SKIPIF = "pytest.mark.skipif(os.getenv('X') != 'true', reason='stack')"
+
+
+def _keys(source: str) -> set[tuple[str, str]]:
+    found = scan.skip_constructs(source)
+    assert found is not None
+    return set(found)
+
+
+def test_skip_constructs_of_a_source_that_does_not_parse_is_none():
+    assert scan.skip_constructs("def (:") is None
+    assert scan.skip_constructs("") == {}
+
+
+def test_skip_constructs_decorators_are_scoped_to_what_they_decorate():
+    source = (
+        "import os\nimport pytest\nimport unittest\n\n\n"
+        "@pytest.mark.skip\ndef test_a():\n    pass\n\n\n"
+        "@pytest.mark.xfail(reason='x')\nclass TestB:\n"
+        "    @pytest.mark.skipif(os.getenv('X') != 'true', reason='stack')\n    def test_c(self):\n        pass\n\n"
+        "    @unittest.expectedFailure\n    def test_d(self):\n        pass\n\n\n"
+        "@unittest.skipUnless(os.getenv('Y'), 'y')\ndef test_e():\n    pass\n"
+    )
+    assert _keys(source) == {
+        ("test_a", "pytest.mark.skip"),
+        ("TestB", "pytest.mark.xfail(reason='x')"),
+        ("TestB.test_c", SKIPIF),
+        ("TestB.test_d", "unittest.expectedFailure"),
+        ("test_e", "unittest.skipUnless(os.getenv('Y'), 'y')"),
+    }
+
+
+def test_skip_constructs_an_unchanged_skipif_is_the_same_key_however_it_is_wrapped():
+    one_line = f"import os, pytest\n\n\n@{SKIPIF}\ndef test_a():\n    pass\n"
+    wrapped = (
+        'import os, pytest\n\n\n@pytest.mark.skipif(\n    os.getenv("X") != "true",\n    reason="stack",\n)\n'
+        "def test_a():\n    pass\n"
+    )
+    assert scan.skip_constructs(one_line) == scan.skip_constructs(wrapped)
+
+
+def test_skip_constructs_a_changed_condition_on_a_continuation_line_is_a_different_key():
+    before = "@pytest.mark.skipif(\n    os.getenv('A') != 'true',\n    reason='r',\n)\ndef test_a():\n    pass\n"
+    after = before.replace("'A'", "'B'")
+    assert scan.skip_markers(before) == scan.skip_markers(after)  # the old count cannot see it
+    assert _keys(before) != _keys(after)
+
+
+def test_skip_constructs_a_mark_inside_a_parametrize_makes_the_decorator_a_construct():
+    source = (
+        "import pytest\n\n\n@pytest.mark.parametrize('n', [1, pytest.param(2, marks=pytest.mark.skip)])\n"
+        "def test_a(n):\n    pass\n\n\n@pytest.mark.parametrize('n', [1, 2])\ndef test_b(n):\n    pass\n"
+    )
+    assert {scope for scope, _ in _keys(source)} == {"test_a"}
+
+
+def test_skip_constructs_module_and_class_marks_and_the_aliases_they_define():
+    source = (
+        f"import os, pytest\n\npytestmark = [pytest.mark.skip]\nrequires_stack = {SKIPIF}\n\n\n"
+        "@requires_stack\ndef test_a():\n    pass\n\n\n"
+        "class TestB:\n    pytestmark = pytest.mark.skipif(True, reason='r')\n    needs: int = pytest.mark.xfail\n\n"
+        "    def test_c(self):\n        pass\n\n    @needs\n    def test_d(self):\n        pass\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "pytestmark = [pytest.mark.skip]"),
+        ("<module>", f"requires_stack = {SKIPIF}"),
+        ("test_a", "requires_stack"),
+        ("TestB", "pytestmark = pytest.mark.skipif(True, reason='r')"),
+        ("TestB", "needs: int = pytest.mark.xfail"),
+        ("TestB.test_d", "needs"),
+    }
+
+
+def test_skip_constructs_an_alias_of_an_alias_and_a_dotted_use():
+    source = (
+        "import pytest\nfrom helpers import marks\n\nbase = pytest.mark.skip\nstack = base\n\n\n"
+        "@stack\ndef test_a():\n    pass\n\n\n@marks.base\ndef test_b():\n    pass\n"
+    )
+    scopes = {scope for scope, _ in _keys(source)}
+    assert scopes == {"<module>", "test_a", "test_b"}
+
+
+def test_skip_constructs_runtime_calls_in_a_test_a_fixture_a_class_body_and_the_module():
+    source = (
+        "import pytest\nfrom unittest import SkipTest\n\ndocker = pytest.importorskip('docker')\n"
+        "if not docker:\n    pytest.skip('no docker', allow_module_level=True)\n\n\n"
+        "def test_a():\n    pytest.xfail('later')\n\n\n"
+        "@pytest.fixture\ndef stack():\n    pytest.skip('no stack')\n\n\n"
+        "class TestB:\n    other = pytest.importorskip('other')\n\n"
+        "    def setUp(self):\n        self.skipTest('no')\n\n    def test_c(self):\n        raise SkipTest('x')\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "pytest.importorskip('docker')"),
+        ("<module>", "pytest.skip('no docker', allow_module_level=True)"),
+        ("test_a", "pytest.xfail('later')"),
+        ("stack", "pytest.skip('no stack')"),
+        ("TestB", "pytest.importorskip('other')"),
+        ("TestB.setUp", "self.skipTest('no')"),
+        ("TestB.test_c", "SkipTest('x')"),
+    }
+
+
+def test_skip_constructs_names_imported_from_pytest_and_unittest():
+    source = (
+        "from pytest import skip, importorskip\nfrom unittest import skipIf\n\nnp = importorskip('numpy')\n\n\n"
+        "@skipIf(True, 'r')\ndef test_a():\n    skip('x')\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "importorskip('numpy')"),
+        ("test_a", "skipIf(True, 'r')"),
+        ("test_a", "skip('x')"),
+    }
+
+
+def test_skip_constructs_counts_repeats_and_ignores_what_is_not_a_skip():
+    source = (
+        "import pytest\n\n\ndef test_a():\n    pytest.skip('x')\n    if False:\n        pytest.skip('x')\n\n\n"
+        "@pytest.mark.parametrize('n', [1])\n@pytest.fixture\ndef test_b(n):\n    assert n\n"
+    )
+    found = scan.skip_constructs(source)
+    assert found == {("test_a", "pytest.skip('x')"): 2}
+    more = scan.skip_constructs(source + "\n\ndef test_c():\n    pass\n")
+    assert more == found

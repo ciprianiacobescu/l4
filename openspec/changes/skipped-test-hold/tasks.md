@@ -4,13 +4,13 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 1. The skip constructs and the rule (L4-VER-092, D1, D3)
 
-- [ ] 1.1 Tests first, in `tests/unit/verifier/test_scan.py` (the function) and a new `tests/unit/evidence/test_skip_predating.py` (the
+- [x] 1.1 Tests first, in `tests/unit/verifier/test_scan.py` (the function) and a new `tests/unit/evidence/test_skip_predating.py` (the
   rule, with a temporary git repo as `tests/unit/evidence/test_scope.py` builds one): the table of D3 one case per row,
   an unchanged `skipif`, a condition changed on a continuation line, an alias defined and an old test newly decorated
   with it, a module-level `importorskip` added, a skip added to another test, a fixture that gained `pytest.skip`, a
   removed skip, an unparsable head; the rules 1-5 of D1 (file added, renamed, deleted; test absent at base; blob over
   `MAX_SOURCE_BYTES`; `git show` failing; support and runner-config files changed). SCN-VER-372..378.
-- [ ] 1.2 Then add `skip_constructs` to `src/l4/verifier/scan.py` (beside `skip_markers`, which stays as it is) and
+- [x] 1.2 Then add `skip_constructs` to `src/l4/verifier/scan.py` (beside `skip_markers`, which stays as it is) and
   `skip_predating(git, base, head, files, ids, cfg, tree)` to `src/l4/evidence/collect.py` (or a new
   `src/l4/evidence/skippred.py` that `collect.py` imports): it returns the ids of `ids` whose skip predates the unit and
   never raises (every failure is "not predating"). Map an id to `(file, qualname)` with `file_of_test`

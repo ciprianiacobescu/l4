@@ -226,6 +226,12 @@ def defined_tests(source: str) -> set[str]:
     return {name for name, _ in _qualified(tree) if name.rsplit(".", 1)[-1].startswith("test")}
 
 
+def function_names(source: str) -> set[str]:
+    """Every module-level function and method of a module-level class by its dotted name, tests or not."""
+    tree = _parse(source)
+    return set() if tree is None else {name for name, _ in _qualified(tree)}
+
+
 def _skips_in(node: ast.AST) -> int:
     count = 0
     for sub in ast.walk(node):
@@ -252,6 +258,120 @@ def skip_markers(source: str) -> Counter[str]:
         if isinstance(node, ast.ClassDef):
             found[node.name] += sum(len(_SKIP_MARK.findall(ast.unparse(d))) for d in node.decorator_list)
     return +found  # drops the zero counts
+
+
+_SKIP_RUNTIME = re.compile(r"^(?:pytest\.(?:skip|xfail|importorskip)|(?:[\w.]*\.)?(?:skipTest|SkipTest))$")
+_RAISED_SKIP = re.compile(r"^(?:[\w.]*\.)?SkipTest$")
+_PYTEST_SKIPS = frozenset({"skip", "xfail", "importorskip"})
+_UNITTEST_SKIPS = frozenset({"skip", "skipIf", "skipUnless", "expectedFailure"})
+_ASSIGNS = (ast.Assign, ast.AnnAssign, ast.AugAssign)
+
+
+def _imported(tree: ast.Module, module: str, wanted: frozenset[str]) -> set[str]:
+    """The local names of `wanted` that `from <module> import ...` binds anywhere in the file."""
+    return {
+        a.asname or a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and n.module == module
+        for a in n.names
+        if a.name in wanted
+    }
+
+
+def _assigned(statements: Iterator[ast.stmt]) -> Iterator[tuple[set[str], str]]:
+    for node in statements:
+        if isinstance(node, _ASSIGNS) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            yield {t.id for t in targets if isinstance(t, ast.Name)}, ast.unparse(node.value)
+
+
+def _alias_names(tree: ast.Module, is_mark: "re.Pattern[str]") -> set[str]:
+    """The names bound at module or class level to a skip marker, or to another alias (`requires_stack = pytest.mark.
+    skipif(...)`, `pytestmark = [...]`, `stack = requires_stack`)."""
+    scopes = [tree.body] + [n.body for n in tree.body if isinstance(n, ast.ClassDef)]
+    assigns = [pair for body in scopes for pair in _assigned(iter(body))]
+    aliases: set[str] = set()
+    grown = True
+    while grown:
+        grown = False
+        for names, value in assigns:
+            if not names <= aliases and (is_mark.search(value) or _mentions(aliases, value)):
+                aliases |= names
+                grown = True
+    return aliases
+
+
+def _mentions(names: Collection[str], text: str) -> bool:
+    return any(re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text) for n in names)
+
+
+def skip_constructs(source: str) -> Counter[tuple[str, str]] | None:
+    """The constructs of a Python file that can skip or expect-fail a test, as `(scope, unparsed text)` with a count
+    (skipped-test-hold D3). `scope` is `<module>`, a module-level class name, a module-level function name or
+    `Class.method`; a construct nested deeper counts for the outermost of those. The text is `ast.unparse`, so a line
+    wrap or a quote style is no change and a changed condition is one. `None` when the source does not parse.
+
+    A construct is: a skip, skipif or xfail marker or a `unittest` skip decorator (also inside a `parametrize`); an
+    assignment at module or class level whose value holds a marker or an alias (`pytestmark = ...`, `requires_stack =
+    pytest.mark.skipif(...)`), and each use of such an alias as a decorator; a call of `pytest.skip`, `pytest.xfail`,
+    `pytest.importorskip`, `<x>.skipTest` or `SkipTest(...)`, and `raise SkipTest`, in any statement."""
+    tree = _parse(source)
+    if tree is None:
+        return None
+    from_pytest = _imported(tree, "pytest", _PYTEST_SKIPS)
+    from_unittest = _imported(tree, "unittest", _UNITTEST_SKIPS)
+    imported = from_pytest | from_unittest
+    is_mark = re.compile(
+        _SKIP_MARK.pattern + (rf"|^(?:{'|'.join(map(re.escape, from_unittest))})\b" if from_unittest else "")
+    )
+    aliases = _alias_names(tree, is_mark)
+    found: Counter[tuple[str, str]] = Counter()
+
+    def marked(text: str) -> bool:
+        return bool(is_mark.search(text)) or _mentions(aliases, text)
+
+    def decorators(scope: str, nodes: Collection[ast.AST]) -> None:
+        for root in nodes:
+            for node in ast.walk(root):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                    found.update((scope, t) for d in node.decorator_list if marked(t := ast.unparse(d)))
+
+    def runtime(scope: str, nodes: Collection[ast.AST]) -> None:
+        for root in nodes:
+            for node in ast.walk(root):
+                if isinstance(node, ast.Call):
+                    callee = ast.unparse(node.func)
+                    if _SKIP_RUNTIME.match(callee) or (isinstance(node.func, ast.Name) and callee in imported):
+                        found[(scope, ast.unparse(node))] += 1
+                elif isinstance(node, ast.Raise) and node.exc is not None and not isinstance(node.exc, ast.Call):
+                    if _RAISED_SKIP.match(ast.unparse(node.exc)):
+                        found[(scope, ast.unparse(node))] += 1
+
+    def statement(scope: str, node: ast.stmt) -> None:
+        value = getattr(node, "value", None) if isinstance(node, _ASSIGNS) else None
+        if value is not None and marked(ast.unparse(value)):
+            found[(scope, ast.unparse(node))] += 1
+        decorators(scope, [node])  # a def or class nested in a module-level `if`, or a class inside a class
+        runtime(scope, [node])
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            found.update((node.name, t) for d in node.decorator_list if marked(t := ast.unparse(d)))
+            decorators(node.name, node.body)
+            runtime(node.name, node.body)
+        elif isinstance(node, ast.ClassDef):
+            found.update((node.name, t) for d in node.decorator_list if marked(t := ast.unparse(d)))
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef):
+                    scope = f"{node.name}.{member.name}"
+                    found.update((scope, t) for d in member.decorator_list if marked(t := ast.unparse(d)))
+                    decorators(scope, member.body)
+                    runtime(scope, member.body)
+                else:
+                    statement(node.name, member)
+        else:
+            statement("<module>", node)
+    return +found
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,8 @@ from l4.evidence.diffcov import (
 )
 from l4.evidence.report import evidence_json, render_evidence_section
 from l4.evidence.scope import ChangedFile, Kind, ScopeContext, ScopeOutcome, check_scope, file_kind, unit_declared_scope
-from l4.evidence.testsran import TestsRanOutcome, check_tests_ran
+from l4.evidence.skippred import qualified_name, skip_predates
+from l4.evidence.testsran import TestsRanOutcome, check_tests_ran, file_of_test
 from l4.gates.coverage import JSON_NAME, NONCE_NAME, STATUS_NAME
 from l4.gates.junit import TestReport
 from l4.security.protected import glob_match
@@ -131,6 +132,34 @@ def changed_files(git: Git, base: str, head: str) -> list[tuple[str, str]]:
             out.append((code if code in "AMD" else "M", fields[i + 1]))
             i += 2
     return out
+
+
+def skip_predating(
+    git: Git, base: str, head: str, files: Collection[str], ids: Collection[str], cfg: L4Config, tree: Collection[str]
+) -> set[str]:
+    """The ids of `ids` (old skipped tests) whose skip predates the unit (L4-VER-092, `skippred.skip_predates`): the
+    file is one of `files` (the changed test files), reported modified (not added, renamed or deleted) by `base..head`,
+    both blobs are read and parse, and the unit added no skip that can affect the test. Never raises and never runs a
+    test: every failure is a skip that does not predate the unit."""
+    try:
+        status = {path: code for code, path in changed_files(git, base, head)}
+        changed = list(status)
+        found: set[str] = set()
+        blobs: dict[str, tuple[str, str] | None] = {}
+        for test_id in sorted(ids):
+            path = file_of_test(test_id, files, tree)
+            if path is None or status.get(path) != "M":
+                continue
+            if path not in blobs:
+                before, after = show_blob(git, base, path), show_blob(git, head, path)
+                blobs[path] = None if before is None or after is None else (before, after)
+            pair = blobs[path]
+            name = qualified_name(test_id, path)
+            if pair is not None and name is not None and skip_predates(pair[0], pair[1], name, changed, cfg):
+                found.add(test_id)
+        return found
+    except Exception:  # a git or parse failure must not stop the evidence step: the skip stays a finding
+        return set()
 
 
 def changed_unit_files(git: Git, base: str, head: str, cfg: L4Config, unit_dir: str = "") -> list[tuple[str, Kind]]:
