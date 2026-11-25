@@ -110,3 +110,29 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 - [x] 7.4 Documents: D1 rewritten, the proposal's non-goal dropped, L4-VER-092 and L4-VER-093 and SCN-VER-372, 378, 381 amended
   and SCN-VER-394..399 added in the change's spec and in `docs/SPEC.md`, the `skipped` key, the runbook (7.1 bullet, 7.3.4 reject
   precedence, 11 known limits: F8, F9, reject precedence), the CHANGELOG entry.
+
+## 8. Rework: in-file dependencies, cost, durable base run, runner files (L4-VER-092, D1, review G1-G7)
+
+- [x] 8.1 Tests first (they failed before the code): `tests/unit/evidence/test_skip_predating_deps.py` (G1: a flag, a guard,
+  its setup, a helper that is called, a helper that skips, a flag of a flag, an import now from another module, a changed
+  `try`/`except ImportError` fallback, a taken or `autouse` fixture, a class flag, a base class, `setUp`, `pytestmark` of
+  any value; an unrelated import, also on the same `import` line, an unrelated test, flag or helper, an assertion after
+  the guard and the real-world `INTEGRATION` shape stay a hold; dynamic forms are the residual; a test absent at the head
+  and a removed part are no hold), `test_skip_predating.py` (G3: 600 skipped tests in under 10 s; G5: a nested runner
+  file by name, a conftest renamed away), `test_base_skips.py` (G2: `SkipLookup.record`, one base run for rounds 3 to 6
+  on fresh workbenches through the real writer; G4: a failed run is kept, the exit's message is kept),
+  `test_ladder_evidence.py` (G2: `_collect_step` writes the record, also when evidence collection raises),
+  `test_hold_verdicts.py` (the question's wording), `test_retry_fixing.py` (G6: the window and its repair).
+- [x] 8.2 Then: `scan.SkipReader`, `scan.skip_constructs_in`, `scan.collected_in`; `l4.verifier.skipdeps.SkipFacts`
+  (one parse and one scan per source, the closure of a test); `skippred.SkipRule` (rules (b), (c), (d) for one file),
+  `RUNNER_NAMES`; `collect.name_status` (the old path of a rename) and `skip_predating` (one rule per path);
+  `Workbench.base_runs` and `BaseRun` (the report, or why there is none), `_run_base_gate` (kept also on failure, an
+  exit is kept and raised again to the caller that made the run), `SkipLookup.record`, `ladder._keep_base_run`; the four
+  `base_skips` carry lines (`orchestrator._escalate`, `_fall_back`, `fixloop._escalation`, `_fall_back`) removed: only
+  the verifier makes this run, so they read nothing; `_hold_question`.
+- [x] 8.3 G6, decided with evidence (a failed closing commit, injected): the ledger-ahead window is real and the next run
+  repairs it; the code is kept, the window is pinned by a test and documented (design D6, L4-VER-095, SCN-VER-404, runbook 11).
+- [x] 8.4 Documents: design D1 (a) 3, (b) 1 and 5, (c), the new (d), the residual list and the environment difference of
+  the base run; D3; D6; L4-VER-092, L4-VER-093, L4-VER-095 and SCN-VER-396, 398 amended and SCN-VER-400..404 added in the
+  change's spec and in `docs/SPEC.md` (step 3 row, the change table row); the runbook (7.1 hold bullet, 11 known limits:
+  the base run has no network, the window); the CHANGELOG entry.

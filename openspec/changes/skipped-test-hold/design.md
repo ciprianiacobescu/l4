@@ -63,12 +63,21 @@ comes from, in this order (`base_tests.SkipLookup`):
    status is `skipped`) only when its `r0` came from a full report (source `baseline` or `base worktree`); `_evidence`
    and `_base_reference` are unchanged and step 1 still does not skip its own check;
 3. one run of the test gate in a base worktree, as `_base_reference` does (`base_checkout`, `run_gate_at`, network off),
-   its result kept on `wb.base_skips` (its own attribute) so that no round runs it twice, and carried to a rebuilt
-   workbench next to `baselines`.
+   its result, a full report or the reason there is none, kept on `wb.base_runs` (its own attribute) so that no
+   round runs it twice, a failed run included (a second asker of the round gets the same reason and no second run).
+   The verifier builds a workbench for each round (`ladder.bench`), so `wb.base_runs` lives for one round. What
+   carries a base worktree run to the next round is the record: when the lookup got its report from such a run it
+   writes `skipped` into this round's `integrity.base_tests` (and the whole record, `passed` and `collection_errors`
+   included, when step 1 wrote none), and the next round's lookup finds it at source 2 (`SkipLookup.record`, called by
+   `_collect_step`; also when the collection of evidence raises). Only a full report is ever written. The lines that
+   copied `base_skips` to a workbench rebuilt after a limit or an escalation (`orchestrator._escalate`,
+   `_fall_back`, `fixloop._escalation`, `_fall_back`) read nothing: only the verifier makes this run, and the
+   workbench of an implementer step never does. They were removed.
 
 The lookup is made only when a skipped test of a changed file passes (b) and (c): no such test, no lookup and no run.
 Cost: at most one extra run of the base's test gate in a round, and only when step 1 had no full report, no earlier
-round recorded the statuses, and such a test exists. When no source gives a report (the gate gave none, or raised), every
+round recorded the statuses, and such a test exists; once a round has run it, the record of that round holds the
+statuses and no later round runs it again for this base and command. When no source gives a report (the gate gave none, or raised), every
 such test stays a finding, and the step note and `tests_ran.summary.skipped_note` say `no base report with statuses:
 <why>`. The lookup runs inside the never-raises wrapper of `collect.skip_predating`: `_collect_step` drops all evidence
 when `collect_evidence` raises, which would drop the finding.
@@ -81,8 +90,8 @@ name, so it misses a changed condition (the count stays 1), an alias (`requires_
 misses the last one too, and flags every test of the file for one added skip. So this change adds `scan.skip_constructs`,
 described in D3, and leaves `skip_markers` and the step 1 check alone. Concretely:
 
-1. `changed_files` reports P with status `M` (`collect.py`: an added file is `A`; a rename keeps only its head path and is
-   reported `R`, so a moved test is never predating). A new file is already the blocker `new tests were skipped` or `new
+1. `name_status` (and `changed_files`, which drops the old path) reports P with status `M` (`collect.py`: an added file is
+   `A`; a rename is reported `R` at its head path, with its old path beside it, so a moved test is never predating). A new file is already the blocker `new tests were skipped` or `new
    test file ran no test` (`testsran.py`).
 2. The blobs of P at base and at head are read with `show_blob` and both parse; a git error, a file over
    `MAX_SOURCE_BYTES` or a syntax error is a failure of this rule, never a pass.
@@ -95,24 +104,59 @@ described in D3, and leaves `skip_markers` and the step 1 check alone. Concretel
    (multiset difference, so removing a skip never matters and one more of the same text does); `new` has no entry whose
    scope is `q`, `q`'s class, `<module>`, or a function or method of P that is not a collected test (`scan.shared_scopes`:
    a fixture whatever its name, a helper, `setUp`, a collection hook). An added skip on another test does not touch q.
+5. The file is read once per path: `skippred.SkipRule` parses and scans the base and the head blob once and answers each
+   test of the file against that (`skipdeps.SkipFacts`: the constructs, the collected tests, the shared scopes, the
+   bindings of the module and of each class, computed once). The first version scanned the file again for each test:
+   600 skipped tests of one file took 82 seconds, now 0.2.
 
 (c) **No support or runner-configuration file changed, unconditionally.** The unit's diff changed no file that matches
-`tdd.test_support_globs` or `tdd.runner_config_files` (`cfg.tdd.test_support_globs`, `cfg.tdd.runner_config_files`).
-The first version dropped this check whenever the file held a construct in scope; a changed `conftest.py` can skip a
-test whatever the file says, so the shortcut is gone.
+`tdd.test_support_globs` or `tdd.runner_config_files` (`cfg.tdd.test_support_globs`, `cfg.tdd.runner_config_files`), and
+none whose NAME is `conftest.py`, `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`, `pyproject.toml`, `setup.cfg`
+or `tox.ini`, in any directory (a root-anchored glob misses a nested one). A rename counts at its old path too
+(`tests/conftest.py` renamed to `tests/conftest_bak.py` takes the support file out of the run, which can unskip or
+skip). The first version dropped this check whenever the file held a construct in scope; a changed `conftest.py` can skip
+a test whatever the file says, so the shortcut is gone.
 
-What the two conditions cover. (a) is what ties the skip to the base: an imported marker, a changed condition variable and
+(d) **What decides an unchanged skip is unchanged: the dependency closure** (`skipdeps.SkipFacts.closure`). (b) compares
+the text of the skip constructs; it cannot see that the unit changed WHY an unchanged construct skips: `FLAG = True` became
+`FLAG = os.environ.get("Z") is None` under an unchanged `@pytest.mark.skipif(FLAG, ...)`; a guard `if not
+os.environ.get("S"): pytest.skip(...)` became `if True: pytest.skip(...)`; the body of `has()` changed under
+`@skipif(not has(), ...)`. The closure of the test q is a multiset of `(label, ast.dump)` pairs (no positions, so a
+comment or a line wrap is no change) of
+   - the skip-relevant **parts**: q's decorators; the decorators, bases and keywords of its class and the class-level skip
+     statements; the module-level skip statements (a `pytestmark` assignment whatever its value, a module `importorskip`, a
+     `pytest.skip(..., allow_module_level=True)`, a marker alias); the statements of q's body up to and including the last
+     one that contains or encloses a skip call or marker, or that loads a name or calls a method of the class that skips
+     (so a guard `if` and the setup before it are in, an assertion after it is not); the whole definition of each fixture q
+     takes by parameter or `usefixtures` (and of the fixtures those take), of every `autouse=True` fixture, and of every
+     function or method of the module or of q's class that no runner collects and that skips (`setUp`, a helper);
+   - the **bindings** of every name those parts load and that the module (or q's class) binds: an import (per alias: an
+     unrelated name added to the same `import` line is no change), a from-import, an assignment, an augmented or annotated
+     assignment, a `def`, a `class`; a name bound inside a module-level `if` or `try` has the whole top-level statement as
+     its binding, because the block's condition decides which binding is in force; then the names each binding loads, in
+     turn, with a depth bound of 20 and a visited set (a longer chain is not compared: the test stays a finding).
+   The closure of q at the base and at the head SHALL be equal, and q SHALL exist at the head. It is an equality, stricter
+   than (b): removing one of two skip decorators of q is a difference too, and the skip stays a finding. An unrelated added
+   import, an added test function, an unrelated flag or helper, and an assertion after the guard are not in the closure and
+   trip nothing: a module of `@INTEGRATION` tests whose unit changed an assertion and a comment in two of them, added an
+   import and a new test is a hold for the skipped ones.
+
+What the conditions cover. (a) is what ties the skip to the base: an imported marker, a changed condition variable and
 a newly inherited skipped base class all make a test that RAN at the base and is skipped now, which the base report says.
-(b) and (c) cover the case "skipped at the base AND the unit changed why": a skip the unit added to a fixture, a block,
-a run-time marker or an alias, or a file that can skip from outside.
+(b), (c) and (d) cover the case "skipped at the base AND the unit changed why": a skip the unit added to a fixture, a
+block, a run-time marker or an alias, a file that can skip from outside, and a flag, a guard, a helper, a fixture or an
+import of the file that the unit changed under a skip that reads the same.
 
-Residual risks, stated in the hold's question and in the runbook (L4-VER-093): the rule compares evidence, not
-behaviour. A test that was skipped at the base can still be skipped now for another reason when the cause is outside
-what is compared: production code the unit changed (`skipif(not hasattr(mod, "x"))`), or a module the test imports whose
-marker, fixture or base class the unit changed (an imported module's content is not read), or a dynamic form
-(`getattr(pytest, "skip")`, `importlib`). The statuses are those of a run in this gate's environment, so a skip of the base
-run and a skip of the head run are one fact only when the environments are the same. The accept is a person's statement
-either way, bound to the file's content (D2).
+Residual risks, stated in the hold's question, in the runbook and in the SPEC (L4-VER-093), and in no other words: the
+rule compares evidence, not behaviour. A test that was skipped at the base can still be skipped now for another reason
+when the cause is outside what is compared: **production code the unit changed** (`skipif(not hasattr(mod, "x"))`), **a
+module the test imports** whose marker, fixture or base class the unit changed (an imported module's content is not
+read), or **a dynamic form** (`getattr(pytest, "skip")`, `importlib`, `globals()`, a name set in a function through
+`global`). What (d) covers, inside the file, is no longer a residual. The statuses are those of a run in another
+environment: the base worktree run has the network off and no `PYTEST_ADDOPTS` (`BASE_RUN_ENV` belongs to step 1's run
+of the base's tests on the head's code), while the head's gate has `gates.network` (`allow` by default). A skip that
+depends on the network can look skipped at the base only, so the base report holds as skipped a test that would run, or
+fail, at the head. The accept is a person's statement either way, bound to the file's content (D2).
 
 Languages: `file_of_test` builds `.py` paths only (`testsran.py`), so the finding, and this change, exist for Python ids
 only [V]. Go (`t.Skip`), Vitest and Jest (`.skip`, `xit`, `xtest`, `xdescribe`, `.todo`, `.only`) do not matter today: a
@@ -194,6 +238,13 @@ tested against these cases, each a scenario: an unchanged `skipif`; a condition 
 defined and applied; an alias newly applied to an old test; a module-level `importorskip` added; a skip added to another
 test; a fixture that gained `pytest.skip`, named `test_env` or not; a mark in a module-level block; `add_marker`; an
 import alias; an unparsable head.
+
+How a file spells a skip (its import aliases and the names bound to a marker) is read once into `scan.SkipReader`;
+`skip_constructs`, the closure of D1 (d) (`skipdeps`) and the test of "this statement contains a skip" share it, so the
+three cannot disagree on what a skip is. The constructs say WHAT skips; the closure of D1 (d) says what the skip DEPENDS
+on in the file, and the two are compared separately: a flag the unit changed under a `skipif` that reads the same is no
+construct and is in the closure. A `pytestmark` assignment is a skip-relevant statement whatever its value
+(`pytestmark = getattr(pytest.mark, "sk" + "ip")` is not a construct, but is a changed part of the closure).
 
 ### D4. The question, the reject, and why a reject makes no fix unit (L4-VER-093)
 
@@ -316,6 +367,20 @@ an `l4` older than the pin refuses state-changing commands, `CHANGELOG.md` L4-OP
 hold; the next run goes on. The bound for "waiting on a person": a fix unit that is running, or has a task no question
 holds, is refused with `the fix unit <name> is running: the harness continues it at the next run`, so a retry cannot throw
 away work in progress.
+
+**The window of a failed closing commit (review G6, kept).** `question.superseded` is recorded before the commit that
+carries the question's new Status, so that a run that ends AFTER the commit loses nothing (the F9 repair of group 7). The
+price is the opposite case: when the commit itself fails, the run's ledger commit still carries the event, because the
+ledger is append-only and the harness has no primitive that takes a line back out of it (`restore_if_tampered` restores
+what the writer wrote). Between that run and the next, the ledger says superseded and the file says open (`l4 status`
+and the plan read the ledger). Evidence: a failed first commit, injected, left exactly that, and the next run closed the
+fix unit from its start (the request `close_fix_unit` was still pending, the tick and the Status had not been committed),
+wrote the event again with the same ids, and ended with the file, the ledger and the fold agreeing
+(`test_a_close_whose_commit_fails_leaves_the_ledger_ahead_of_the_file_until_the_next_run_repairs_it`, SCN-VER-404).
+The alternative, to record the event after the commit, moves the window to the other side (a crash after the commit
+leaves the file ahead of the ledger, the case group 7 fixed) and would need a new repair path that re-reads the file;
+that is more code and a new way to be wrong for a window that the next run already closes. So the code stays, the test
+pins the repair, and the runbook's known limits and L4-VER-095 say that the window exists and that the next run repairs it.
 
 Not verified [U]: that `Orchestrator.resume` can record `unit.retried` in `fixing` without a phase edge (`lifecycle.py:122`
 lists `FIXING` for a set of edges; the implementation reads it first, task 5.1); that `question.superseded` takes a fix

@@ -72,7 +72,7 @@ Amended in place in `docs/SPEC.md`, each with a pointer to the new requirements;
 ## Impact
 
 - `src/l4/verifier/scan.py` (`skip_constructs`, `collected_tests`, `shared_scopes`), `src/l4/verifier/base_tests.py`
-  (`SkipLookup`, the `skipped` key of the step 1 record), `src/l4/implementer/workbench.py` (`base_skips`),
+  (`SkipLookup`, the `skipped` key of the step 1 record), `src/l4/implementer/workbench.py` (`base_runs`),
   `src/l4/evidence/skippred.py`, `src/l4/evidence/testsran.py` (`check_tests_ran`, `TestsSummary`),
   `src/l4/evidence/collect.py` (`Hold.kind`, `collect_evidence`, `Evidence`), `src/l4/evidence/report.py`,
   `src/l4/verifier/ladder.py` (`_collect_step`, `_finalize`), `src/l4/verifier/verdicts.py` (`HoldKind`, `hold_kind`,
