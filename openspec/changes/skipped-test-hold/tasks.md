@@ -160,3 +160,27 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 - [x] 9.3 Documents: design D1 ((c) names, the new (e), what the conditions cover, residuals, the failed-run sentence), D3;
   L4-VER-092 and SCN-VER-381, 400, 401, 402 amended and SCN-VER-405..408 added in the change's spec and in `docs/SPEC.md`
   (also the step 3 row and the change table row); runbook 7.1 hold bullet and section 11; the CHANGELOG entry.
+
+## 10. Rework: added imports, transitive reach, decorators, getfixturevalue and raise (L4-VER-092, D1 (e), review J)
+
+- [x] 10.1 Tests first (they failed before the code): `tests/unit/evidence/test_skip_predating_imports_reach.py` (G1: an added
+  import of a module outside the standard library, a relative import, a name a runner reads off a module, a name the base
+  spells as a parameter, a fixture or a string; G2: a test two and three calls away from the skip, also through a helper;
+  G3: a decorator that is no plain `pytest.mark.<name>` on an existing, a new and a deleted test, an alias of
+  `pytest.fixture`; G4: `getfixturevalue` by an alias, a string or `getattr`; G5: `raise` of anything and the names
+  `Skipped`, `SkipTest`, `skip.Exception`; positive controls: the real-world shape, `import json`, a comment, a blank line,
+  a new test with `@pytest.mark.slow`, a new method of an existing class).
+- [x] 10.2 Then `l4.evidence.skipscope`: `_standard_library`, `_read_by_runner`, `_Names.importable` (parameters, fixtures
+  and identifier-like strings of the base), `_Side.grow` (the fixed point, used by `build` and by `Confined.holds`),
+  `_plain_mark` and `Confined._decorators` (any collected test, both sides), `_Side.prefix` (a `raise` or a skip
+  exception name ends the free body, `getfixturevalue` anywhere protects the whole body), `RESIDUALS`. Existing tests whose
+  expectation changed: `test_skip_predating.py` (`test_a_removed_skip_never_counts`, `..._changed_condition_on_a_continuation_line...`,
+  `..._skip_decorator_added_to_one_test_keeps_the_whole_file_a_finding`, `..._alias_newly_applied_to_an_old_test...`: a decorator of another
+  test that is no plain mark is no free change, so the file is no hold for any test), `test_skip_predating_location.py`
+  (a replaced decorator of another test and a relative import move to the finding list; `request.getfixturevalue` followed
+  by an assertion; the parametrize residual becomes a plain mark residual), `test_skip_hold_evidence.py` (two tests that
+  added a decorator to `test_a` now add a skip call to its body or expect `test_b` in the finding), `test_hold_verdicts.py`
+  (the residual wording).
+- [x] 10.3 Documents: design D1 ((e) items 2 and 3, what (e) leaves, the residual list), L4-VER-092 and SCN-VER-373..376, 400, 405,
+  406 amended and SCN-VER-409..411 added in the change's spec and in `docs/SPEC.md` (also the step 3 row and the change table
+  row); the residual list in L4-VER-093, SCN-VER-381, the runbook (7.1 hold bullet, section 11) and the CHANGELOG entry.

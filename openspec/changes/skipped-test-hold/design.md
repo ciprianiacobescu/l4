@@ -125,7 +125,7 @@ any changed `.py` file under a path that matches `tdd.test_globs` that defines n
 a test imports: `collect._support_modules`, read at the head, and at the base for a deleted or renamed file, with the rule
 of `support_base.is_support_source`, which is the rule of the support files the verifier already puts back for its own
 runs). A test module that defines tests and that the file under review imports is not in this list: that is the residual
-"a module outside the tests tree" in the wider sense (D1 residuals), and the base report is what stands in front of it.
+"a changed sibling test module the file imports" (D1 residuals), and the base report is what stands in front of it.
 
 (d) **What decides an unchanged skip is unchanged: the dependency closure** (`skipdeps.SkipFacts.closure`). (b) compares
 the text of the skip constructs; it cannot see that the unit changed WHY an unchanged construct skips: `FLAG = True` became
@@ -173,19 +173,10 @@ that the base does not have (located in the head's tree), SHALL be one of:
       is being decided (each one is asked on its own), a change to its decorators, to its `def` line and signature (its
       parameters are fixtures) or to the statements of its body up to and including the last one that contains or
       encloses a skip call or marker (the prefix of the closure, `SkipFacts.skip_relevant`), or the last one that calls
-      `request.getfixturevalue(...)` (it runs a fixture that is named by a string, and a changed name is a changed skip),
-      is not allowed. A test that is not T may change whole, its decorators and signature too, and may be removed: the
-      decorators of another test cannot skip T (a decorator that turns a test into a fixture changes which functions are
-      collected, which the structure check below refuses). One exception, found in review: a collected test that the
+      `request.getfixturevalue(...)` (it runs a fixture that is named by a string, and a changed name is a changed skip), is not allowed. Rework 10 (Review J) widens the two ends of that prefix: it runs up to the last statement that holds a `raise` of anything, or a name `Skipped`, `SkipTest` or `skip.Exception` (a form of a skip that `skipdeps` does not read: `raise Skipped("old")`), and a body that mentions `getfixturevalue` anywhere, as an attribute, an alias (`get = request.getfixturevalue`), a name or a string (`getattr(request, "getfixturevalue")`), has no free line at all. A test that is not T may change whole and may be removed, and its signature too, but its decorators only in one way (rework 10, for any collected test, existing or new, candidate or not): a `pytest.mark.<name>` or `pytest.mark.<name>(...)` may be added or removed when `<name>` is not `skip`, `skipif`, `xfail`, `usefixtures` or `parametrize`; any other difference of the decorators (compared as trees, in order, with the plain marks left out) is a change. The first design took the decorators of a test that is not T for free (they cannot skip T), and a review found that a decorator runs when the module is imported and can be anything: an alias of `pytest.fixture` (`fx = pytest.fixture`, `functools.partial(pytest.fixture)`) turns a new `test_new` into a fixture that overrides one T takes, which the name-based check of fixtures does not see. A plain mark can still carry an expression in its arguments (`@pytest.mark.slow(ITEMS.append(1))`), which is the residual of import-time code. One exception, found in review: a collected test that the
       file reads by its name from a place that is not free is not free. `skipif('test_check()')`, a decorator that calls
-      `test_check()`, a helper that does, `self.test_helper()` in a class statement or in the prefix of T make the body of
-      that test a part of why T skips. The structure keeps such a test whole (tree and lines), and T's own parts
-      (decorators, signature, prefix) are read for the names they reach;
-   3. a whole new module-level `import M`, `import M as N` or `from M import a, b` statement, on lines of its own (not
-      `import json; X = 1`), that binds only names that the base module neither binds nor loads (a `Name` anywhere, a
-      module-level `def` or `class`, an import alias anywhere, `global`, `except as`, a `match` capture) and that no
-      string condition of a `skipif`, `xfail`, `skipIf` or `skipUnless` names, not `*`, not `__future__`, not a builtin
-      and not one of the names pytest gives a string condition (`os`, `sys`, `platform`, `config`). A base module that
+      `test_check()`, a helper that does, `self.test_helper()` in a class statement or in the prefix of T make the body of that test a part of why T skips. The structure keeps such a test whole (tree and lines), and T's own parts (decorators, signature, prefix) are read for the names they reach. The reach is transitive (rework 10): a test kept whole is read for the names it reaches in turn, `self.test_mid()` that calls `self.test_inner()`, also through a helper that is not collected, until no new test is reached (a fixed point, over both sides);
+   3. a whole new module-level `import M`, `import M as N` or `from M import a, b` statement, on lines of its own (not `import json; X = 1`), of a module of the standard library (rework 10: the top-level package is in `sys.stdlib_module_names`, so a module of the repository, a third party package and every relative import are out: an import runs a module's code, and the content of a module outside the file is not compared), that binds only names that the base module neither binds nor loads (a `Name` anywhere, a module-level `def` or `class`, an import alias anywhere, `global`, `except as`, a `match` capture) and that no string condition of a `skipif`, `xfail`, `skipIf` or `skipUnless` names, not `*`, not `__future__`, not a builtin and not one of the names pytest gives a string condition (`os`, `sys`, `platform`, `config`). Rework 10 adds the names that a runner reads off a module by convention (`pytestmark`, `setup_module`, `teardown_module`, `setup_function`, `teardown_function`, `setUpModule`, `tearDownModule`, `load_tests`, any `pytest_*` name, any name that starts with `test` or `Test`: a collected name or a hook), and the names that the base spells as a parameter (`ast.arg`: a possible fixture), as a fixture (the def's name and its `name=`) or as an identifier-like string anywhere (`usefixtures("db")`, `getfixturevalue("db")`, `depends=["a"]`: a name that is read by a string). A base module that
       has a `from x import *` takes no added import. A test the head adds takes no name the base binds, loads or reads as
       an attribute.
    Nothing else at module level or class level is allowed: no other statement may be added, removed or changed, a module
@@ -194,14 +185,9 @@ that the base does not have (located in the head's tree), SHALL be one of:
    line changed, or anything is ambiguous, (e) is False (the major).
    **What (e) leaves, said plainly.** A free place runs code too. The decorators and the default values of a test that is
    not T run when the module is imported (`def test_y(a=ITEMS.append(1))`, `@pytest.mark.parametrize('b',
-   [ITEMS.append(1)])`), and the body of another test runs before T when the order says so (a test that sets a module
-   global that a later skip reads). Both are the residual "run-time state that another test sets" (D1 residuals); the
-   rule is not tightened for them, because the real case is a unit that edits assertions in tests and adds tests. The
-   changed sibling test module that defines tests and that T's file imports is in neither (c) nor (e): it is "a module
-   outside the tests tree" only in the wider sense that nobody compares its content, and the base report is what stands
-   in front of it. (e) judges the test it is asked about, not every candidate of the file at once:
-   each candidate is protected in its own place and free in the others, which is what SCN-VER-375 needs (a skip added to
-   one test does not touch another).
+   [ITEMS.append(1)])`), and the body of another test runs before T when the order says so (a test that sets a module global that a later skip reads). Both are the residual "run-time or import-time state that another test sets" (D1 residuals); after rework 10 the decorator of such a test is a plain mark only, and its arguments (`@pytest.mark.slow(ITEMS.append(1))`) and its default values stay free; the rule is not tightened for them, because the real case is a unit that edits assertions in tests and adds tests. The
+   changed sibling test module that defines tests and that T's file imports is in neither (c) nor (e): it is the residual "a changed sibling test module the file imports", because nobody compares its content, and the base report is what stands in front of it. (e) judges the test it is asked about, not every candidate of the file at once:
+   each candidate is protected in its own place and free in the others, which is what SCN-VER-375 needs (a skip call added to the body of one test does not touch another; since rework 10 a skip decorator is no free change, so it keeps the whole file a finding).
    **How the lines are mapped.** The first design said `git diff -U0` or `difflib` on the two blobs. A diff of lines has to
    guess which line became which, and with 600 tests that share lines (`    assert x`, the same decorator) `difflib`
    took 18 s on one file and can still align a changed line with an unchanged one. The implementation pairs statements
@@ -229,13 +215,7 @@ still out.
 
 Residual risks, stated in the hold's question, in the Evidence line, in the runbook and in the SPEC (L4-VER-092,
 L4-VER-093), and in no other words: the rule compares evidence, not behaviour. A test that was skipped at the base can
-still be skipped now for another reason when the cause is outside what is compared: production code the unit changed, a module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`). That is, **production
-code the unit changed** (`skipif(not hasattr(mod, "x"))`), **a module outside the tests tree that the test imports**
-whose marker, fixture or base class the unit changed (an imported module's content is not read; a module of the tests
-tree that defines no test and that changed is rule (c)), **run-time state that another test sets** (a test body is a
-place the unit may change, and a body that sets a module global that a later test's skip reads is not told apart) and
-**a dynamic form** (`exec`, `getattr(pytest, "skip")`, `importlib`, `globals()`, a name set in a function through
-`global`). What (d) and (e) cover, inside the file, is no longer a residual. The statuses are those of a run in another
+still be skipped now for another reason when the cause is outside what is compared: production code the unit changed, a module the file imports that the unit did not change (an added import is allowed only from the standard library), run-time or import-time state that another test sets (its body, decorator or default values), a changed sibling test module the file imports, and dynamic forms and plugins that read test names (`exec`, `getattr`, `importlib`, `globals()`, a plugin such as test dependencies). That is, **production code the unit changed** (`skipif(not hasattr(mod, "x"))`), **a module the file imports that the unit did not change** whose marker, fixture or base class a skip reads (an imported module's content is not read, which is why an added import is allowed only from the standard library; a module of the tests tree that defines no test and that changed is rule (c)), **run-time or import-time state that another test sets** (a test body is a place the unit may change, and a body that sets a module global that a later test's skip reads is not told apart; nor is the argument of a plain mark or a default value of a test, run when the module is imported), **a changed sibling test module the file imports** (it defines tests, so it is neither a support module of (c) nor a part of this file) and **dynamic forms and plugins that read test names** (`exec`, `getattr(pytest, "skip")`, `importlib`, `globals()`, a name set in a function through `global`, a plugin such as test dependencies: `@pytest.mark.dependency(depends=["test_a"])` reads another test's outcome by a string, and a hook such as `pytest_generate_tests` that looks a test name up). What (d) and (e) cover, inside the file, is no longer a residual. The statuses are those of a run in another
 environment: the base worktree run has the network off and no `PYTEST_ADDOPTS` (`BASE_RUN_ENV` belongs to step 1's run
 of the base's tests on the head's code), while the head's gate has `gates.network` (`allow` by default). A skip that
 depends on the network can look skipped at the base only, so the base report holds as skipped a test that would run, or
@@ -482,7 +462,7 @@ verdict questions); and the end-to-end run, which the scenarios SCN-VER-387..390
 - A hold is asked once per file and content; the accept is void when the file or its skipped set changes.
 - A `skipped` hold in `verdict.json` read by an older harness is an `other` hold (its question asks for a WHEN THEN);
   not a supported downgrade.
-- Residuals: D1's (production code the unit changed, a module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`); a base run whose environment differs from the head's); one more run of the base's test gate in a round, when no full report or
+- Residuals: D1's (production code the unit changed, a module the file imports that the unit did not change (an added import is allowed only from the standard library), run-time or import-time state that another test sets (its body, decorator or default values), a changed sibling test module the file imports, and dynamic forms and plugins that read test names (`exec`, `getattr`, `importlib`, `globals()`, a plugin such as test dependencies); a base run whose environment differs from the head's); one more run of the base's test gate in a round, when no full report or
   recorded status exists; a skip the unit added in a place the table does not list is a hold only when the base report
   also held the test as skipped, and a person must accept it; a person's own commit that adds a skip stays a
   deterministic major, as today (`integrity.py:355-361` lists it for people, and step 3 raises the finding): out of scope.

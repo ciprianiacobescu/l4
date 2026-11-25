@@ -1225,15 +1225,11 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   `setup.py`, `requirements*.txt`, `constraints*.txt`, `Pipfile`, `poetry.lock`, `uv.lock`, `pdm.lock`), and no Python
   module of the tests tree that defines no test (an `__init__.py`, a helper), whether or not the file holds a skip; and
   (4) **the unit changed the test file only in places that cannot change why a test skips**: a comment line or a blank
-  line; a line inside the body of a test (a new one too), beyond the statements that can skip that test (its
-  decorators, its signature and the body up to its last skip stay as they were); or a whole new `import` line that binds
-  a name the file did not use before. The lists of (2) name what decides a skip, and a review kept finding one more way to
+  line; a line inside the body of a test (a new one too), beyond the statements that can skip that test (its decorators, its signature and the body up to its last skip or its last `raise` stay as they were, and a body that mentions `getfixturevalue` stays whole); a `@pytest.mark.<name>` that is not `skip`, `skipif`, `xfail`, `usefixtures` or `parametrize`, added to or removed from a test (any other decorator of any test is a change); or a whole new `import` line of the standard library that binds a name the file did not use before (not a relative import, not a name that pytest reads off a module such as `pytestmark` or `setup_module`, not a name the file has as a parameter, a fixture or a string). The lists of (2) name what decides a skip, and a review kept finding one more way to
   change it that they miss (a string condition that names a flag, `self.FLAG`, a statement at module level that sets a
   value); (4) is the check that does not need the list: any other changed line, a flag, a helper, a fixture, a class
   attribute, a docstring, a statement at module level, a name added to an `import` line that was there, keeps the
-  finding, even when it looks unrelated. **Not told apart**: production code the unit changed, a module outside the
-  tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`,
-  `importlib`, `globals()`); the tests were skipped at the base too, but the reason may have changed. If no base report
+  finding, even when it looks unrelated. **Not told apart**: production code the unit changed, a module the file imports that the unit did not change (an added import is allowed only from the standard library), run-time or import-time state that another test sets (its body, decorator or default values), a changed sibling test module the file imports, and dynamic forms and plugins that read test names (`exec`, `getattr`, `importlib`, `globals()`, a plugin such as test dependencies); the tests were skipped at the base too, but the reason may have changed. If no base report
   with statuses can be had, the finding stays and the step note says `no base report with statuses: <why>` (a failed
   base run is not repeated in the round, and the first line of a checkout's error is in the note). Two answers:
   - `accept` says that you ran these tests where they can run, or that you know they pass there. It holds for this
@@ -3034,16 +3030,13 @@ These limits make operation more difficult. Know them before you start.
 - From the release after 0.4.60, an old skipped test of a changed test file is a hold when a base report also holds it as
   skipped, the file adds or changes no skip construct that the harness reads and nothing inside the file that decides
   whether an unchanged skip skips (a flag, a guard's condition, a helper, a fixture, an import), the unit changed the
-  file only in places that cannot change why a test skips (a comment, a blank line, the body of a test beyond what skips
-  it, a whole new import of an unused name), and no test-support, runner, setup or dependency file changed. Otherwise it
+  file only in places that cannot change why a test skips (a comment, a blank line, the body of a test beyond what skips it, a plain `pytest.mark.<name>`, a whole new standard library import of an unused name), and no test-support, runner, setup or dependency file changed. Otherwise it
   stays a finding, also when the change outside those places looks unrelated (a new helper, fixture or flag in the file, a
   changed docstring, a name added to an `import` line that was there). The check sees Python test files only. The base
   report is step 1's own reference, an earlier round's record that has the statuses, or one more run of the base's test
   gate in a worktree (once for a base and a command: the round that makes it writes the statuses into its
   `integrity.base_tests`); when none can be had the finding stays and the step note says why.
-  What it does not tell apart ([7.1](#71-awaiting_human-a-question-waits-for-you)): production code the unit changed, a
-  module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`,
-  `getattr`, `importlib`, `globals()`). The base run and the head's gate do not have the same environment: the base
+  What it does not tell apart ([7.1](#71-awaiting_human-a-question-waits-for-you)): production code the unit changed, a module the file imports that the unit did not change (an added import is allowed only from the standard library), run-time or import-time state that another test sets (its body, decorator or default values), a changed sibling test module the file imports, and dynamic forms and plugins that read test names (`exec`, `getattr`, `importlib`, `globals()`, a plugin such as test dependencies). The base run and the head's gate do not have the same environment: the base
   worktree run has the network off and no `PYTEST_ADDOPTS`, while the head's gate has `gates.network` (`allow` by
   default). A skip that depends on the network can look skipped at the base only, so the base report holds as skipped a
   test that would run, or fail, at the head. Your accept says the tests ran or pass where they can run. Three more
