@@ -1,0 +1,214 @@
+"""`l4 retry` of a unit in `fixing` whose open fix unit waits on a person (L4-VER-095, design D6, SCN-VER-389..392).
+
+Task 5.1, read in the code before anything was changed (file:line are of the branch before this change):
+
+(a) Can `Orchestrator.resume` record `unit.retried` for a unit in `fixing`? NOT AS IT WAS. `resume` appends the event
+    (`src/l4/orchestrator.py:707`) and then takes an edge with `self._go(trigger)` (`:723`). `retry_unit` passes
+    `Trigger.RESUMED` for every phase that has no edge of its own (`src/l4/state/retry.py:25`), and `TRANSITIONS` has no
+    `FIXING` source for `RESUMED` (`src/l4/state/lifecycle.py:122-144`; `RESUMED` is for `halted` and `escalated`,
+    `:134`): the event would be written and `IllegalTransition` raised after it. Before that, `refuse` lists `fixing` in
+    `_CONTINUES` (`retry.py:61-62`) and says `the harness continues it at the next run`. What this change does: `refuse`
+    accepts `fixing` when the open fix unit waits on a person; `resume` takes a `close_fix_unit` and then takes NO edge
+    (the unit stays `fixing` until the run's `fix_unit_done`); `_take_pending_spec_edit` is already a no-op in `fixing`
+    (`orchestrator.py:766`).
+(b) Does `question.superseded` take a fix unit's technical question out of `questions.open`? YES, when the event carries
+    `fix_unit`: `_question_superseded` (`src/l4/state/fold.py:272-280`) prefixes each id with the event's `fix_unit` and
+    removes `<fix unit>/Q-001`, the key `question.raised{fix_unit}` added (`_question_id`, `:243-247`). The round-based
+    supersede (`verifiers/verdicts.py:981`) carries none because verdict questions are the parent's. Pinned in
+    `tests/unit/state/test_fold_fix_units.py`. The mirror drops `l4:needs-answers` through the same fold
+    (`answers_recorded`, `orchestrator.py:670`).
+(c) Not in the task: after the retry the planner still said `fixing: fix unit questions open` (`planner.py:196-199`),
+    which is `none`, so a run that selects units by the plan would never reach `fix_hook`. The planner now reads the
+    pending close (`UnitState.close_fix_unit`) and says `implement`.
+
+SCN-VER-389 here asserts the close, the supersede, `fix.done`, `verifying`, a fresh round and no `-fix-3`; the hold that
+the new round raises (L4-VER-092) is another change group, tested where both are merged.
+"""
+
+import json
+
+import pytest
+
+from l4 import services
+from l4.cli import main
+from l4.specs.questions import QuestionsFile, QuestionStatus
+
+from ..conftest import UNIT
+from ..implementer.conftest import red_step
+from ..orchestrator.conftest import BRANCH
+from .test_ladder_fix import FIX_DIR, FIX_UNIT, chore_fix, judge, noqa_green, plan_entry
+
+REASON = "the skipped tests are env-gated, see the hold"
+QUESTION = [{"title": "Which flag?", "context": "two ways", "kind": "technical", "options": ["a", "b"]}]
+
+
+@pytest.fixture(autouse=True)
+def no_fix_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Overrides the verifier suite's switch: these tests are about the fix loop."""
+    monkeypatch.setitem(services.HOOKS, "fix", "l4.verifier.fixloop:fix_hook")
+
+
+def blocked():
+    return chore_fix(status="blocked", questions=QUESTION)
+
+
+def retry(tdd_repo, *flags: str) -> int:
+    argv = ["retry", "--unit", UNIT, "--reason", REASON, "--no-run", *flags, "--repo", str(tdd_repo.repo)]
+    return main(argv, environ=tdd_repo.environ)
+
+
+@pytest.fixture
+def waiting(run_l4, valid_spec):
+    """Round 1 failed, fix unit 1 was written and its one task asked a question: the unit is `fixing` and waits."""
+    first = run_l4([red_step(), noqa_green(), blocked()])
+    assert first.code == 11 and first.outcome["units"][0]["phase_after"] == "fixing"
+    return first
+
+
+def fold_of(run):
+    from datetime import datetime
+
+    from l4.state.fold import fold
+    from l4.state.ledger import LedgerEvent
+
+    rows = [
+        LedgerEvent(
+            datetime.fromisoformat(e["ts"]), e["run_id"], UNIT, e["seq"], e["type"],
+            {k: v for k, v in e.items() if k not in {"ts", "run_id", "seq", "type", "unit"}},
+        )
+        for e in run.ledger()
+    ]  # fmt: skip
+    return fold(rows, UNIT)
+
+
+# --- SCN-VER-389, SCN-VER-390 ------------------------------------------------------------------------------------
+
+
+def test_a_retry_is_accepted_and_records_the_fix_unit_to_close_and_no_phase_edge(waiting, tdd_repo, raw, capsys):
+    phases = len(waiting.events("phase.changed"))
+    assert retry(tdd_repo) == 0
+    [retried] = waiting.events("unit.retried")
+    assert retried["close_fix_unit"] == FIX_UNIT and retried["reason"] == REASON
+    assert len(waiting.events("phase.changed")) == phases  # 5.1(a): no edge, the unit is still `fixing`
+    assert fold_of(waiting).phase == "fixing" and fold_of(waiting).close_fix_unit == FIX_UNIT
+    assert waiting.subjects()[-1].startswith("chore(add-discount-codes): retry")
+    capsys.readouterr()
+    assert main(["questions", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ) == 0
+    assert "Q-001" in capsys.readouterr().out  # still asked until the run closes the fix unit (the control of 390)
+    entry = plan_entry(tdd_repo, raw, capsys)  # 5.1(c): the plan lets the run in
+    assert entry["next_action"] == "implement" and entry["actionable"] is True
+    assert FIX_UNIT in entry["reason"] and "closed by the retry" in entry["reason"]
+
+
+def test_the_run_after_the_retry_closes_the_fix_unit_in_harness_commits_and_verifies_a_fresh_round(
+    waiting, run_l4, tdd_repo, raw, capsys
+):
+    """SCN-VER-389 and SCN-VER-390. The unit's round 1 failed on a suppression the fix task never removed, so the fresh
+    round fails again here (the hold of L4-VER-092 is not in this worktree): it spawns fix unit 2, and the retry never
+    reaches fix unit 3 on its own."""
+    assert retry(tdd_repo) == 0
+    second = run_l4([chore_fix(), judge()])
+    assert second.code == 0, second.adapter.requests[-1].prompt[-800:]
+    [done] = [e for e in second.events("task.done") if e.get("closed_by")]
+    closed = (done["fix_unit"], done["task"], done["tdd"], done["closed_by"])
+    assert closed == (FIX_UNIT, "1.1", "already-done", "retry")
+    assert REASON in done["reason"] and done["reason"].startswith("closed by l4 retry: ")
+    tasks = second.pushed(f"{FIX_DIR}/tasks.md")
+    assert "- [x] 1.1" in tasks and "- [ ] 1.1" not in tasks
+    question = QuestionsFile.parse(second.pushed(f"{FIX_DIR}/questions.md"))
+    one = question.get("Q-001")
+    assert one is not None and one.status is QuestionStatus.SUPERSEDED and one.retried and "Which flag?" in one.title
+    [gone] = second.events("question.superseded")
+    assert (gone["fix_unit"], gone["ids"]) == (FIX_UNIT, ["Q-001"])
+    # the order: tick, supersede, fix.done, then the parent verifies again
+    kinds = [e["type"] for e in second.ledger() if e["type"] in {"unit.retried", "task.done", "question.superseded",
+                                                                   "fix.done", "verify.verdict"}]  # fmt: skip
+    assert kinds[kinds.index("unit.retried") :][:6] == [
+        "unit.retried", "task.done", "question.superseded", "fix.done", "verify.verdict", "task.done"
+    ]  # fmt: skip
+    closing = [e["fix_unit"] for e in second.events("fix.done")]
+    assert closing == [FIX_UNIT, f"{FIX_UNIT[:-1]}2"]  # fix unit 1 by the close, fix unit 2 by its own task
+    assert second.triggers()[-4:] == ["fix_unit_done", "verify_fail_fix", "fix_unit_done", "verify_pass"]
+    verdicts = [(e["round"], e["verdict"]) for e in second.events("verify.verdict")]
+    assert verdicts == [(1, "FAIL"), (2, "FAIL"), (3, "PASS")]  # a fresh round, the failed one not reused
+    spawned = [(e["fix_unit"], e["round"]) for e in second.events("fix.spawned")]
+    assert spawned == [(FIX_UNIT, 1), (f"{FIX_UNIT[:-1]}2", 2)]  # the closed fix round stays counted; no `-fix-3`
+    state = fold_of(second)
+    assert state.fix_rounds_counted == 2 and state.close_fix_unit is None and state.questions.open == []
+    subjects = second.subjects()
+    assert any(s.startswith(f"fix({FIX_UNIT}): ") and s.endswith("already done [skip ci]") for s in subjects)
+    trailers = raw(tdd_repo.origin, "log", "--format=%B", BRANCH)
+    assert "L4-TDD: already-done" in trailers and "L4-Task: 1.1" in trailers
+    assert "L4-Unit: openspec:" + FIX_UNIT in trailers  # as `_already_done` writes it, by the fix unit's workbench
+    listed = main(["questions", "--unit", UNIT, "--repo", str(tdd_repo.repo)], environ=tdd_repo.environ)
+    out = capsys.readouterr().out
+    assert listed == 0 and "Q-001" not in out  # nothing is open: SCN-VER-390
+
+
+def test_the_close_keeps_the_questions_text_and_the_fix_units_marker(waiting, run_l4, tdd_repo):
+    assert retry(tdd_repo) == 0
+    second = run_l4([chore_fix(), judge()])
+    text = second.pushed(f"{FIX_DIR}/questions.md")
+    assert "Which flag?" in text and "- **Status:** superseded by retry" in text
+    assert second.pushed(f"{FIX_DIR}/.l4/fix.json")  # the marker is untouched
+
+
+def test_a_close_writes_no_source_file(waiting, run_l4, tdd_repo):
+    before = waiting.raw(tdd_repo.origin, "ls-tree", "-r", "--name-only", BRANCH, "src/")
+    assert retry(tdd_repo) == 0
+    second = run_l4([chore_fix(), judge()])
+    assert second.raw(tdd_repo.origin, "ls-tree", "-r", "--name-only", BRANCH, "src/") == before
+
+
+# --- SCN-VER-391 ----------------------------------------------------------------------------------------------------
+
+
+def test_a_fix_unit_with_a_task_that_can_run_is_not_closed(waiting, tdd_repo, raw, capsys):
+    from .test_ladder_fix import answer_fix_question
+
+    answer_fix_question(tdd_repo, raw)  # the question is answered: the task can run
+    head = raw(tdd_repo.origin, "rev-parse", BRANCH)
+    kinds = [e["type"] for e in waiting.ledger()]
+    code = retry(tdd_repo)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert f"the fix unit {FIX_UNIT} is running: the harness continues it at the next run" in err
+    assert raw(tdd_repo.origin, "rev-parse", BRANCH) == head and [e["type"] for e in waiting.ledger()] == kinds
+
+
+def test_a_question_that_cannot_be_read_does_not_open_the_close(waiting, tdd_repo, raw, capsys):
+    clone = tdd_repo.repo.parent / "human-break"
+    raw(tdd_repo.repo.parent, "clone", "-q", "--branch", BRANCH, str(tdd_repo.origin), str(clone))
+    path = clone / FIX_DIR / "questions.md"
+    path.write_text(path.read_text().replace("- **Blocking tasks:** 1.1", "- **Blocking tasks:** see the design"))
+    raw(clone, "add", "-A")
+    raw(clone, "commit", "-q", "-m", "break the line")
+    raw(clone, "push", "-q", "origin", BRANCH)
+    raw(tdd_repo.repo, "fetch", "-q", "origin")
+    assert retry(tdd_repo) == 2
+    assert f"the fix unit {FIX_UNIT} is running" in capsys.readouterr().err
+
+
+# --- the run finds the close no longer safe -------------------------------------------------------------------------
+
+
+def test_an_answer_that_arrives_between_the_retry_and_the_run_makes_the_task_run_and_the_close_is_dropped(
+    waiting, run_l4, tdd_repo, raw
+):
+    from .test_ladder_fix import answer_fix_question
+
+    assert retry(tdd_repo) == 0
+    answer_fix_question(tdd_repo, raw)
+    second = run_l4([chore_fix(), judge()])
+    assert second.code == 0, second.adapter.requests[-1].prompt[-800:]
+    [skipped] = second.events("fix.close_skipped")
+    assert skipped["fix_unit"] == FIX_UNIT and "can run" in skipped["reason"]
+    assert [e for e in second.events("task.done") if e.get("closed_by")] == []  # the task ran as it always does
+    assert "superseded by retry" not in second.pushed(f"{FIX_DIR}/questions.md")
+    assert fold_of(second).close_fix_unit is None
+
+
+def test_the_pending_close_is_in_the_folded_state_that_status_prints(waiting, tdd_repo):
+    assert retry(tdd_repo) == 0
+    dumped = json.loads(fold_of(waiting).model_dump_json())
+    assert dumped["close_fix_unit"] == FIX_UNIT

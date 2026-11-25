@@ -243,6 +243,7 @@ class Question:
     notes_text: str = ""  # the `### Harness notes` body (L4-IMP-102): never part of what the question asks
     restarted: bool = False  # the Status is `superseded by restart`: no successor, and nothing is held
     superseded_round: int | None = None  # the Status is `superseded by round <n>`: a later round replaced it
+    retried: bool = False  # the Status is `superseded by retry`: `l4 retry` closed the fix unit that waited on it
     answered_by: str = ""  # the text after `**Answered by:**` (the delegate's answer, L4-DLG-006)
     escalated_by: str = ""  # the text after `**Escalated by:**` (the delegate's escalation, L4-DLG-008)
     field_lines: tuple[tuple[str, Span], ...] = ()  # (lower-case field name, its whole line with the line break)
@@ -275,6 +276,8 @@ _SUCCESSOR = re.compile(r"\bsuperseded\s+by\s+`?(Q-\d+)", re.IGNORECASE)
 _RESTART_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+restart\b", re.IGNORECASE)
 SUPERSEDED_BY_RESTART = "superseded by restart"  # `l4 restart` (L4-OPS-004): the question belongs to the old attempt
 _ROUND_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+round\s+(\d+)\b", re.IGNORECASE)
+_RETRY_SUPERSEDED = re.compile(r"\bsuperseded\s+by\s+retry\b", re.IGNORECASE)
+SUPERSEDED_BY_RETRY = "superseded by retry"  # `l4 retry` closed the fix unit the question held (L4-VER-095)
 _QUESTION_HEADING = re.compile(rb"^## Q-(\d+):")
 _ANSWER_MARK = b"<!-- write below this line -->"
 _REPLACED_HEAD = "<!-- l4 questions --replace"
@@ -395,6 +398,7 @@ def _parse_section(
         notes_text=_visible(data[notes.body.start : notes.body.end]) if notes else "",
         restarted=bool(_RESTART_SUPERSEDED.search(fields.get("status", ""))) and not successor,
         superseded_round=int(later.group(1)) if (later := _ROUND_SUPERSEDED.search(fields.get("status", ""))) else None,
+        retried=bool(_RETRY_SUPERSEDED.search(fields.get("status", ""))) and not successor,
         answered_by=fields.get("answered by", ""), escalated_by=fields.get("escalated by", ""),
         field_lines=tuple(field_lines.items()),
     )  # fmt: skip
@@ -507,6 +511,14 @@ class QuestionsFile:
         if question.status_value is None:
             raise SpecError(f"{qid} has no Status line")
         return _edited(self, [(question.status_value, SUPERSEDED_BY_RESTART.encode())], row_of=qid)
+
+    def supersede_by_retry(self, qid: str) -> "QuestionsFile":
+        """Status `superseded by retry` (L4-VER-095): `l4 retry` closed the fix unit whose task this question held, so
+        the question is history: its text stays, it holds no task (see `holds`). The index row follows."""
+        question = _require(self, qid)
+        if question.status_value is None:
+            raise SpecError(f"{qid} has no Status line")
+        return _edited(self, [(question.status_value, SUPERSEDED_BY_RETRY.encode())], row_of=qid)
 
     def supersede_by_question(self, qid: str, successor: str) -> "QuestionsFile":
         """Status `superseded by Q-NNN`: the question was replaced by `successor`, which asks the same thing again
@@ -744,14 +756,15 @@ def holds(
     where the file cannot be read: a question whose Blocking tasks line is unreadable, and an id in `unreadable`
     (`QuestionsFile.unreadable_ids`), hold every pending task. A superseded question holds the tasks its named
     successor does not list: with no successor in the file nothing took over. The exceptions are `superseded by
-    restart` (`l4 restart`) and `superseded by round <n>` (L4-OPS-014): the question of an old attempt or round,
-    which holds nothing."""
+    restart` (`l4 restart`), `superseded by round <n>` (L4-OPS-014) and `superseded by retry` (L4-VER-095): the
+    question of an old attempt, round or closed fix unit, which holds nothing."""
     every, all_questions = frozenset(pending), list(questions)
     by_id = {q.id: q for q in all_questions}
     held = {qid: every for qid in unreadable}
     for q in all_questions:
-        if is_answered(q) or (q.status is QuestionStatus.SUPERSEDED and (q.restarted or q.superseded_round)):
-            continue  # a question that a restart or a later round superseded belongs to the old attempt
+        gone = q.restarted or q.superseded_round or q.retried
+        if is_answered(q) or (q.status is QuestionStatus.SUPERSEDED and gone):
+            continue  # a question that a restart, a later round or a retry superseded belongs to the old attempt
         if not q.blocking_readable:
             held[q.id] = every
             continue

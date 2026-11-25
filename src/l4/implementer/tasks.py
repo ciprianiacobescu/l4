@@ -105,6 +105,20 @@ def open_blocking_questions(file: QuestionsFile | None, tasks: Sequence[Task]) -
     return ids + [qid for qid in file.unreadable_ids if qid not in ids]
 
 
+def waiting_questions(file: QuestionsFile | None, tasks: Sequence[Task]) -> list[str]:
+    """Ids of the open questions that a unit's tasks wait for, when a person's answer is all they wait for: a pending
+    leaf exists, every one is held by an open question, and every such question can be set aside (its Blocking tasks
+    line and its section are readable, so the harness can write its Status). Empty otherwise: a task that can run, a
+    unit with nothing pending, or a question the harness cannot edit (L4-VER-095)."""
+    if file is None or file.unreadable_ids:
+        return []
+    held = holds(file.questions, _pending_keys(tasks))
+    if not questions_hold(tasks, frozenset().union(*held.values()) if held else frozenset()):
+        return []
+    asked = [q for q in file.questions if q.id in held]
+    return [q.id for q in asked] if all(q.blocking_readable and q.status_value is not None for q in asked) else []
+
+
 def answers_unblock(file: QuestionsFile | None, tasks: Sequence[Task]) -> list[str]:
     """Ids of the answered questions whose pending tasks are free to run, when at least one task is eligible now;
     empty otherwise. This is the "answers submitted" condition of the `awaiting_human -> implementing` row."""

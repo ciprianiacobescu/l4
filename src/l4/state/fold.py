@@ -118,6 +118,9 @@ class UnitState(_Model):
     fix_round: int = 0
     children: list[str] = Field(default_factory=list)  # fix unit names, in the order they were spawned
     open_fix_unit: str | None = None  # the last fix unit spawned and not yet done
+    # `unit.retried{close_fix_unit}` (L4-VER-095): `l4 retry` asked the run to close this fix unit, whose tasks wait
+    # for a person; cleared by its `fix.done` or by `fix.close_skipped` (the run found a task that can run)
+    close_fix_unit: str | None = None
     verdicts_consumed: list[str] = Field(default_factory=list)  # verdict question ids a `human.verdict` recorded
     verdict_asked_round: int | None = None  # the latest round that a `question.raised{kind: verdict}` names
     # the ids of the verdict questions that a `question.raised{kind: verdict}` of the unit's ledgers names (L4-VER-070):
@@ -348,11 +351,20 @@ def _fix_spawned(state: UnitState, event: LedgerEvent) -> None:
     if isinstance(round_, int) and not isinstance(round_, bool):
         state.fix_round = max(state.fix_round, round_)
     state.open_fix_unit = name
+    if state.close_fix_unit not in (None, name):
+        state.close_fix_unit = None  # a request to close another fix unit is spent: a new one was spawned
 
 
 def _fix_done(state: UnitState, event: LedgerEvent) -> None:
     if _text(event, "fix_unit") == state.open_fix_unit:
         state.open_fix_unit = None
+    _close_ended(state, event)
+
+
+def _close_ended(state: UnitState, event: LedgerEvent) -> None:
+    """`fix.done` or `fix.close_skipped` of the fix unit that a retry asked to close: the request is spent."""
+    if state.close_fix_unit is not None and _text(event, "fix_unit") == state.close_fix_unit:
+        state.close_fix_unit = None
 
 
 def _human_verdict(state: UnitState, event: LedgerEvent) -> None:
@@ -428,6 +440,8 @@ def _breaker_tripped(state: UnitState, event: LedgerEvent) -> None:
 
 def _unit_resumed(state: UnitState, event: LedgerEvent) -> None:
     state.halt_task = state.halt_fix_unit = None
+    if event.type == "unit.retried" and (close := _text(event, "close_fix_unit")):
+        state.close_fix_unit = close  # `l4 retry` of a unit in `fixing` whose fix unit waits on a person (L4-VER-095)
     state.breaker_trips = 0  # M1: the other breaker counters (no_progress, same_error, oscillation) reset here too
     if (signal := _text(event, "signal")) and signal not in state.resumed_signals:
         state.resumed_signals.append(signal)
@@ -572,6 +586,7 @@ HANDLERS: dict[str, Callable[[UnitState, LedgerEvent], None]] = {
     "review.accepted_judged": _accepted_judged,
     "fix.spawned": _fix_spawned,
     "fix.done": _fix_done,
+    "fix.close_skipped": _close_ended,
     "human.verdict": _human_verdict,
     "pr.updated": _pr_updated,
     "pr.misdirected": _pr_misdirected,

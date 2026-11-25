@@ -686,10 +686,11 @@ class Orchestrator:
         extend_fix_rounds: int | None = None,
         extend_feedback_rounds: int | None = None,
         event: str = "unit.resumed",
-        trigger: Trigger = Trigger.RESUMED,
+        trigger: Trigger | None = Trigger.RESUMED,
         what: str = "resume",
         note_task: str | None = None,
         note_fix_unit: str | None = None,
+        close_fix_unit: str | None = None,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
@@ -702,7 +703,9 @@ class Orchestrator:
 
         `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
         `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
-        leaves (`capacity_restored`, `retry_requested`).
+        leaves (`capacity_restored`, `retry_requested`). `close_fix_unit` (a retry of a unit in `fixing` whose open fix
+        unit waits on a person, L4-VER-095) is recorded in the event and `trigger` is None: no edge is taken, the unit
+        stays `fixing`, and the run that follows closes the fix unit before it selects a task (`fix_hook`).
 
         The commit of this step would bury a person's change to the unit folder (review M3), so the tail is checked
         first: a halted or escalated unit takes `spec_edit_since_stop` instead (L4-OPS-003), an `in_review` unit takes
@@ -718,8 +721,10 @@ class Orchestrator:
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         who = {"actor": actor[0], "marker": actor[1]} if actor is not None else {}  # a command's, never a label's
-        self.services.ledger.append(event, reason=reason[:300], **extra, **who, **binding)
-        self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
+        closing = {"close_fix_unit": close_fix_unit} if close_fix_unit else {}
+        self.services.ledger.append(event, reason=reason[:300], **extra, **who, **binding, **closing)
+        if trigger is not None:
+            self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         edit = self._spec_edit() if self._takes_spec_edit else None
         stop_edge = {
             Phase.HALTED.value: Trigger.SPEC_EDIT_SINCE_STOP, Phase.ESCALATED.value: Trigger.SPEC_EDIT_SINCE_STOP,
@@ -730,7 +735,10 @@ class Orchestrator:
             trigger, context = stop_edge, {"commits": list(edit.shas)[-MAX_EDIT_COMMITS:]}
         elif edit is not None:
             self._see_spec_edit(edit)  # this step's commit buries it: the run that follows takes it
-        self._go(trigger, **context)
+        if trigger is not None:
+            self._go(trigger, **context)
+        else:
+            self._refold()  # no edge: the fix unit still waits, and the run that follows closes it
         if edit is not None and context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
             self._reopen(edit.base)
         else:
@@ -1788,8 +1796,9 @@ def run_unit_in_worktree(
     resume_extend_fix_rounds: int | None = None,
     resume_extend_feedback_rounds: int | None = None,
     resume_event: str = "unit.resumed",
-    resume_trigger: Trigger = Trigger.RESUMED,
+    resume_trigger: Trigger | None = Trigger.RESUMED,
     resume_what: str = "resume",
+    resume_close_fix_unit: str | None = None,
     note_task: str | None = None,
     note_fix_unit: str | None = None,
     take_spec_edit: bool = True,
@@ -1800,7 +1809,8 @@ def run_unit_in_worktree(
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
     lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
-    `Orchestrator.resume`). `note_task` and `note_fix_unit` bind a person's note to the halted task (L4-OPS-018).
+    `Orchestrator.resume`); `resume_close_fix_unit` is the retry of a `fixing` unit (L4-VER-095).
+    `note_task` and `note_fix_unit` bind a person's note to the halted task (L4-OPS-018).
     `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011). `accepted`: the plan id and the accepted
     review items of this unit, from the plan step (L4-YOLO-028). `activated`: the plan id and the digest of the unit's
@@ -1871,6 +1881,7 @@ def run_unit_in_worktree(
                 what=resume_what,
                 note_task=note_task,
                 note_fix_unit=note_fix_unit,
+                close_fix_unit=resume_close_fix_unit,
             )
         )
         code, failed = result.exit_code, False

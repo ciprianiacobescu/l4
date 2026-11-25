@@ -29,7 +29,14 @@ from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.held_patch import NearPass
 from l4.implementer.loop import Escalate, EscalationRequest, run_task, stall_plan_for
-from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
+from l4.implementer.tasks import (
+    open_blocking_questions,
+    questions_hold,
+    select_next_step,
+    tick_completed_parents,
+    unselectable,
+    waiting_questions,
+)
 from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, clip_subject, make_workbench
 from l4.sandbox.caches import mount_caches
@@ -56,9 +63,9 @@ from l4.specs.base import (
 from l4.specs.criteria import kiro_criteria, openspec_criteria
 from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the prompt, red and doctor read it here
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
-from l4.specs.fixmark import read_fix_marker, split_fix_name
+from l4.specs.fixmark import FixMarker, read_fix_marker, split_fix_name
 from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
-from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, blocked_tasks, is_answered
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, blocked_tasks, holds, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
@@ -407,6 +414,61 @@ def _escalation(
     return escalate
 
 
+def _retry_reason(ctx: HookContext, name: str) -> str:
+    """The reason of the last `l4 retry` that asked to close the fix unit `name` (its `unit.retried`)."""
+    events = read_ledger(ctx.services.ref.path).events
+    asked = [e for e in events if e.type == "unit.retried" and e.data.get("close_fix_unit") == name]
+    return str(asked[-1].data.get("reason") or "no reason recorded") if asked else "no reason recorded"
+
+
+def _close_for_retry(ctx: HookContext, wb: Workbench, fix: UnitRef, marker: FixMarker) -> bool:
+    """`unit.retried{close_fix_unit}` (L4-VER-095, design D6): `l4 retry` of a unit in `fixing` whose fix unit waits on
+    a person asked this run to close it. Checked again now, because an answer may have come since: only when every
+    pending task of the fix unit is still held by an open question (and each such question can be set aside) does the
+    harness tick each task `already-done` in a harness commit (the commit and the `task.done` that `_already_done`
+    writes, with `closed_by: retry`), set each question that held it to `superseded by retry` in the same commit as
+    the last task it held (a crash leaves what is left still held), and record `question.superseded`. A task that can
+    run, or one that cannot be ticked, drops the request: `fix.close_skipped`, and the loop runs the fix unit as it
+    always does, so a retry never ticks a task that no question holds. True when the fix unit is closed (the caller
+    appends `fix.done`)."""
+    s, name = ctx.services, fix.name
+    tasks = wb.provider.tasks(fix)
+    path = fix.path / QUESTIONS_FILENAME
+    file = QuestionsFile.load(path)
+    if not waiting_questions(file, tasks) or unselectable(tasks) or file is None:
+        why = "a task of the fix unit can run: an answer arrived, or a question can no longer be set aside"
+        s.ledger.append("fix.close_skipped", fix_unit=name, reason=why)
+        return False
+    held = holds(file.questions, [t.key for t in tasks if not t.done])
+    reason = f"closed by l4 retry: {_retry_reason(ctx, name)}"
+    ticked: set[str] = set()
+    set_aside: list[str] = []
+    while (task := select_next_step(tasks)) is not None:
+        wb.provider.set_marker(fix, task.key, Marker.DONE)
+        parents = tick_completed_parents(wb.provider, fix)
+        ticked.update((task.key, *parents))
+        free = [qid for qid, keys in held.items() if qid not in set_aside and keys <= ticked]
+        for qid in free:
+            file = file.supersede_by_retry(qid)
+        if free:
+            file.save(path)
+            set_aside.extend(free)
+        sha = wb.commit(
+            f"fix({fix.name}): {task.title} already done [skip ci]", task=task.key, attempt=1, phase="single",
+            tdd="already-done",
+        )  # fmt: skip
+        wb.emit(
+            "task.done", task=task.key, sha=sha, parents=parents, tdd="already-done", closed_by="retry", reason=reason,
+            findings=[],
+        )  # fmt: skip
+        if free:
+            wb.emit("question.superseded", ids=free, closed_by="retry")  # `fix_unit` is in the bench's context
+        tasks = wb.provider.tasks(fix)
+    s.ledger.append("fix.done", fix_unit=name, round=marker.round, findings=list(marker.findings), closed_by="retry")
+    wb.push()
+    return True
+
+
 def fix_hook(ctx: HookContext) -> FixOutcome:
     """Run the tasks of the open fix unit (the last `fix.spawned` without a `fix.done`) until every one is ticked, one
     is blocked on a question, or one halts. A `RoleLimit` from a task moves it to the next implementer profile once
@@ -425,6 +487,8 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
     carries: dict[str, NearPass] = {}  # task -> the near pass the limit cut short, for its next profile (L4-IMP-100)
     moved: dict[str, str] = {}  # task -> the profile it moved to (fix-unit-escalate D2)
     escalate = _escalation(ctx, fix, state.iteration, moved, retried)
+    if state.close_fix_unit == name and _close_for_retry(ctx, wb, fix, marker):  # before the first selection
+        return FixOutcome("done")
     while True:
         if _reenter(ctx, fix) and "answers_recorded" in ctx.shared:
             ctx.shared["answers_recorded"]()  # the mirror drops `l4:needs-answers` before the chore's agent runs
