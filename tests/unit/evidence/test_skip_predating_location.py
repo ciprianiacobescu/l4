@@ -844,3 +844,71 @@ def test_a_candidate_whose_place_among_the_statements_moved_is_not_a_hold():
     base = "import pytest\n\nX = 1\n\n\n@pytest.mark.skip\ndef test_x():\n    assert 1\n"
     head = "import pytest\n\n\n@pytest.mark.skip\ndef test_x():\n    assert 1\n\n\nX = 1\n"
     assert not holds(base, head)
+
+
+# --- a test that the not-free parts of the file can reach is not free (review of rework 9) -------------------------
+
+
+def _check(value: str, call: str = "'test_check()'") -> str:
+    return (
+        f"import os\nimport pytest\n\n\ndef test_check():\n    return {value}\n\n\n"
+        f"@pytest.mark.skipif({call}, reason='r')\ndef test_x():\n    assert 1\n"
+    )
+
+
+@pytest.mark.parametrize("call", ["'test_check()'", "test_check()", "'test_check() or False'"])
+def test_a_test_that_a_skip_condition_calls_or_names_is_not_free(call):
+    """The name of a collected test in a string condition or a decorator is a read of it: its body decides the skip."""
+    assert not holds(_check("not os.environ.get('S')", call), _check("True", call))
+    assert holds(
+        _check("not os.environ.get('S')", call), _check("not os.environ.get('S')", call).replace("assert 1", "assert 2")
+    )
+
+
+def test_a_test_method_that_the_prefix_of_the_test_calls_is_not_free():
+    def source(value: str) -> str:
+        return (
+            "import pytest\n\n\nclass TestK:\n    def test_helper(self):\n        return " + value + "\n\n"
+            "    def test_x(self):\n        if self.test_helper():\n            pytest.skip('r')\n        assert 1\n"
+        )
+
+    assert not holds(source("True"), source("False"), "TestK.test_x")
+    assert holds(source("True"), source("True").replace("assert 1", "assert 2"), "TestK.test_x")
+
+
+def test_a_test_that_a_helper_of_the_file_calls_is_not_free():
+    def source(value: str) -> str:
+        return (
+            "import pytest\n\n\ndef test_check():\n    return "
+            + value
+            + "\n\n\ndef need():\n    return test_check()\n\n\n"
+            "@pytest.mark.skipif(need(), reason='r')\ndef test_x():\n    assert 1\n"
+        )
+
+    assert not holds(source("True"), source("False"))
+
+
+def _fixtures(name: str) -> str:
+    return (
+        "import pytest\n\n\n@pytest.fixture\ndef res():\n    pytest.skip('r')\n\n\n@pytest.fixture\ndef other():\n"
+        f"    pytest.skip('r')\n\n\ndef test_x(request):\n    request.getfixturevalue('{name}')\n    assert 1\n"
+    )
+
+
+def test_a_fixture_the_body_runs_by_name_is_part_of_what_skips_the_test():
+    """`request.getfixturevalue('res')` is a skip the prefix of `skipdeps` does not read (the fixture is named by a
+    string): the statement is not free, so naming another fixture keeps the finding. An assertion after it is free."""
+    assert not holds(_fixtures("res"), _fixtures("other"))
+    assert holds(_fixtures("res"), _fixtures("res").replace("assert 1", "assert 2"))
+
+
+def test_import_time_code_of_another_tests_decorator_or_default_is_the_residual():
+    """Not told apart, by design (RESIDUALS: run-time state that another test sets): the decorators and the defaults of
+    a test that is not asked about are free, and they run when the module is imported. A hold, and a person who accepts
+    it has been told so in the question."""
+    base = (
+        "import pytest\n\nITEMS = []\n\n\n@pytest.mark.skipif(not ITEMS, reason='r')\ndef test_x():\n    assert 1\n\n\n"
+        "def test_y(a=None):\n    assert a is None\n"
+    )
+    assert holds(base, base.replace("def test_y(a=None)", "def test_y(a=ITEMS.append(1))"))
+    assert holds(base, base.replace("def test_y", "@pytest.mark.parametrize('b', [ITEMS.append(1)])\ndef test_y"))

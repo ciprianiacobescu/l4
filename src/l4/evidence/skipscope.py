@@ -46,6 +46,7 @@ import io
 import re
 import tokenize
 from collections import Counter
+from collections.abc import Iterable
 
 from l4.verifier import scan
 from l4.verifier.skipdeps import SkipFacts
@@ -60,6 +61,7 @@ _COOKIE = re.compile(r"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
 _WORD = re.compile(r"[A-Za-z_]\w*")
 _CONDITIONAL = frozenset({"skipif", "xfail", "skipIf", "skipUnless"})  # markers whose first argument may be a string
 _GIVEN = frozenset({"os", "sys", "platform", "config"}) | frozenset(dir(builtins))  # names a condition has unbound
+_FIXTURE_CALLS = frozenset({"getfixturevalue", "getfuncargvalue"})  # `request.getfixturevalue("res")` runs a fixture
 _NOT_CODE = frozenset(
     {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
 )
@@ -84,6 +86,34 @@ def _code_lines(text: str) -> set[int]:
         if token.type not in _NOT_CODE:
             code.update(range(token.start[0], token.end[0] + 1))
     return code
+
+
+def _condition_words(call: ast.Call) -> set[str]:
+    """`skipif("FLAG and sys.platform == 'x'")`: pytest evaluates the string with the module's names; its words."""
+    func = call.func
+    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    words: set[str] = set()
+    if name in _CONDITIONAL:
+        for value in [*call.args[:1], *(k.value for k in call.keywords if k.arg == "condition")]:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                words.update(_WORD.findall(value.value))
+    return words
+
+
+def _references(nodes: Iterable[ast.AST]) -> set[str]:
+    """The names that `nodes` can reach: every `Name`, every attribute (`self.test_helper`) and the words of a string
+    condition. A collected test that appears here is called, read or evaluated by code that is not in a free place: its
+    body is no longer free."""
+    found: set[str] = set()
+    for root in nodes:
+        for node in ast.walk(root):
+            if isinstance(node, ast.Name):
+                found.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                found.add(node.attr)
+            elif isinstance(node, ast.Call):
+                found |= _condition_words(node)
+    return found
 
 
 def _bound(statement: ast.stmt) -> set[str] | None:
@@ -135,21 +165,37 @@ class _Side:
     def build(self, leave_out: frozenset[int]) -> None:
         """The structure: every statement of the module and of its classes as a tree and its lines, a collected test
         left out (T is compared on its own, by `fingerprint`, and its `positions` among the others) and so are the
-        imports whose ids are `leave_out` (the head's whole added imports)."""
+        imports whose ids are `leave_out` (the head's whole added imports). A collected test that the statements which
+        are not free read by its name (called in a decorator or a helper, named in a string condition, `self.test_x()`)
+        stays in, whole: another place of the file can reach it."""
         collected = self.facts.collected
+        kept: list[ast.AST] = []
+        for node in self.tree.body:
+            if id(node) in leave_out:
+                continue
+            if isinstance(node, ast.ClassDef):
+                kept += [*node.decorator_list, *node.bases, *node.keywords]
+                kept += [
+                    m for m in node.body if not (isinstance(m, _FUNCTIONS) and f"{node.name}.{m.name}" in collected)
+                ]
+            elif not (isinstance(node, _FUNCTIONS) and node.name in collected):
+                kept.append(node)
+        reached = _references(kept)
         items: list[object] = []
         for node in self.tree.body:
             if id(node) in leave_out:
                 continue
             if isinstance(node, _FUNCTIONS) and node.name in collected:
                 self.positions[node.name] = (len(items), -1)
+                if node.name in reached:
+                    items.append(self._item(node))
             elif isinstance(node, ast.ClassDef):
                 members: list[object] = []
                 for member in node.body:
                     q = f"{node.name}.{member.name}" if isinstance(member, _FUNCTIONS) else ""
                     if q in collected:
                         self.positions[q] = (len(items), len(members))
-                    else:
+                    if q not in collected or member.name in reached:
                         members.append(self._item(member))
                 header = copy.copy(node)
                 header.body = []
@@ -160,9 +206,43 @@ class _Side:
                 items.append(self._item(node))
         self.items = items
 
+    def prefix(self, qualname: str) -> tuple[_FUNCTIONS, list[ast.stmt]] | None:
+        """T's def and the statements of its body that no change may touch: up to its last skip (`skip_relevant`), and
+        up to its last `request.getfixturevalue(...)`, which runs a fixture that can skip by a name in a string."""
+        found = self.facts.skip_relevant(qualname) if qualname in self.facts.collected else None
+        if found is None:
+            return None
+        function, prefix = found
+        last = max(
+            (
+                i
+                for i, statement in enumerate(function.body)
+                if any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _FIXTURE_CALLS
+                    for n in ast.walk(statement)
+                )
+            ),
+            default=-1,
+        )
+        return function, function.body[: max(len(prefix), last + 1)]
+
+    def whole(self, qualname: str) -> tuple[str, tuple[str, ...]] | None:
+        """A collected test as a tree and as written, for a test that code outside T's free places can reach."""
+        found = self.facts.skip_relevant(qualname) if qualname in self.facts.collected else None
+        return None if found is None else self._item(found[0])
+
+    def reaches(self, qualname: str) -> set[str]:
+        """The names that the part of T that is not free (decorators, signature, prefix) reads."""
+        found = self.prefix(qualname)
+        assert found is not None
+        function, prefix = found
+        return _references(
+            [*function.decorator_list, function.args, *prefix, *([function.returns] if function.returns else [])]
+        )
+
     def fingerprint(self, qualname: str) -> tuple[object, ...] | None:
         """Everything of T that must not change: its decorators, signature and the statements up to its last skip."""
-        found = self.facts.skip_relevant(qualname) if qualname in self.facts.collected else None
+        found = self.prefix(qualname)
         if found is None:
             return None
         function, prefix = found
@@ -179,7 +259,7 @@ class _Side:
     def protected(self, qualname: str) -> tuple[str, ...]:
         """The lines of T that no change may touch, as written: from its first decorator to the end of its signature,
         and every line of the statements of its prefix (comment and blank lines among them left out)."""
-        found = self.facts.skip_relevant(qualname)
+        found = self.prefix(qualname)
         assert found is not None
         function, prefix = found
         first, _ = _span(function)
@@ -215,7 +295,7 @@ class _Names:
             elif isinstance(node, ast.MatchMapping) and node.rest:
                 self.module.add(node.rest)
             elif isinstance(node, ast.Call):
-                self._condition(node)
+                self.words |= _condition_words(node)
         for statement in scan.flat(tree.body):
             if isinstance(statement, _FUNCTIONS | ast.ClassDef):
                 self.module.add(statement.name)
@@ -224,16 +304,6 @@ class _Names:
                 self.members.update(
                     s.name for s in scan.flat(statement.body) if isinstance(s, _FUNCTIONS | ast.ClassDef)
                 )
-
-    def _condition(self, call: ast.Call) -> None:
-        """`skipif("FLAG and sys.platform == 'x'")`: pytest evaluates the string with the module's names."""
-        func = call.func
-        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
-        if name in _CONDITIONAL:
-            given = [*call.args[:1], *(k.value for k in call.keywords if k.arg == "condition")]
-            for value in given:
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    self.words.update(_WORD.findall(value.value))
 
     def free(self, name: str) -> bool:
         """The module may bind `name` newly: nothing binds or loads it, no string condition names it, pytest and the
@@ -258,7 +328,14 @@ class Confined:
         before, after = self.base.fingerprint(qualname), self.head.fingerprint(qualname)
         if before is None or before != after or self.base.positions.get(qualname) != self.head.positions.get(qualname):
             return False
-        return self.base.protected(qualname) == self.head.protected(qualname)
+        if self.base.protected(qualname) != self.head.protected(qualname):
+            return False
+        reached = self.base.reaches(qualname) | self.head.reaches(qualname)  # a test that T's own parts can call
+        return all(
+            self.base.whole(other) is not None and self.base.whole(other) == self.head.whole(other)
+            for other in self.base.facts.collected | self.head.facts.collected
+            if other != qualname and other.rsplit(".", 1)[-1] in reached
+        )
 
     def _compare(self) -> bool:
         """What does not depend on the test: both sides read, the coding line the same, the added imports and the added

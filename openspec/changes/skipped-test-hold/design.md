@@ -172,10 +172,15 @@ that the base does not have (located in the head's tree), SHALL be one of:
       helper), existing at both sides or a whole new one at the head. For T itself, and for every test whose skip status
       is being decided (each one is asked on its own), a change to its decorators, to its `def` line and signature (its
       parameters are fixtures) or to the statements of its body up to and including the last one that contains or
-      encloses a skip call or marker (the prefix of the closure, `SkipFacts.skip_relevant`) is not allowed. A test that is
-      not T may change whole, its decorators and signature too, and may be removed: the decorators of another test
-      cannot skip T (a decorator that turns a test into a fixture changes which functions are collected, which the
-      structure check below refuses);
+      encloses a skip call or marker (the prefix of the closure, `SkipFacts.skip_relevant`), or the last one that calls
+      `request.getfixturevalue(...)` (it runs a fixture that is named by a string, and a changed name is a changed skip),
+      is not allowed. A test that is not T may change whole, its decorators and signature too, and may be removed: the
+      decorators of another test cannot skip T (a decorator that turns a test into a fixture changes which functions are
+      collected, which the structure check below refuses). One exception, found in review: a collected test that the
+      file reads by its name from a place that is not free is not free. `skipif('test_check()')`, a decorator that calls
+      `test_check()`, a helper that does, `self.test_helper()` in a class statement or in the prefix of T make the body of
+      that test a part of why T skips. The structure keeps such a test whole (tree and lines), and T's own parts
+      (decorators, signature, prefix) are read for the names they reach;
    3. a whole new module-level `import M`, `import M as N` or `from M import a, b` statement, on lines of its own (not
       `import json; X = 1`), that binds only names that the base module neither binds nor loads (a `Name` anywhere, a
       module-level `def` or `class`, an import alias anywhere, `global`, `except as`, a `match` capture) and that no
@@ -187,6 +192,16 @@ that the base does not have (located in the head's tree), SHALL be one of:
    docstring, a class's decorators and bases, a class attribute, `setUp` and a helper included. If the line mapping fails,
    a blob does not parse or does not tokenize, a name is defined twice, a test is not collected at both sides, the coding
    line changed, or anything is ambiguous, (e) is False (the major).
+   **What (e) leaves, said plainly.** A free place runs code too. The decorators and the default values of a test that is
+   not T run when the module is imported (`def test_y(a=ITEMS.append(1))`, `@pytest.mark.parametrize('b',
+   [ITEMS.append(1)])`), and the body of another test runs before T when the order says so (a test that sets a module
+   global that a later skip reads). Both are the residual "run-time state that another test sets" (D1 residuals); the
+   rule is not tightened for them, because the real case is a unit that edits assertions in tests and adds tests. The
+   changed sibling test module that defines tests and that T's file imports is in neither (c) nor (e): it is "a module
+   outside the tests tree" only in the wider sense that nobody compares its content, and the base report is what stands
+   in front of it. (e) judges the test it is asked about, not every candidate of the file at once:
+   each candidate is protected in its own place and free in the others, which is what SCN-VER-375 needs (a skip added to
+   one test does not touch another).
    **How the lines are mapped.** The first design said `git diff -U0` or `difflib` on the two blobs. A diff of lines has to
    guess which line became which, and with 600 tests that share lines (`    assert x`, the same decorator) `difflib`
    took 18 s on one file and can still align a changed line with an unchanged one. The implementation pairs statements

@@ -153,7 +153,9 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
   `RESIDUALS`), `SkipFacts.skip_relevant` and `.ambiguous` and the memoised prefix (`skipdeps`), `SkipRule.changes_confined`
   and `RUNNER_NAMES`/`RUNNER_PATTERNS`/`support_module` (`skippred`), `collect._support_modules`, `base_tests._exit_reason`
   and `SkipLookup._look`/`_run_base_gate` keeping any failure, the question (`verdicts._hold_question`) and the Evidence
-  line (`report`) with the same residual list. Existing tests that expected a hold with an unrelated flag, helper, fixture,
+  line (`report`) with the same residual list. Found in the review of 9.1 and fixed with tests: a collected test
+  that a string condition, a decorator, a helper or the prefix of T reads by its name is kept whole, and a statement that
+  calls `request.getfixturevalue(...)` ends T's free body. Existing tests that expected a hold with an unrelated flag, helper, fixture,
   class decorator or a name added to an import line, or with a support module added, now expect the finding.
 - [x] 9.3 Documents: design D1 ((c) names, the new (e), what the conditions cover, residuals, the failed-run sentence), D3;
   L4-VER-092 and SCN-VER-381, 400, 401, 402 amended and SCN-VER-405..408 added in the change's spec and in `docs/SPEC.md`
