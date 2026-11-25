@@ -124,6 +124,26 @@ def test_every_other_phase_continues_by_itself(phase):
     assert step(phase) == "nothing: the harness continues at the next run"
 
 
+def test_a_fixing_unit_whose_fix_unit_waits_on_a_person_names_the_retry_that_closes_it():
+    """L4-VER-095: `l4 retry` is the way to close the fix unit; the text never tells anyone to tick a task by hand."""
+    got = step("fixing", open_fix_unit="x-fix-1", fix_questions_open=("Q-001",))
+    assert "answer the fix unit's questions (Q-001)" in got
+    assert "upgrade the pin to a release that has L4-VER-095" in got
+    assert "l4 retry --unit openspec:x --reason TEXT" in got
+    assert got.index("upgrade the pin") < got.index("l4 retry --unit")
+    assert "tick" not in got
+    assert label_for(facts("fixing", fix_questions_open=("Q-001",)), "l4:") is None  # no label closes it
+
+
+def test_a_fixing_unit_whose_close_is_pending_continues_by_itself():
+    got = step("fixing", open_fix_unit="x-fix-1", fix_questions_open=("Q-001",), fix_closing=True)
+    assert got == "nothing: the harness continues at the next run"
+
+
+def test_a_fixing_unit_with_no_fix_question_open_continues_by_itself():
+    assert step("fixing", open_fix_unit="x-fix-1") == "nothing: the harness continues at the next run"
+
+
 def test_scn_imp_319_a_harness_question_names_its_cause_and_both_answers():
     """L4-OPS-006: the REASON is `Q-NNN: <title> (<why>)`, the step names both answers."""
     from l4.state.next_step import reason

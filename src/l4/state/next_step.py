@@ -56,6 +56,17 @@ def skipped_way_out(unit: str) -> str:
     )
 
 
+def fix_closing_step(unit: str, ids: tuple[str, ...]) -> str:
+    """The step of a unit in `fixing` whose open fix unit waits on a person (L4-VER-095): answer its questions, or, when
+    no answer makes its task able to run, close the fix unit with `l4 retry` once the pin is a release that has it. The
+    harness ticks the tasks itself; a person's own tick of a fix task is a step 1 blocker."""
+    return (
+        f"answer the fix unit's questions ({', '.join(ids)}); or, when no answer lets its task run, upgrade the pin to a "
+        f"release that has L4-VER-095 and run l4 retry --unit {unit} --reason TEXT: the harness ends the fix unit in "
+        "its own commits and verifies again"
+    )
+
+
 def ci_not_fixed_way_out(unit: str) -> str:
     """The step of a unit escalated with `ci_not_fixed` (L4-OPS-023): the same CI job failed again on a hand-off and no
     commit since changed a project file, so a fix unit cannot see the failure either. A person fixes it, or gives the
@@ -211,6 +222,8 @@ def next_step(facts: "UnitFacts", *, branch: str, questions_path: str) -> str:
         if facts.follow_up_open:
             return f"nothing: feedback {ids} waits for the open follow-up {facts.follow_up_open}"
         return f"nothing: feedback {ids} becomes a follow-up unit at the next run"
+    if phase == Phase.FIXING.value and facts.fix_questions_open and not facts.fix_closing:
+        return fix_closing_step(unit, facts.fix_questions_open)
     return CONTINUES
 
 
