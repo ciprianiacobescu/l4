@@ -1218,16 +1218,24 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   marker added at run time, a mark under a module-level `if`, `try`, `with` or `for`, in the test, its class, the module,
   or a fixture or helper of the file), and changed nothing inside the file that decides whether an unchanged skip skips:
   the flag a `skipif` reads, the condition of a guard `if not os.environ.get("S"): pytest.skip(...)` and the setup before
-  it, a helper, fixture or `setUp` the skip uses, an import it reads, a base class, a `pytestmark`. An assertion after the
-  guard, an unrelated import, flag or helper, and a new test are not part of that and change nothing; (3) the unit changed
+  it, a helper, fixture or `setUp` the skip uses, an import it reads, a base class, a `pytestmark`; (3) the unit changed
   no `conftest.py`, support file or runner configuration file (`tdd.test_support_globs`, `tdd.runner_config_files`, and a
   `conftest.py`, `pytest.ini`, `pyproject.toml`, `setup.cfg` or `tox.ini` in any directory, a rename counting at its old
-  path), whether or not the file holds a skip. **Not told apart**: a skip that comes from production code the unit
-  changed (`skipif(not hasattr(mod, "x"))`), from a module that the test imports (a marker, a fixture or a base class
-  there), or from a dynamic form (`getattr`, `importlib`, `globals()`, a name set in a function through `global`); the
-  tests were skipped at the base too, but the reason may have changed. If no base report with statuses can be had, the
-  finding stays and the step note says `no base report with statuses: <why>` (a failed base run is not repeated in the
-  round, and the first line of a checkout's error is in the note). Two answers:
+  path), no file that sets up the interpreter or the dependencies (`sitecustomize.py`, `usercustomize.py`, `noxfile.py`,
+  `setup.py`, `requirements*.txt`, `constraints*.txt`, `Pipfile`, `poetry.lock`, `uv.lock`, `pdm.lock`), and no Python
+  module of the tests tree that defines no test (an `__init__.py`, a helper), whether or not the file holds a skip; and
+  (4) **the unit changed the test file only in places that cannot change why a test skips**: a comment line or a blank
+  line; a line inside the body of a test (a new one too), beyond the statements that can skip that test (its
+  decorators, its signature and the body up to its last skip stay as they were); or a whole new `import` line that binds
+  a name the file did not use before. The lists of (2) name what decides a skip, and a review kept finding one more way to
+  change it that they miss (a string condition that names a flag, `self.FLAG`, a statement at module level that sets a
+  value); (4) is the check that does not need the list: any other changed line, a flag, a helper, a fixture, a class
+  attribute, a docstring, a statement at module level, a name added to an `import` line that was there, keeps the
+  finding, even when it looks unrelated. **Not told apart**: production code the unit changed, a module outside the
+  tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`,
+  `importlib`, `globals()`); the tests were skipped at the base too, but the reason may have changed. If no base report
+  with statuses can be had, the finding stays and the step note says `no base report with statuses: <why>` (a failed
+  base run is not repeated in the round, and the first line of a checkout's error is in the note). Two answers:
   - `accept` says that you ran these tests where they can run, or that you know they pass there. It holds for this
     content of the file and this list of skipped ids: an edit of the file, or another set of skipped tests, asks again.
   - `reject: <reason>` stops the unit with `skipped_tests_rejected` ([7.3.4](#734-escalated-with-skipped_tests_rejected)).
@@ -3025,29 +3033,32 @@ These limits make operation more difficult. Know them before you start.
 
 - From the release after 0.4.60, an old skipped test of a changed test file is a hold when a base report also holds it as
   skipped, the file adds or changes no skip construct that the harness reads and nothing inside the file that decides
-  whether an unchanged skip skips (a flag, a guard's condition, a helper, a fixture, an import), and the unit changed no
-  test-support or runner-configuration file. Otherwise it stays a finding. The check sees Python test files only. The base
+  whether an unchanged skip skips (a flag, a guard's condition, a helper, a fixture, an import), the unit changed the
+  file only in places that cannot change why a test skips (a comment, a blank line, the body of a test beyond what skips
+  it, a whole new import of an unused name), and no test-support, runner, setup or dependency file changed. Otherwise it
+  stays a finding, also when the change outside those places looks unrelated (a new helper, fixture or flag in the file, a
+  changed docstring, a name added to an `import` line that was there). The check sees Python test files only. The base
   report is step 1's own reference, an earlier round's record that has the statuses, or one more run of the base's test
   gate in a worktree (once for a base and a command: the round that makes it writes the statuses into its
   `integrity.base_tests`); when none can be had the finding stays and the step note says why.
-  What it does not tell apart ([7.1](#71-awaiting_human-a-question-waits-for-you)): a skip that comes from production
-  code the unit changed, from a module the test imports (a marker, a fixture or a base class there), or from a dynamic
-  form (`getattr`, `importlib`, `globals()`, a name set in a function through `global`). The base run and the head's gate
-  do not have the same environment: the base worktree run has the network off and no `PYTEST_ADDOPTS`, while the head's
-  gate has `gates.network` (`allow` by default). A skip that depends on the network can look skipped at the base only, so
-  the base report holds as skipped a test that would run, or fail, at the head. Your accept says the tests ran or pass
-  where they can run. Three more limits: (1) the rule that only a person answers the hold relies on the actor detection
-  of L4-QMD-009: an agent that edits `questions.md` by hand without `l4 questions` is read as a person; (2) the close of
-  a fix unit by `l4 retry` writes `question.superseded` before the commit of the task it releases, so that the event
-  travels inside that commit, and the `task.done` after it (it names the commit's sha). A run that ends between the two
-  leaves a commit with no `task.done` event, which step 1 does not count as a missing red or green, and the question's
-  Status and the ledger agree. If the closing commit itself fails, the ledger says `question.superseded` while
-  `questions.md` still says open and the task is unticked, until the next run: the request to close is still pending, so
-  that run closes the fix unit from the start and writes the event again (the same ids, harmless). Between the two runs
-  `l4 status` and the plan read the ledger and can show the question as closed although `questions.md` says open: read the
-  file, or run again; (3) a reject of the hold can escalate with `same_failure` or `fix_rounds_exhausted` when those are decided
-  first ([7.3.4](#734-escalated-with-skipped_tests_rejected)). A unit that is already in `fixing` for the old finding
-  needs the pin upgraded first and then `l4 retry`; a retry on the old harness spends a fix round.
+  What it does not tell apart ([7.1](#71-awaiting_human-a-question-waits-for-you)): production code the unit changed, a
+  module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`,
+  `getattr`, `importlib`, `globals()`). The base run and the head's gate do not have the same environment: the base
+  worktree run has the network off and no `PYTEST_ADDOPTS`, while the head's gate has `gates.network` (`allow` by
+  default). A skip that depends on the network can look skipped at the base only, so the base report holds as skipped a
+  test that would run, or fail, at the head. Your accept says the tests ran or pass where they can run. Three more
+  limits: (1) the rule that only a person answers the hold relies on the actor detection of L4-QMD-009: an agent that
+  edits `questions.md` by hand without `l4 questions` is read as a person; (2) the close of a fix unit by `l4 retry`
+  writes `question.superseded` before the commit of the task it releases, so that the event travels inside that commit,
+  and the `task.done` after it (it names the commit's sha). A run that ends between the two leaves a commit with no
+  `task.done` event, which step 1 does not count as a missing red or green, and the question's Status and the ledger
+  agree. If the closing commit itself fails, the ledger says `question.superseded` while `questions.md` still says open
+  and the task is unticked, until the next run: the request to close is still pending, so that run closes the fix unit
+  from the start and writes the event again (the same ids, harmless). Between the two runs `l4 status` and the plan read
+  the ledger and can show the question as closed although `questions.md` says open: read the file, or run again; (3) a
+  reject of the hold can escalate with `same_failure` or `fix_rounds_exhausted` when those are decided first
+  ([7.3.4](#734-escalated-with-skipped_tests_rejected)). A unit that is already in `fixing` for the old finding needs
+  the pin upgraded first and then `l4 retry`; a retry on the old harness spends a fix round.
 
 - With `gates.test.red_check: targeted`, a new test file that breaks an old test only when they run together shows at
   green and not at red (also after a resume), and green cannot change the frozen file. The harness names the cause and

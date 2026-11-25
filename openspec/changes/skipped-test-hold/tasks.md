@@ -136,3 +136,25 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
   the base run; D3; D6; L4-VER-092, L4-VER-093, L4-VER-095 and SCN-VER-396, 398 amended and SCN-VER-400..404 added in the
   change's spec and in `docs/SPEC.md` (step 3 row, the change table row); the runbook (7.1 hold bullet, 11 known limits:
   the base run has no network, the window); the CHANGELOG entry.
+
+## 9. Rework: where the unit may change the file, a whitelist (L4-VER-092, D1 (e), review H)
+
+- [x] 9.1 Tests first (they failed before the code): `tests/unit/evidence/test_skip_predating_location.py` (the 86 cases of
+  review H, `t1.py`, `t2.py` and `t3.py`, each asserting `no_skip_added` is False, except the three unchanged controls and
+  the run-time-state residual, which are asserted True and named; positive controls: the real-world shape also through
+  `collect.skip_predating`, a comment-only change, a blank line between functions, a whole new test method, a changed body
+  or decorator of another test, a new import of a new name; negative controls: an import that rebinds, a builtin, `*`,
+  `__future__`, a docstring, a module statement, a class attribute, `setup_method`, a fixture, a candidate's prefix,
+  signature, default and decorators, a moved candidate, a deleted `def` line, a `def` inserted into a helper, a string that
+  swallows a fixture, a blank line inside a string; (c): one test per new name group in three directories, a support
+  module under `tests/` added, changed, deleted and renamed); `test_base_skips.py` (note A: a failure that is not an
+  `L4Exit` is kept and not run again).
+- [x] 9.2 Then: `l4.evidence.skipscope` (`Confined`: pairing of statements by tree and by text, the added-import rule,
+  `RESIDUALS`), `SkipFacts.skip_relevant` and `.ambiguous` and the memoised prefix (`skipdeps`), `SkipRule.changes_confined`
+  and `RUNNER_NAMES`/`RUNNER_PATTERNS`/`support_module` (`skippred`), `collect._support_modules`, `base_tests._exit_reason`
+  and `SkipLookup._look`/`_run_base_gate` keeping any failure, the question (`verdicts._hold_question`) and the Evidence
+  line (`report`) with the same residual list. Existing tests that expected a hold with an unrelated flag, helper, fixture,
+  class decorator or a name added to an import line, or with a support module added, now expect the finding.
+- [x] 9.3 Documents: design D1 ((c) names, the new (e), what the conditions cover, residuals, the failed-run sentence), D3;
+  L4-VER-092 and SCN-VER-381, 400, 401, 402 amended and SCN-VER-405..408 added in the change's spec and in `docs/SPEC.md`
+  (also the step 3 row and the change table row); runbook 7.1 hold bullet and section 11; the CHANGELOG entry.

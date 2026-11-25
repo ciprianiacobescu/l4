@@ -21,8 +21,12 @@ constructs over the base's, so that a removed skip never counts and a changed co
 module-level or class-level `if`, `try`, `with` or `for` block, and a skip reached through an import alias
 (`import pytest as pt`, `from pytest import mark as m`, `skip = pytest.skip`) do; (c) the unit changed no file
 that matches `tdd.test_support_globs` or `tdd.runner_config_files`, none named `conftest.py`, `pytest.ini`, `.pytest.ini`,
-`pytest.toml`, `.pytest.toml`, `pyproject.toml`, `setup.cfg` or `tox.ini` in any directory, and renamed none of them
-away (a rename counts at its old path too), whether or not the file holds a skip construct; and (d) the dependency
+`pytest.toml`, `.pytest.toml`, `pyproject.toml`, `setup.cfg`, `tox.ini`, `sitecustomize.py`, `usercustomize.py`,
+`noxfile.py`, `setup.py`, `Pipfile`, `Pipfile.lock`, `poetry.lock`, `uv.lock` or `pdm.lock`, none that matches
+`requirements*.txt` or `constraints*.txt`, in any directory, and no `.py` file under a path that matches `tdd.test_globs`
+that defines no test (an `__init__.py`, a helper, a module a test imports: a support module of the tests tree, read at
+the head, and at the base for a deleted or renamed one), and renamed none of them away (a rename counts at its old path
+too), whether or not the file holds a skip construct; (d) the dependency
 closure of the test's skip is equal at the base and at the head, and the test exists at the head: the multiset of the
 `ast.dump` of its skip-relevant parts (its decorators; its class's decorators, bases and class-level skip statements; the
 module-level skip statements, a `pytestmark` assignment whatever its value; the statements of its body up to and
@@ -32,16 +36,37 @@ bindings (import per alias, assignment, `def`, `class`) of every name those part
 binds, followed through the names those bindings load to a depth of 20 (a longer chain keeps the finding), so that
 a flag, a guard's condition, a helper, a fixture or an import that the unit changed under a skip that reads the same
 is a changed skip; an unrelated added import, test function, flag or helper, and an assertion after the guard are not in
-the closure.
+the closure; and (e) every change the unit made to the file is in a place that cannot change why a test skips (a
+whitelist of WHERE, beside the lists of (b) and (d), which stay as defence: (b) and (d) enumerate what decides a skip,
+and each review found one more in-file way to change it). Every changed line, a line of the base that the head no longer
+has and a line of the head that the base does not have, SHALL be: a blank line or a comment-only line (read with
+`tokenize`: a docstring is not a comment, and a blank line inside a string is not a blank line); a line inside a
+collected test (never a fixture, `setUp`, `setup_method` or a helper), existing at both sides or a whole new one at the
+head, its decorators and signature included, except that for the test itself its decorators, its signature (its
+parameters are fixtures) and the statements of its body up to and including the last one that contains, encloses or
+calls a skip are not a place for a change, a decorator or signature of another test being no way to skip this one; or a
+whole new module-level `import M`, `import M as N` or `from M import a, b` statement, on lines of its own, that binds
+only names which the base module neither binds nor loads and which no string condition of a skip marker names (not
+`*`, not `__future__`, not a builtin or one of the names pytest gives a string condition: `os`, `sys`, `platform`,
+`config`; a new test takes no such name either). Nothing else of the module or of a class SHALL be added, removed or
+changed: no statement, no docstring, no decorator of a class, no `setUp`, `setup_method`, helper, fixture or class
+attribute. The changed lines SHALL be located by pairing the statements of the two sides, not by a diff of lines: the
+statements that are not collected tests, and the imports the base had, are the same trees (`ast.dump`) in the same
+order and the same lines of text (comment and blank lines left out), the test is at the same place among them, and its
+decorators, signature and skip-relevant statements are the same trees and the same text; a line that no such statement
+holds is then in a collected test or in a new import. A source that does not tokenize, a name defined twice, a test that
+is not collected at both sides, a coding line that changed, or anything else that is not clear keeps the test in the
+finding.
 The base report of (a) SHALL be, in this order: step 1's reference of the round when it is a full report of the
 base's own run (a cached baseline or a base worktree run; never the head's run with the base's test files); the
 `skipped` list of the newest earlier round's `integrity.base_tests` of the same base sha and test command that has
 that key; else one run of the test gate in a worktree of the base (network off), kept so that no round runs it
-twice, a failed run included (a second asker of the round gets the same reason and no second run; the message of an
-exit of the base checkout is kept in the note, redacted, first line). A lookup that obtained its report from such a
+twice, a failed run included, whatever the failure (an exit of the base checkout or any other exception: a second asker
+of the round gets the same reason and no second run; the first line of the message, redacted and cut, and the type of
+an exception that is not an exit, are kept in the note). A lookup that obtained its report from such a
 run SHALL write `skipped` into this round's `integrity.base_tests` (the whole record, `passed` and `collection_errors`
 included, when step 1 wrote none), so that the next round reads it from its predecessor's record and the base's gate runs
-once for the base and the command, not once a round; nothing is written from anything that is not a full report. It SHALL be looked up only when a skipped test of a changed file passes (b) and (c). When none of these gives
+once for the base and the command, not once a round; nothing is written from anything that is not a full report. It SHALL be looked up only when a skipped test of a changed file passes (b) to (e). When none of these gives
 a report, every such test SHALL stay in the finding, and the step note and `tests_ran.summary.skipped_note` SHALL
 say `no base report with statuses: <why>`. Any doubt SHALL keep the test in the finding. A test whose skip predates the unit SHALL NOT be named in the finding `existing tests are
 skipped in a changed test file`; the tests of one file SHALL be one hold of kind `skipped` with the text `skipped:
@@ -51,8 +76,8 @@ Any other old skipped test of a changed file, and every case in which a blob can
 deterministic major finding as before. The hold SHALL join the round at step 3, whether diff coverage is on or off, and
 SHALL be listed in `evidence.holds` of `verdict.json` with kind `skipped` and in `tests_ran.summary.skipped_predating`.
 The Evidence section of `verification.md` SHALL print the line `Skipped in a changed file before this unit (hold): also
-skipped in a base report (<source>); the file adds or changes no skip construct the harness reads; a skip from code the
-unit changed or from an imported module is not told apart: <ids>` when `skipped_predating` is not empty, and the line
+skipped in a base report (<source>); the file adds or changes no skip construct the harness reads and the unit changed it
+only in places that cannot change why a test skips; not told apart: <the residuals below>. Tests: <ids>` when `skipped_predating` is not empty, and the line
 `Skipped tests were not matched with a base report: <note>` when `skipped_note` is not empty, and a `verdict.json` that has no `skipped_predating`, `skipped_source` or `skipped_note` SHALL read them as empty.
 The check SHALL run no test of the unit; the only run it can make is the third source of (a), at most one a round.
 `integrity.base_tests` of `verdict.json` SHALL carry a `skipped` list (the sorted ids the base's report holds as
@@ -63,10 +88,9 @@ SHALL NOT have the key, and an absent key SHALL mean "not observed", never "noth
 held the tests as skipped SHALL be named (`step 1 base run`, `an earlier round's record` or `a base worktree run`) in
 `tests_ran.summary.skipped_source`, in the hold's view and in its question, and in neither the hold's text nor its
 binding, so that the same file and ids read in another report are the same hold. Not told apart, and said so in the
-question and the runbook, in these words and no others: a skip that comes from production code the unit changed, from
-a module the test imports (a marker, a fixture, a base class), or from a dynamic form (`getattr`, `importlib`,
-`globals()`, a name set in a function through `global`), where the tests were skipped at the base too for another
-reason. The base report is a run without the network and without `PYTEST_ADDOPTS`, while the head's gate has `gates.network`:
+question, in the Evidence line and in the runbook, in these words and no others: production code the unit changed, a module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`), where the tests were
+skipped at the base too for another reason (what (e) bounds is where the unit changed the file; it does not read
+behaviour). The base report is a run without the network and without `PYTEST_ADDOPTS`, while the head's gate has `gates.network`:
 a skip that depends on the network can look skipped at the base only. [V, the code: step 3 compared nothing with the base, and
 a fix chore puts every test path back, so no fix unit could make a skipped test run]
 
@@ -123,9 +147,9 @@ The hold of L4-VER-092 SHALL be asked like any hold (`Kind: verdict`, target `H-
 kind SHALL be read from the text prefix `skipped: existing tests in ` (`hold_kind` returns `skipped`); `hold_subjects`
 SHALL return none for it, so no judge finding is settled by its answer. The question SHALL name the file and the count,
 list the skipped test ids, name the base report that held them as skipped, say what was compared (the file adds or
-changes no skip construct the harness reads, nothing inside the file that decides whether an unchanged skip skips, and
-no support or runner-configuration file changed) and what is not told apart (a skip that comes from production code the
-unit changed, from a module the test imports, or from a dynamic form), say that an `accept` means the person ran them where they can run or knows they pass there and holds for this
+changes no skip construct the harness reads, nothing inside the file that decides whether an unchanged skip skips, the
+unit changed the file only in places that cannot change why a test skips, and no support, runner, setup or dependency file
+changed) and what is not told apart (production code the unit changed, a module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`)), say that an `accept` means the person ran them where they can run or knows they pass there and holds for this
 content of the file only, and say that `reject: <reason>` ends the round because a fix unit cannot change test files. A
 person's `accept` SHALL be bound (`result.hold_views`) to the head blob of the file and the full sorted list of its
 skipped ids, so that an edit of the file or a change of the skipped set voids it and the hold is asked again. An `accept`
@@ -175,10 +199,10 @@ fix task; the other way out shows once this one is resolved.
 - **Given** `test_a` was skipped at the base and at the head by a skip construct whose text the unit did not change, the base report holds it as skipped, and the unit changed one of: `FLAG = True` to `FLAG = os.environ.get("Z") is None` under `@pytest.mark.skipif(FLAG, ...)`; the condition of a guard in the body, `if not os.environ.get("S"): pytest.skip(...)` to `if True: pytest.skip(...)`, or the setup before it; the body of `has()` under `@skipif(not has(), ...)`; a flag that a flag reads; a class-level flag, a base class, or a `setUp` of its class; a fixture the test takes or an `autouse` fixture; a from-import that a skip reads (`from helpers import has` to `from other import has`); a `pytestmark = ...` whatever its value
 - **When** step 3 collects evidence
 - **Then** `test_a` is in the finding and in no hold, because the dependency closure of its skip is not the same at the base and at the head
-- **And** a skip whose closure is the same, with an assertion after the guard, an unrelated import, flag or helper, or a new test added, stays in the hold of the file
+- **And** a skip whose closure is the same, with an assertion after the guard, a whole new import of an unused name, or a new test added, stays in the hold of the file (an unrelated flag or helper of the module is no part of the closure, and is refused by (e): SCN-VER-406)
 
 #### Scenario: SCN-VER-401 (+) Changes outside the closure of the skip leave the hold
-- **Given** a module with `INTEGRATION = pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` and several tests marked `@INTEGRATION`, all skipped at the base and at the head, and the unit changed one assertion line and added a comment inside two of the test bodies, added an import (also an unrelated name on an existing `import` line), and added a test that is not skipped
+- **Given** a module with `INTEGRATION = pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` and several tests marked `@INTEGRATION`, all skipped at the base and at the head, and the unit changed one assertion line and added a comment inside two of the test bodies, added an import, and added a test that is not skipped (the same change as SCN-VER-405; a name added to an `import` line the base has is a changed line outside a test, and is refused by (e))
 - **When** step 3 collects evidence
 - **Then** the skipped tests are in the hold of the file and in no finding, and a file of 600 skipped tests is decided in seconds: the file is read, parsed and scanned once for the path, not once for each test
 
@@ -186,17 +210,40 @@ fix task; the other way out shows once this one is resolved.
 - **Given** the records of rounds 1 and 2 have `base_tests` without a `skipped` key, and rounds 3 to 6 are each verified on a workbench of their own, with the old skipped tests of a changed file passing the rest of L4-VER-092
 - **When** step 3 collects evidence in each of those rounds
 - **Then** the base's test gate runs once in a base worktree, in round 3, and `integrity.base_tests` of round 3 carries `skipped` (and `passed` and `collection_errors` when step 1 wrote no record); rounds 4 to 6 read it as `an earlier round's record` and run nothing
-- **And** a base run that gave no report, or whose checkout exited (`gates.setup failed at the merge base`), is not run again in the same round by the second asker (step 1 and step 3 together), writes no `skipped`, and leaves the first line of the exit's message, redacted, in the step note
+- **And** a base run that gave no report, or whose checkout exited (`gates.setup failed at the merge base`), is not run again in the same round by the second asker (step 1 and step 3 together), writes no `skipped`, and leaves the first line of the exit's message, redacted, in the step note (any other failure of the run is kept the same way: SCN-VER-408)
 
 #### Scenario: SCN-VER-403 (−) A runner file by name in any directory, and a renamed support file, keep the finding
 - **Given** `test_a` is skipped at the base and at the head by an unchanged `skipif`, and the unit also changed `services/api/tests/pyproject.toml` (or a `pytest.ini`, `setup.cfg`, `tox.ini` or `conftest.py` in any directory), or renamed `tests/conftest.py` to `tests/conftest_bak.py`
 - **When** step 3 collects evidence
 - **Then** `test_a` is in the finding and in no hold: the file name is read in any directory, and a rename counts at its old path too
 
+#### Scenario: SCN-VER-405 (+) A change confined to comments, blank lines, test bodies beyond the skip and a new import leaves the hold
+- **Given** a module with `INTEGRATION = pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` and several tests marked `@INTEGRATION`, skipped at the base and at the head, and the unit changed one assertion line and added a comment line inside two of the test bodies after any skip, added `import json` (a name the base does not bind, load or name in a condition), and added a test that is not skipped at the end
+- **When** step 3 collects evidence
+- **Then** the skipped tests are in the hold of the file and in no finding, and the same holds for a comment-only change at module level, a blank line added or removed between functions, a whole new test method in a test class, a changed body or decorator of a test that is not the one asked about, and a statement added after the last skip of the test's own body
+- **And** the base report was asked once, and the file is read, parsed, tokenized and paired once for the path, not once for each test
+
+#### Scenario: SCN-VER-406 (−) A change outside those places keeps the finding, whatever the lists of (b) and (d) see
+- **Given** `test_a` was skipped at the base and at the head, the base report holds it as skipped, and the unit changed the file in one of these places: a flag that a string condition names (`skipif('FLAG')`); a class attribute that the body reads through `self`, or an added `setup_method`, or a base class's attribute or method; a helper method that calls the method that skips; a fixture reached through `pytestmark = pytest.mark.usefixtures(...)`, `@pytest.mark.usefixtures(...)` or `request.getfixturevalue(...)`; a module binding that a class binding hides; a statement run at import (`cfg.enabled = True`, `os.environ[...] = ...`, `ITEMS.append(1)`, `del FLAG`, `setattr(sys.modules[__name__], ...)`); a name bound by `for`, `with`, `:=`, `except ... as` or `match`; a `from x import *`; a module `__getattr__`; a changed module docstring, a statement added to or removed from the module, a class attribute, `setup_method`, helper or fixture; the decorators, the signature (its default values too) or the statements up to the last skip of `test_a` itself; an import that binds a name the base binds, loads or names in a condition, a builtin, `os`, `sys`, `platform` or `config`, a `*` or a `__future__` import, or an import beside another statement on its line; a deleted `def` line (so that its body joins the function above) or a `def` inserted in the middle of a helper
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and in no hold, because the changed line is not a comment, a blank line, a line of a collected test beyond what skips `test_a`, or a whole new import of a free name
+- **And** a test whose changed place is another test's body that sets run-time state, and a dynamic form there (`globals()`, `exec`), stay in the hold: that is the residual of L4-VER-092 (the production code, an outside module, run-time state, dynamic forms)
+
+#### Scenario: SCN-VER-407 (−) A file that sets up the interpreter or the dependencies, and a support module of the tests tree, keep the finding
+- **Given** `test_a` is skipped at the base and at the head by an unchanged `skipif`, and the unit also changed `sitecustomize.py`, `usercustomize.py`, `noxfile.py`, `setup.py`, `Pipfile`, `Pipfile.lock`, `poetry.lock`, `uv.lock`, `pdm.lock`, a `requirements*.txt` or a `constraints*.txt` (in any directory), or added, changed, deleted or renamed a `.py` file under a path that matches `tdd.test_globs` and that defines no test (`tests/__init__.py`, `tests/util.py`)
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and in no hold, and the base report is not asked for
+- **And** a changed `.py` file outside the tests tree, and a changed test file that defines a test, are not by themselves a reason
+
+#### Scenario: SCN-VER-408 (+/−) A failure of the base run that is not an exit is kept for the round too
+- **Given** the lookup of SCN-VER-402 and a base worktree run that fails with an exception that is not an exit of the checkout (a full disk, a git error)
+- **When** the lookup is asked twice in the round, and a second lookup object asks too
+- **Then** the first answer is no report, with the type and the first line of the message, redacted and cut, in the note (`no base report with statuses: OSError: ...`), the same answer comes back each time, the base's gate ran once, and every test of that file stays in the finding
+
 #### Scenario: SCN-VER-381 (+) The question names what a person needs to decide
 - **Given** the hold of SCN-VER-372
 - **When** the verdict question is raised
-- **Then** its context lists `tests.test_live::test_a` and `tests.test_live::test_b`, names the base report that held them as skipped, says what was compared (the file adds or changes no skip construct the harness reads and nothing inside the file that decides whether an unchanged skip skips, no support or runner-configuration file changed) and what is not told apart (a skip from production code the unit changed, from a module the test imports, or from a dynamic form), offers `accept` and `reject: <reason>`, and does not ask for a `WHEN ... THEN ...`
+- **Then** its context lists `tests.test_live::test_a` and `tests.test_live::test_b`, names the base report that held them as skipped, says what was compared (the file adds or changes no skip construct the harness reads and nothing inside the file that decides whether an unchanged skip skips, the unit changed the file only in places that cannot change why a test skips, no support, runner, setup or dependency file changed) and what is not told apart (production code the unit changed, a module outside the tests tree that the test imports, run-time state that another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`)), offers `accept` and `reject: <reason>`, and does not ask for a `WHEN ... THEN ...`
 
 #### Scenario: SCN-VER-382 (+) An accept waives the hold and the round can pass
 - **Given** the hold of SCN-VER-372 and `accept ran against the stack on 2026-11-25`
