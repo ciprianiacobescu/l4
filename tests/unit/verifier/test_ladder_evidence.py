@@ -611,3 +611,50 @@ def test_an_accepted_proof_is_not_rerun_and_a_rejection_is_rerun_at_a_new_head(r
     assert ["tests.test_owner::test_bulk_price", "human"] in _traced(third, 3)[CID]
     # the rejected one is run again at the new head: a second zero-value run, for it alone
     assert len(_gates(third, "test-extra-zero")) == 2
+
+
+# ---- the skipped-test hold joins the round at step 3 (L4-VER-092, SCN-VER-379) -------------------------
+
+SKIPPED_HOLD = (
+    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
+    "can affect them (1 tests)"
+)
+
+
+def _stub_evidence(coverage):
+    from l4.evidence.collect import Evidence, Hold
+    from l4.evidence.diffcov import CoverageCheck
+    from l4.evidence.scope import ScopeOutcome
+    from l4.evidence.testsran import TestsRanOutcome
+    from l4.verifier.verdicts import hold_id
+
+    views = {SKIPPED_HOLD: {"sha": "a" * 64, "paths": ["tests.test_live::test_a"]}}
+    return Evidence(
+        ScopeOutcome(), coverage, CoverageCheck(), TestsRanOutcome(), holds=[SKIPPED_HOLD],
+        hold_records=[Hold(hold_id(SKIPPED_HOLD), SKIPPED_HOLD, "skipped", ("tests/test_live.py",))],
+        ran_holds=1, hold_views=views,
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize("mode", ["off", "warn"])
+def test_scn_ver_379_the_skipped_hold_is_in_the_round_at_step_3_and_in_no_later_step(monkeypatch, mode):
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.evidence.diffcov import DiffCoverage
+    from l4.verifier import ladder
+    from l4.verifier.types import Verdict, VerifyResult
+
+    ev = _stub_evidence(DiffCoverage(100.0) if mode == "warn" else None)
+    monkeypatch.setattr(ladder, "collect_evidence", lambda *a, **k: ev)
+    monkeypatch.setattr(ladder, "_record_step", lambda vc, run, record: run.records.update({record.step: record}))
+    cfg = L4Config.model_validate({"verifier": {"evidence": {"diff_coverage": {"mode": mode}}}})
+    wb = SimpleNamespace(ref=SimpleNamespace(id=UNIT), cfg=cfg)
+    vc = SimpleNamespace(wb=wb)
+    result = VerifyResult(UNIT, 1, Verdict.FAIL, "b", "h")
+    run = ladder._Run(result)
+    assert ladder._collect_step(vc, run, "base", None, True, None, None) == []
+    assert result.holds == [SKIPPED_HOLD]
+    assert result.hold_views == {SKIPPED_HOLD: {"sha": "a" * 64, "paths": ["tests.test_live::test_a"]}}
+    ladder._quality_step(vc, run)  # step 6: the coverage holds only
+    assert result.holds == [SKIPPED_HOLD]

@@ -63,7 +63,13 @@ from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, fee
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.next_step import CI_NOT_FIXED, JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
+from l4.state.next_step import (
+    CI_NOT_FIXED,
+    JUDGE_VIEW_REJECTED,
+    NO_CONVERTIBLE_FINDING,
+    SKIPPED_TESTS_REJECTED,
+    UNCONVERTED_AND_JUDGE_VIEW,
+)
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -76,7 +82,7 @@ from l4.verifier.provenance import introduction_problem
 from l4.verifier.repairs import log_tail, repair_candidates
 from l4.verifier.report import write_round_evidence
 from l4.verifier.types import Finding, FixDecision, Severity, Verdict, VerifyResult
-from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE
+from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE, SKIPPED_REJECTED_TITLE
 
 
 def is_fix_unit(ref: UnitRef) -> bool:
@@ -692,10 +698,19 @@ def ci_not_fixed_detail(unfixed: Sequence[CiHistory]) -> str:
 
 
 def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
-    """Why a failed round with no fix group escalates: a person rejected a hold on the judge's view of the diff (a fix
-    unit cannot shrink it, L4-VER-044), or no finding can be converted (L4-OPS-022), or both: each way out is named."""
+    """Why a failed round with no fix group escalates: a person rejected a hold on the skipped tests of a changed file
+    (a fix unit cannot change test files, L4-VER-093), or on the judge's view of the diff (a fix unit cannot shrink it,
+    L4-VER-044), or no finding can be converted (L4-OPS-022), or both of the last two: each way out is named. A
+    skipped reject beside another cause keeps its own code and says so: the other cause shows once it is resolved."""
+    skipped = any(f.title == SKIPPED_REJECTED_TITLE for f in findings)
     view = any(f.title == JUDGE_VIEW_REJECTED_TITLE for f in findings)
-    others = any(f.source == "human" and f.blocking and f.title != JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    own = (JUDGE_VIEW_REJECTED_TITLE, SKIPPED_REJECTED_TITLE)
+    others = any(f.source == "human" and f.blocking and f.title not in own for f in findings)
+    if skipped:
+        text = "a person rejected a hold on skipped tests of a changed file: a fix unit cannot change test files"
+        if view or others:
+            text += " (another finding of a person also cannot be converted into a fix task)"
+        return text, SKIPPED_TESTS_REJECTED
     if view and others:
         return (
             "a person rejected a hold on the judge's view of the diff (a fix unit cannot shrink the diff), and "

@@ -31,14 +31,14 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 3. The round, the question and the reject (L4-VER-093, D2, D4)
 
-- [ ] 3.1 Tests first, in `tests/unit/verifier/test_hold_verdicts.py`, `test_hold_binding.py`, `test_verdict_question_texts.py`,
+- [x] 3.1 Tests first, in `tests/unit/verifier/test_hold_verdicts.py`, `test_hold_binding.py`, `test_verdict_question_texts.py`,
   `test_fixunit.py` (or a new `test_fixunit_skipped_hold.py`), `test_ladder_evidence.py` and a new
   `tests/unit/state/test_next_step_skipped.py`: `hold_kind` of the text is `skipped` and `hold_subjects` is empty; the
   question text of SCN-VER-381 (ids from `view.paths`, no WHEN THEN request); the binding of SCN-VER-383 (file edit,
   skipped set change); the accept of SCN-VER-382; the reject of SCN-VER-384 (title, source `human`, with and without a
   `WHEN ... THEN ...`, not converted, no fix unit, escalation code, `way_out` text); SCN-VER-385; SCN-VER-379 (diff
   coverage off) in `_collect_step`.
-- [ ] 3.2 Then: `HoldKind`, `hold_kind`, `hold_subjects`, `SKIPPED_REJECTED_TITLE`, `_hold_question`, `_hold_finding`
+- [x] 3.2 Then: `HoldKind`, `hold_kind`, `hold_subjects`, `SKIPPED_REJECTED_TITLE`, `_hold_question`, `_hold_finding`
   (`src/l4/verifier/verdicts.py`); `_collect_step` adds the holds and `result.hold_views` (`src/l4/verifier/ladder.py:970-995`);
   `src/l4/verifier/fixunit.py:262-266` treats the title like `JUDGE_VIEW_REJECTED_TITLE`; `_no_task_cause`
   (`src/l4/verifier/fixloop.py:694-712`) and the new code `SKIPPED_TESTS_REJECTED` with `skipped_way_out` in

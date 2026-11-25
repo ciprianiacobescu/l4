@@ -992,6 +992,10 @@ def _collect_step(
     run.evidence = ev
     ran = ev.ran.findings if ev.ran is not None else []
     result.findings.extend(ran)
+    # the holds of old skipped tests whose skip predates the unit (L4-VER-092) join here, beside the finding they
+    # replace: step 6 stops early when diff coverage is off, and the finding was raised in that case too
+    result.holds.extend(h.text for h in ev.ran_hold_records)
+    result.hold_views |= ev.hold_views
     return [f for f in ran if f.severity is Severity.BLOCKER]
 
 

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 NO_CONVERTIBLE_FINDING = "no_convertible_finding"  # `phase.changed{to: escalated, reason}` of the fix loop (L4-OPS-022)
 JUDGE_VIEW_REJECTED = "judge_view_rejected"  # a person rejected a hold on the judge's view of the diff (L4-VER-044)
 UNCONVERTED_AND_JUDGE_VIEW = "no_convertible_finding_and_judge_view_rejected"  # both causes in one round (L4-VER-044)
+SKIPPED_TESTS_REJECTED = "skipped_tests_rejected"  # a person rejected a hold on old skipped tests (L4-VER-093)
 CI_NOT_FIXED = "ci_not_fixed"  # a CI job failed again on a hand-off and no commit since changed a project file
 CONTINUES = "nothing: the harness continues at the next run"
 RUNBOOK_CORRUPT = "see docs/runbook.md section 7.9"
@@ -43,6 +44,18 @@ def judge_view_way_out(unit: str) -> str:
     )
 
 
+def skipped_way_out(unit: str) -> str:
+    """The step of a unit escalated with `skipped_tests_rejected` (L4-VER-093): a fix unit cannot change test files, so
+    no fix unit was made; a person changes the file, or replaces the answer with an accept once the tests ran."""
+    return (
+        "a fix unit cannot change test files, so none was made for the skipped tests; change the file in your own "
+        "commit on the unit branch (remove the skip, or make the tests able to run in the gate), then "
+        f"l4 retry --unit {unit} --reason TEXT; or, once you ran the tests, replace the answer: "
+        f'l4 questions answer Q-NNN --unit {unit} --text "accept ..." --replace, then l4 retry --unit {unit} '
+        "--reason TEXT"
+    )
+
+
 def ci_not_fixed_way_out(unit: str) -> str:
     """The step of a unit escalated with `ci_not_fixed` (L4-OPS-023): the same CI job failed again on a hand-off and no
     commit since changed a project file, so a fix unit cannot see the failure either. A person fixes it, or gives the
@@ -58,13 +71,16 @@ def ci_not_fixed_way_out(unit: str) -> str:
 
 def way_out(unit: str, halt_reason: str | None) -> str | None:
     """The unit's own way out of an escalation: `feedback_way_out` for `no_convertible_finding`, `judge_view_way_out`
-    for `judge_view_rejected`, `ci_not_fixed_way_out` for `ci_not_fixed`, None for every other reason."""
+    for `judge_view_rejected`, `skipped_way_out` for `skipped_tests_rejected`, `ci_not_fixed_way_out` for
+    `ci_not_fixed`, None for every other reason."""
     if halt_reason == CI_NOT_FIXED:
         return ci_not_fixed_way_out(unit)
     if halt_reason == NO_CONVERTIBLE_FINDING:
         return feedback_way_out(unit)
     if halt_reason == JUDGE_VIEW_REJECTED:
         return judge_view_way_out(unit)
+    if halt_reason == SKIPPED_TESTS_REJECTED:
+        return skipped_way_out(unit)
     if halt_reason == UNCONVERTED_AND_JUDGE_VIEW:  # each cause keeps its own way out
         return (
             f"two causes. For the finding no fix task can be derived from: {feedback_way_out(unit)}. "

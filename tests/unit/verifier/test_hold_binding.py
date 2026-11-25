@@ -99,3 +99,55 @@ def test_the_question_lists_every_unseen_path_and_points_at_verification_md_when
     text = " ".join(_hold_question(hold, 1, (), paths=many).context.split())
     assert "src/gen/f0000.py" in text and "src/gen/f0499.py" not in text and "see verdict.json" in text
     assert "400 more" in text or "more unseen" in text
+
+
+# ---- the hold on skipped tests that predate the unit: bound to the head blob of the file and the skipped ids ------
+
+SKIPPED = (
+    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
+    "can affect them (2 tests)"
+)
+IDS = ["tests.test_live::test_a", "tests.test_live::test_b"]
+
+
+def _view(blob: str, ids: list[str]) -> dict:
+    import hashlib
+
+    return {SKIPPED: {"sha": hashlib.sha256("\0".join([SKIPPED, blob, *ids]).encode()).hexdigest(), "paths": ids}}
+
+
+def _in_force(accepted: dict, now: dict):
+    from l4.verifier.verdicts import hold_sha256
+
+    events = accept_event_sha(hold_sha256(SKIPPED, accepted))
+    return effective_verdicts(events, {hold_id(SKIPPED): hold_sha256(SKIPPED, now)})
+
+
+def accept_event_sha(sha: str) -> list[LedgerEvent]:
+    target = hold_id(SKIPPED)
+    return [
+        ev("question.raised", id="Q-001", target=target, round=1, text_sha256=sha),
+        ev("human.verdict", question="Q-001", target=target, decision="accept", by="alex", reason="ran them",
+           text_sha256=sha),
+    ]  # fmt: skip
+
+
+def test_scn_ver_382_an_accept_waives_the_hold_while_the_file_and_the_skipped_set_are_the_same():
+    view = _view("blob-1", IDS)
+    in_force = _in_force(view, _view("blob-1", IDS))
+    assert in_force[hold_id(SKIPPED)].decision == "accept" and unresolved_holds([SKIPPED], in_force) == []
+
+
+def test_scn_ver_383_an_edit_of_the_file_voids_the_accept_and_the_hold_is_asked_again():
+    in_force = _in_force(_view("blob-1", IDS), _view("blob-2", IDS))
+    assert hold_id(SKIPPED) not in in_force and unresolved_holds([SKIPPED], in_force) == [SKIPPED]
+
+
+def test_scn_ver_383_a_change_of_the_skipped_set_voids_the_accept():
+    in_force = _in_force(_view("blob-1", IDS), _view("blob-1", IDS[:1]))
+    assert unresolved_holds([SKIPPED], in_force) == [SKIPPED]
+
+
+def test_the_question_lists_the_ids_of_the_view():
+    text = " ".join(_hold_question(SKIPPED, 1, (), paths=IDS).context.split())
+    assert "tests.test_live::test_a" in text and "tests.test_live::test_b" in text

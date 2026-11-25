@@ -887,3 +887,101 @@ def test_scn_ver_353_a_half_key_block_in_a_record_that_0_4_59_wrote_is_not_in_th
 
     with_excerpt = _failed_outcome(excerpt=f"  E   RuntimeError: {begin}\n  E   MIIEowIBAAKCAQEA" + "q" * 60)
     assert "MIIEow" not in _ui_hold_notes(UI_CRITERION.id, [with_excerpt], Redactor({}).redact_text)
+
+
+# ---- the hold on skipped tests that predate the unit (L4-VER-092, L4-VER-093) ---------------------------
+
+SKIPPED = (
+    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
+    "can affect them (2 tests)"
+)
+SKIPPED_IDS = ["tests.test_live::test_a", "tests.test_live::test_b"]
+SKIPPED_VIEW = {SKIPPED: {"sha": "a" * 64, "paths": SKIPPED_IDS}}
+SKIPPED_TITLE = "Rejected hold: a skipped test is not accepted"
+
+
+def test_a_skipped_hold_has_its_own_kind_and_names_no_subject():
+    assert hold_kind(SKIPPED) == "skipped" and hold_subjects(SKIPPED) == ()
+
+
+def test_a_judge_finding_on_the_file_of_a_skipped_hold_is_not_about_the_hold():  # SCN-VER-385
+    found = judge("The assertions of tests/test_live.py are weak", "test_a in tests/test_live.py asserts nothing")
+    assert subsumed_findings([found], [SKIPPED]) == {}
+    out = settle_holds(
+        [found], [SKIPPED], {hold_id(SKIPPED): verdict(SKIPPED, "accept", "ran them")}, {"Q-004": {found.id}}
+    )
+    assert out == [found]  # the accept settles nothing: the finding is asked on its own
+
+
+def test_scn_ver_381_the_question_names_the_file_the_ids_and_what_each_answer_does(tmp_path):
+    class Sink:
+        def append(self, event_type: str, /, **data) -> None:
+            pass
+
+    raise_verdict_questions(
+        tmp_path, "u", outcomes=[], criteria=[], trace=[], findings=[], existing=None, consumed=(), raised=(),
+        ledger=Sink(), round_no=1, redactor=Redactor({}), holds=[SKIPPED], hold_views=SKIPPED_VIEW,
+    )  # fmt: skip
+    text = " ".join((tmp_path / "questions.md").read_text().split())
+    assert "tests/test_live.py" in text and "(2 tests)" in text
+    assert "- tests.test_live::test_a" in text and "- tests.test_live::test_b" in text
+    assert "no base run was made" in text and "adds or changes no skip that can affect these tests" in text
+    assert "`accept` means you ran them where they can run, or know they pass there" in text
+    assert "for this content of the file only" in text
+    assert "`reject: <reason>` ends the round" in text and "a fix unit cannot change test files" in text
+    assert "WHEN" not in text and "fixed by a fix unit" not in text and "a fix unit can be made" not in text
+    assert "accept" in text and "reject: <reason>" in text  # the options
+
+
+def test_the_question_lists_at_most_the_bounded_number_of_ids_and_points_at_verdict_json():
+    from l4.verifier.verdicts import _hold_question
+
+    many = [f"tests.test_live::test_{i:04d}" for i in range(500)]
+    text = " ".join(_hold_question(SKIPPED, 1, (), paths=many).context.split())
+    assert "test_0000" in text and "test_0499" not in text and "see verdict.json" in text
+
+
+def test_scn_ver_384_a_reject_is_the_persons_finding_even_with_a_scenario():
+    from l4.verifier.verdicts import SKIPPED_REJECTED_TITLE
+
+    for reason in ("run them in the gate", "run them in the gate. WHEN the gate runs THEN they pass", ""):
+        finding, v, plan = _plan(SKIPPED, reason)
+        assert finding.source == "human" and finding.severity is Severity.MAJOR and finding.id == hold_id(SKIPPED)
+        assert finding.title == SKIPPED_REJECTED_TITLE == SKIPPED_TITLE
+        assert "A fix unit cannot change test files" in finding.detail
+        if reason:
+            assert reason in finding.detail
+        assert plan.groups == [] and plan.delta is None and plan.consumed == []
+        assert len(plan.not_converted) == 1 and "a skipped-test hold" in plan.not_converted[0]
+
+
+def test_a_feedback_only_plan_consumes_the_rejected_skipped_question():
+    v = verdict(SKIPPED, "reject", "run them")
+    [human] = settle_holds([], [SKIPPED], {v.target: v})
+    r = VerifyResult(UNIT, 3, Verdict.FAIL, "b", "h")
+    r.findings = [human, _feedback_finding()]
+    plan = plan_fix_unit([], r, [v], ordinal=1, fix_minor=False)
+    assert plan.feedback_only and len(plan.not_converted) == 1 and plan.consumed == ["Q-004"]
+
+
+def test_scn_ver_384_the_round_escalates_with_skipped_tests_rejected_and_the_way_out():
+    from l4.state.next_step import skipped_way_out, way_out
+    from l4.verifier.fixloop import _no_task_cause
+
+    finding, _, _ = _plan(SKIPPED, "run them in the gate")
+    why, code = _no_task_cause([finding])
+    assert code == "skipped_tests_rejected" and "skipped" in why and "cannot change test files" in why
+    out = way_out("openspec:x", code)
+    assert out == skipped_way_out("openspec:x")
+    assert "your own commit" in out and "l4 retry --unit openspec:x --reason TEXT" in out and "--replace" in out
+    assert "l4 feedback add" not in out
+
+
+def test_a_skipped_reject_beside_another_unconvertible_finding_keeps_its_own_code_and_says_so():
+    from l4.verifier.fixloop import _no_task_cause
+
+    skipped, _, _ = _plan(SKIPPED, "run them")
+    other = Finding(Severity.MAJOR, "Rejected hold: diff coverage: not measured", "d", "human", id="H-2")
+    why, code = _no_task_cause([skipped, other])
+    assert code == "skipped_tests_rejected" and "another finding of a person" in why
+    assert _no_task_cause([other])[1] == "no_convertible_finding"

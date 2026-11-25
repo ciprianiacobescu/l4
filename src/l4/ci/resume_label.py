@@ -16,6 +16,7 @@ from l4.state.next_step import (
     CI_NOT_FIXED,
     JUDGE_VIEW_REJECTED,
     NO_CONVERTIBLE_FINDING,
+    SKIPPED_TESTS_REJECTED,
     UNCONVERTED_AND_JUDGE_VIEW,
     way_out,
 )
@@ -113,7 +114,7 @@ def halted_section(
             f"To go on: {way_out(unit, reason_code)}. The retry is also the label `{label}` on this merge request, "
             "after the change is pushed.",
         ])  # fmt: skip
-    if phase == "escalated" and reason_code == JUDGE_VIEW_REJECTED:
+    if phase == "escalated" and reason_code in (JUDGE_VIEW_REJECTED, SKIPPED_TESTS_REJECTED):
         return f"### Escalated: {why}\n\nTo go on: {way_out(unit, reason_code)}."
     if phase == "escalated":
         kind = "feedback" if feedback else "fix"

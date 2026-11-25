@@ -104,16 +104,21 @@ _UI_HOLD = re.compile(r"^UI criterion (C-[0-9a-f]{8}) has no end-to-end test")  
 JUDGE_VIEW_PREFIX = "judge view: "  # the holds on what the judge could not see of the diff (L4-VER-043)
 LEGACY_LENGTH_HOLD = "the diff is longer than 120000 characters: the judge saw only the start"  # the 0.4.14 text
 JUDGE_VIEW_REJECTED_TITLE = "Rejected hold: the judge could not see all of the diff"
-HoldKind = Literal["scope", "coverage", "judge_view", "other"]
+SKIPPED_PREFIX = "skipped: existing tests in "  # the holds on old skipped tests that predate the unit (L4-VER-092)
+SKIPPED_REJECTED_TITLE = "Rejected hold: a skipped test is not accepted"
+HoldKind = Literal["scope", "coverage", "judge_view", "skipped", "other"]
 
 
 def hold_kind(text: str) -> HoldKind:
     """What a hold is about, from its text (the texts are fixed by `evidence/scope.py`, `evidence/diffcov.py` and the
     judge step): the two kinds a fix task can be derived from, `judge_view` (what the judge could not see of the diff:
-    a person's decision, never a fix task), else `other` (not measured, unsafe path, no scope declared, a UI criterion
-    without an e2e test, a judge reply that was discarded...)."""
+    a person's decision, never a fix task), `skipped` (old tests that are skipped in a changed file by a skip the unit
+    did not add: a person's decision, never a fix task, L4-VER-093), else `other` (not measured, unsafe path, no scope
+    declared, a UI criterion without an e2e test, a judge reply that was discarded...)."""
     if _SCOPE_HOLD.match(text):
         return "scope"
+    if text.startswith(SKIPPED_PREFIX):
+        return "skipped"
     if text.startswith(JUDGE_VIEW_PREFIX) or text == LEGACY_LENGTH_HOLD or _SPEC_VIEW_HOLD.match(text):
         return "judge_view"
     return "coverage" if text.startswith(_COVERAGE_HOLD) else "other"
@@ -127,7 +132,8 @@ def ui_hold_criterion(text: str) -> str | None:
 
 def hold_subjects(text: str) -> tuple[str, ...]:
     """The files (scope), `path::qualname` functions (coverage) or files the judge did not see (judge view) a hold
-    names; none for another kind."""
+    names; none for another kind. A skipped-test hold names its file and no subject: a person's statement about skipped
+    tests settles no judge finding about the file's assertions (L4-VER-093)."""
     kind = hold_kind(text)
     if kind == "scope":
         return (_BACKTICKED.findall(text)[0],)
@@ -255,6 +261,14 @@ def _hold_finding(hold: str, verdict: HumanVerdict, quoted: Sequence[Finding]) -
         )
         detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
         return Finding(Severity.MAJOR, JUDGE_VIEW_REJECTED_TITLE, detail, "human", id=hold_id(hold))
+    if kind == "skipped":  # a fix unit cannot change test files: a reject is the person's, whatever its reason says
+        what = (
+            "A fix unit cannot change test files, so no task comes from this reject: change the file in a commit of "
+            "your own (remove the skip, or make the tests able to run in the gate), or accept the hold once you ran "
+            "the tests."
+        )
+        detail = f"{what} Hold: {_flat(hold, 400)} {context}".rstrip() + rejection_note(verdict)
+        return Finding(Severity.MAJOR, SKIPPED_REJECTED_TITLE, detail, "human", id=hold_id(hold))
     if kind == "scope" and reason:
         what = (
             f"Remove or relocate the change to `{subjects[0]}`: the spec does not name its module. Revert it from "
@@ -783,6 +797,15 @@ def _hold_question(
             "shrink the diff, so `reject` stops the unit (escalated with judge_view_rejected): then split the change "
             "into smaller units."
         )
+    elif kind == "skipped":
+        answer = (
+            "The unit's diff adds or changes no skip that can affect these tests (the skip markers and calls of the "
+            "file are compared at the base and at the head), and no base run was made, so this does not say they "
+            "passed before. Often the cause is an environment the gate does not have (a stack, a service). `accept` "
+            "means you ran them where they can run, or know they pass there; it holds for this content of the file "
+            "only. `reject: <reason>` ends the round, because a fix unit cannot change test files: no fix unit is "
+            "made and the unit is escalated with skipped_tests_rejected; then change the file in your own commit."
+        )
     else:
         answer = "Answer `accept` if the unit can go on as it stands, " + (
             "or `reject` and say why: a rejected hold is fixed by a fix unit."
@@ -794,8 +817,13 @@ def _hold_question(
     if paths:
         shown = [f"- {p}" for p in paths[:QUESTION_MAX_PATHS]]
         more = len(paths) - QUESTION_MAX_PATHS
-        tail = [f"- and {more} more unseen files: see verdict.json"] if more > 0 else []
-        title = "The spec file the judge did not see in full" if spec else "The files the judge did not see"
+        noun = "skipped tests" if kind == "skipped" else "unseen files"
+        tail = [f"- and {more} more {noun}: see verdict.json"] if more > 0 else []
+        title = (
+            "The skipped tests" if kind == "skipped"
+            else "The spec file the judge did not see in full" if spec
+            else "The files the judge did not see"
+        )  # fmt: skip
         listed = ["", f"{title} ({len(paths)}):", *shown, *tail]
     context = "\n".join(
         [
