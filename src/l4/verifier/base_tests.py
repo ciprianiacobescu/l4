@@ -23,13 +23,14 @@ from typing import Any
 
 from l4.config.schema import duration_seconds
 from l4.evidence.skippred import EARLIER_SOURCE, STEP1_SOURCE, WORKTREE_SOURCE, BaseSkips
+from l4.exitcodes import L4Exit
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
 from l4.implementer.excerpt import case_excerpt
 from l4.implementer.guards import IGNORE_FILE_GLOBS
 from l4.implementer.test_locate import file_of_id
-from l4.implementer.workbench import Workbench
+from l4.implementer.workbench import BaseRun, Workbench
 from l4.security.protected import glob_match
 from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
@@ -400,15 +401,31 @@ def _base_reference(
     return (report, "base worktree", "") if report is not None else (None, "", why)
 
 
+def _exit_reason(wb: Workbench, exc: L4Exit) -> str:
+    """The first line of an exit's message, redacted and cut: it goes into a note that is committed."""
+    lines = str(exc).splitlines()
+    return wb.redactor.redact_text(lines[0] if lines else type(exc).__name__)[:300]
+
+
 def _run_base_gate(wb: Workbench, base_sha: str, command: str) -> tuple[TestReport | None, str]:
-    """The test gate in a worktree of the base, network off: (its report, why not). A report's skipped ids are kept on
-    `wb.base_skips`, whoever asked (step 1's reference, or step 3's lookup), so that no round runs the gate twice."""
+    """The test gate in a worktree of the base, network off: (its report, why not). The run is kept on `wb.base_runs`,
+    whoever asked (step 1's reference, or step 3's lookup), and so is its failure (no report, or an exit of the
+    checkout, which is raised again to the caller that made the run): no round runs the gate twice."""
+    key = (base_sha, command)
+    if (kept := wb.base_runs.get(key)) is not None:
+        return kept.report, kept.why
     spec = GateSpec("base-tests-base", command, _reports(wb), "junit", duration_seconds(wb.cfg.gates.timeout))
-    with base_checkout(wb, base_sha) as tree:
-        result = run_gate_at(wb, tree, spec, network=False)
+    try:
+        with base_checkout(wb, base_sha) as tree:
+            result = run_gate_at(wb, tree, spec, network=False)
+    except L4Exit as exc:
+        wb.base_runs[key] = BaseRun(None, _exit_reason(wb, exc))
+        raise
     if result.report is None:
-        return None, f"the base's test gate gave no report ({result.reason})"
-    wb.base_skips[(base_sha, command)] = frozenset(_skipped_ids(result.report))
+        why = f"the base's test gate gave no report ({result.reason})"
+        wb.base_runs[key] = BaseRun(None, why)
+        return None, why
+    wb.base_runs[key] = BaseRun(result.report)
     return result.report, ""
 
 
@@ -439,16 +456,20 @@ class SkipLookup:
     (i) the reference step 1 used this round, when it was a full report (`step1`, from `Outcome.base_report`: a cached
         baseline or a base worktree run; never R1, which is the base's test files on the unit's code);
     (ii) the newest earlier round's `integrity.base_tests` of this base sha and command that has a `skipped` key;
-    (iii) the run of the test gate in a base worktree, kept on the workbench (`wb.base_skips`) so that no round runs it
-        twice: step 1's reference may have made it already (it keeps the result even when it hands nothing over, for
+    (iii) the run of the test gate in a base worktree, kept on the workbench (`wb.base_runs`) so that no round runs it
+        twice: step 1's reference may have made it already (it keeps the run even when it hands nothing over, for
         example an all-kept or all-green step 1); else this lookup makes it. The implementer's `wb.baselines` is left
         as it is.
 
-    The answer is kept in the object, so a round that asks twice gets the same one. No report is `skipped=None`."""
+    The answer is kept in the object, so a round that asks twice gets the same one. No report is `skipped=None`.
+
+    The verifier builds a workbench for each round, so (iii) lives for one round. `record` is what carries it to the
+    next: the round writes it into its own `integrity.base_tests`, and the next round's lookup finds it at (ii)."""
 
     def __init__(self, wb: Workbench, base_sha: str, round_no: int, step1: TestReport | None = None) -> None:
         self.wb, self.base_sha, self.round_no, self.step1 = wb, base_sha, round_no, step1
         self._found: BaseSkips | None = None
+        self._ran: TestReport | None = None  # the full report of a base worktree run, when the answer came from one
 
     def __call__(self) -> BaseSkips:
         if self._found is None:
@@ -461,12 +482,35 @@ class SkipLookup:
             return BaseSkips(frozenset(_skipped_ids(self.step1)), STEP1_SOURCE)
         if (recorded := _recorded_skips(wb, self.base_sha, command, self.round_no)) is not None:
             return BaseSkips(frozenset(recorded), EARLIER_SOURCE)
-        key = (self.base_sha, command)
-        if key not in wb.base_skips:  # not run by step 1's reference either (`_run_base_gate` keeps its result)
-            report, why = _run_base_gate(wb, self.base_sha, command)
-            if report is None:
-                return BaseSkips(None, "", f"no base report with statuses: {why}")
-        return BaseSkips(wb.base_skips[key], WORKTREE_SOURCE)
+        try:
+            report, why = _run_base_gate(wb, self.base_sha, command)  # kept: step 1 may have made it
+        except L4Exit as exc:  # `gates.setup` failed at the merge base: say so, and leave the finding in place
+            return BaseSkips(None, "", f"no base report with statuses: {_exit_reason(wb, exc)}")
+        if report is None:
+            return BaseSkips(None, "", f"no base report with statuses: {why}")
+        self._ran = report
+        return BaseSkips(frozenset(_skipped_ids(report)), WORKTREE_SOURCE)
+
+    def record(self, current: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The `integrity.base_tests` of this round after the lookup, when it must change, else None. Only a full report
+        is written: a lookup that ran the base gate (a full report, every status) adds `skipped` to the round's record
+        when that has none, or makes the whole record (`passed`, `collection_errors` and `skipped`, as step 1 writes it
+        from a full reference) when step 1 wrote none. `current` is not changed in place."""
+        if self._ran is None:
+            return None
+        command = self.wb.cfg.gates.test.command
+        skipped = _skipped_ids(self._ran)
+        if current is None:
+            return {
+                "base_sha": self.base_sha,
+                "command": command,
+                "passed": sorted(i for i, c in self._ran.tests.items() if c.status == "passed"),
+                "collection_errors": list(self._ran.collection_errors),
+                "skipped": skipped,
+            }
+        if current.get("base_sha") != self.base_sha or current.get("command") != command or "skipped" in current:
+            return None
+        return {**current, "skipped": skipped}
 
 
 def _support_reverted(

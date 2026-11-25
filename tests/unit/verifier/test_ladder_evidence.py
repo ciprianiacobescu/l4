@@ -666,3 +666,39 @@ def test_scn_ver_379_the_skipped_hold_is_in_the_round_at_step_3_and_in_no_later_
     assert result.hold_views == {SKIPPED_HOLD: {"sha": "a" * 64, "paths": ["tests.test_live::test_a"]}}
     ladder._quality_step(vc, run)  # step 6: the coverage holds only
     assert result.holds == [SKIPPED_HOLD]
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_g2_a_base_run_made_by_the_lookup_reaches_the_integrity_record_of_the_round(monkeypatch, tmp_path, raises):
+    """The lookup ran the base's gate on a workbench that dies with the round: the statuses go into this round's
+    `integrity.base_tests`, which `verdict.json` carries to the next round, also when evidence collection fails."""
+    from types import SimpleNamespace
+
+    from l4.config.schema import L4Config
+    from l4.evidence.diffcov import DiffCoverage
+    from l4.gates.junit import TestCase, TestReport
+    from l4.verifier import base_tests, ladder
+    from l4.verifier.integrity import IntegrityReport
+    from l4.verifier.types import Verdict, VerifyResult
+
+    full = TestReport({"t::a": TestCase("t::a", "passed"), "t::b": TestCase("t::b", "skipped")})
+    monkeypatch.setattr(base_tests, "_run_base_gate", lambda wb, sha, command: (full, ""))
+
+    def collect(*args, **kwargs):
+        kwargs["base_skips"]()  # the lookup of rule (a)
+        if raises:
+            raise RuntimeError("evidence fell over")
+        return _stub_evidence(DiffCoverage(100.0))
+
+    monkeypatch.setattr(ladder, "collect_evidence", collect)
+    monkeypatch.setattr(ladder, "_record_step", lambda vc, run, record: run.records.update({record.step: record}))
+    cfg = L4Config.model_validate({})
+    wb = SimpleNamespace(ref=SimpleNamespace(id=UNIT, path=tmp_path), cfg=cfg, base_runs={})
+    result = VerifyResult(UNIT, 3, Verdict.FAIL, "b" * 40, "h" * 40)
+    result.integrity = IntegrityReport()
+    run = ladder._Run(result)
+    ladder._collect_step(SimpleNamespace(wb=wb, round=3), run, "b" * 40, None, True, None, None)
+    assert result.integrity.base_tests == {
+        "base_sha": "b" * 40, "command": cfg.gates.test.command, "passed": ["t::a"], "collection_errors": [],
+        "skipped": ["t::b"],
+    }  # fmt: skip

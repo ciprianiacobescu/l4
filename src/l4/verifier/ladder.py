@@ -975,6 +975,15 @@ def _merged(unit: TestReport | None, browser: TestReport | None) -> TestReport |
     return TestReport({**unit.tests, **browser.tests}, [*unit.collection_errors, *browser.collection_errors])
 
 
+def _keep_base_run(result: VerifyResult, lookup: base_tests.SkipLookup) -> None:
+    """A base worktree run of the lookup goes into this round's `integrity.base_tests` (L4-VER-092): the next round, on
+    a workbench of its own, reads the statuses there instead of running the base's gate again."""
+    if result.integrity is None:
+        return
+    if (record := lookup.record(result.integrity.base_tests)) is not None:
+        result.integrity.base_tests = record
+
+
 def _collect_step(
     vc: VerifyContext,
     run: _Run,
@@ -988,17 +997,19 @@ def _collect_step(
     tests-ran findings join the round here (the blockers are returned: they stop the ladder like a failed gate);
     step 6 reports the coverage ones."""
     wb, result = vc.wb, run.result
-    run.base_skips = run.base_skips or base_tests.SkipLookup(wb, base_sha, vc.round, run.base_report)
+    lookup = run.base_skips = run.base_skips or base_tests.SkipLookup(wb, base_sha, vc.round, run.base_report)
     try:
         ev = collect_evidence(
             wb, base_sha, result.head_sha, report, cov_dir, wb.ref, new_tests=set(result.red_green),
             gate_passed=gate_ok, cov_nonce=(extra or {}).get("L4_COV_NONCE"), step1=run.scope,
-            base_skips=run.base_skips,
+            base_skips=lookup,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001
         log.warning("%s: evidence collection failed: %s", wb.ref.id, exc)
         result.holds.append(f"evidence: could not be collected ({type(exc).__name__})")
+        _keep_base_run(result, lookup)
         return []
+    _keep_base_run(result, lookup)
     run.evidence = ev
     ran = ev.ran.findings if ev.ran is not None else []
     result.findings.extend(ran)

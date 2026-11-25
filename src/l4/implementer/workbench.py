@@ -237,6 +237,15 @@ class GateMark:
 
 
 @dataclass(frozen=True)
+class BaseRun:
+    """One run of the test gate in a worktree of the base, as the verifier made it in a round (L4-VER-092): its full
+    report, with every status, or None and why the gate gave none. Kept on `Workbench.base_runs` for the round."""
+
+    report: TestReport | None
+    why: str = ""
+
+
+@dataclass(frozen=True)
 class KeptRun:
     """The last accepted green gate of this workbench's job (L4-IMP-088): the tree it tested, the gate's digest, its
     test report and the green commit. In memory only; a later baseline of the same tree reuses the report."""
@@ -275,9 +284,11 @@ class Workbench:
     runner: ProcRunner = field(default_factory=ProcRunner)
     baselines: dict[str, TestReport] = field(default_factory=dict)
     static_baselines: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)  # per base commit
-    # (base commit, test command) -> the ids a base worktree run held as skipped (L4-VER-092): kept apart from
-    # `baselines`, whose reports the implementer's red and green steps compare against
-    base_skips: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
+    # (base commit, test command) -> the run of the test gate in a base worktree that the verifier made in this round,
+    # its report or why it gave none (L4-VER-092). Kept apart from `baselines`, whose reports the implementer's red and
+    # green steps compare against. The verifier builds a workbench for each round, so it lives for one round: the next
+    # round reads what step 1 wrote into `integrity.base_tests` (`SkipLookup.record`).
+    base_runs: dict[tuple[str, str], BaseRun] = field(default_factory=dict)
     # (base commit, job) -> how a failing CI step ran at that base: (reproduced|skipped, reason), M1.10 decision 4
     ci_reproductions: dict[tuple[str, str], tuple[str, str | None]] = field(default_factory=dict)
     setup_at: str | None = None  # the HEAD `gates.setup` last ran at, valid until an agent step has run
