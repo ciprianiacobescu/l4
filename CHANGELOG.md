@@ -14,6 +14,45 @@ consumer can decide when to move its pin (`l4 upgrade --harness-ref vX.Y.Z`).
 
 ### Added
 - `agent.time_limit` records a step that reached the agent's time limit (`task`, `phase`, `attempt`, `profile`, `limit_s`, `as_limit`, and `reason` when it counted as a failed attempt), and `agent.idle` says which kind of stall it was, whether it was a limit and how many files the step left uncommitted. The progress log has a warning line for each. The runbook tells how to read them and when to move a profile later in `roles.implementer`, which L4 never does for you (L4-IMP-116).
+- `gates.test.red_check` (`full`, the default, or `targeted`) lets a red step run only the test files it added. Red's job
+  is to add failing tests, and its test gate ran the whole suite anyway: in one TypeScript consumer plan of seven units
+  66 red steps ran the whole suite, about 4.9 minutes each and about 320 minutes in all, and 8 red steps failed with `red
+  broke existing tests` on end-to-end stack or journey tests that were probably flakes (that is inferred, not proven).
+  With `targeted` and a `gates.test.targeted` command that holds `{files}` as a word of its own, a red step that only
+  added new test modules (no stub, nothing put back by red scope, no named or stale test, no changed existing file, no
+  support file, at most 50 files) runs that command with its files, as the gate `test-targeted`, and judges the new
+  tests against the base report with their results added. The step runs the whole suite instead, in the same step and as
+  before, when the targeted run is not complete: no report, a collection error, an old test ran, a file owns no test or a
+  test no file, or a new test passes or is skipped. The ledger says which: `task.red_ok` has `check` and `files`, and
+  `task.red_check_full{why, detail}` says why a step of a `targeted` configuration ran the whole suite. A targeted
+  command that times out fails the attempt, with no whole run. A `targeted` configuration without a `{files}` word, with
+  `{grep}` or with `{files}` inside another word does not load (exit 2); `{grep}` is not supported. Green, the near-pass
+  carry, the next task's baseline and verification are unchanged: they still run the whole suite and read the measured
+  baseline. The key is off by default, because a targeted red moves where a new test file that breaks an old test by
+  interaction shows, from red to green. **Upgrade:** 0.4.60 does not load the key (`extra: forbid`): move the pin first,
+  then set the key, and remove it before you move the pin back. Run the targeted and the whole command once and compare
+  the test ids they print before you set it (L4-CFG-007, L4-GAT-007..009, L4-IMP-117..120).
+- In a unit that has a targeted red, a green whose whole run still fails a test that passed in the base report (after
+  its re-run) records `task.red_check_disabled` once, and every later red step of the unit and of its fix units runs the
+  whole suite (`task.red_check_full{why: unit_switched}`). For a task whose own red was targeted, so does a red test that
+  the whole run does not report, a collection error that names a file of that red (`green_collection`), and a whole run
+  with no readable report or a timeout (`green_no_report`). The trigger is the unit, since an interaction that depends
+  on order can first show in a later task's green, and the record is read from the unit's ledger, so it is made also
+  after the key was set back to `full`. `l4 retry` and `l4 resume` keep the switch, and `l4 restart`, which starts a new
+  ledger, reads the key again. For a task whose own red was targeted, the failed attempt's reason ends with `; the red
+  step of this task ran only its new test files (L4-IMP-122): ...`: for a regression or a file that does not collect it
+  tells the agent to report status blocked with a question that names the test file (an answer that names the file
+  unfreezes it, L4-IMP-015); for a red test that the whole suite reports under another id, it says that the targeted
+  command names the tests differently and that a person fixes `gates.test.targeted` and runs `l4 restart`. The red files
+  are frozen in green, so green cannot repair a new test file that really broke an old test: this names the cause and
+  ends the saving for the unit.
+- A task resumes at green whenever it starts again after its red commit (a deadline, a retry, an answered question).
+  For a targeted red, `resume_red` now measures the base with the red's files removed from the work tree for its one
+  whole run and put back byte for byte, as the red step measured its own base, so green sees an old test that those
+  files break and records the switch. When the red commit does not match its record, or the files cannot be put back
+  exactly, it measures at the red commit as before and records `task.red_check_disabled` (`resume_files`,
+  `resume_put_back`). A targeted path that starts with `@` is refused, since pytest reads `@file` as an argument file
+  (L4-IMP-117, L4-IMP-119, L4-IMP-121, L4-IMP-122).
 
 ## 0.4.60 (2026-11-23)
 

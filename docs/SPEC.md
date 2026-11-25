@@ -725,6 +725,15 @@ never config overrides; doctor prints both resolved paths.
 
 **L4-CFG-006 A judge role holds only adapters that can judge.** Loading `.l4/config.yaml` MUST fail with a configuration error (exit 2 in every command, `l4 doctor` included) when `roles.judges`, `roles.plan_judges` (from 0.4.59, L4-YOLO-095), `roles.verifier_agent`, `roles.clarifier` or `roles.s1_judge` names a defined profile that has an `adapter` and whose adapter is not one of `JUDGE_ADAPTERS` (`claude-code`, `codex`, `opencode`, `kiro-cli`, `copilot-cli`, `fake`; `kiro-cli` since 0.4.19, in every one of these roles, L4-KJD-008; `copilot-cli` since 0.4.27, L4-FAC-014). The message SHALL name the profile, the role, the adapter when it is one the harness knows (never an unknown configured value), the allowlist and the fix. A backend profile (no `adapter`) SHALL load in these roles as before, and so SHALL an undefined profile name: `l4 run`'s preflight and doctor CFG-002 report it. The allowlist MUST be a single constant (`l4.config.roles.JUDGE_ADAPTERS`) that the selection's `serves=` filter and this check both read.
 
+**L4-CFG-007 A red step's test run is chosen by `gates.test.red_check`.** The key `gates.test.red_check` SHALL be
+`full` (the default) or `targeted`. With `full`, `gates.test.targeted` SHALL not be read: a configuration that sets it
+and omits `red_check` loads as before. With `targeted`, loading `.l4/config.yaml` MUST fail with a configuration error
+(exit 2 in every command, `l4 doctor` included) unless `gates.test.targeted` splits into words as a shell would
+(`shlex`), holds exactly one word equal to `{files}`, and holds no other word that contains `{files}` or `{grep}`. The
+message SHALL name `gates.test.red_check` and `gates.test.targeted`, say which rule failed and how to fix it, and
+SHALL NOT contain the command. `{grep}` is not supported. A harness that predates the key refuses it as an unknown
+key, so a consumer moves its pin before it sets the key and removes the key before it moves the pin back.
+
 ### 3.2 Reference configuration (every key shown with its default or an example)
 
 ```yaml
@@ -797,7 +806,9 @@ gates:                             # deterministic commands, run in the worktree
     command: ""                    # REQUIRED when tdd.mode != off, e.g. "uv run pytest --junitxml=.l4-out/junit.xml"
     reports: [".l4-out/junit.xml"]
     format: junit                  # junit | playwright-json | pytest-json | tap
-    targeted: ""                   # optional: command with {files} / {grep} placeholders for red/green runs
+    targeted: ""                   # a command with {files} as a word of its own: a red step that adds only new test
+                                   # files runs it with those files (red_check: targeted); {grep} is not supported
+    red_check: full                # full | targeted: how a red step runs its tests (L4-CFG-007); targeted needs `targeted`
   e2e:                             # disabled while command is ""; e.g. Playwright with --reporter=junit,json
     command: ""
     reports: []
@@ -1516,6 +1527,37 @@ longer than 2000 characters) SHALL be read as before. [V: a consumer's red step 
 reporter writes a passing subtest nowhere, so after a green step that made every test pass the ids were missing and
 the step failed with `red tests still failing` three times, and the unit halted.]
 
+**L4-GAT-007 A targeted test run replaces `{files}` with the new test files and nothing else.** The targeted command
+SHALL be `gates.test.targeted` split with `shlex`, with the one word `{files}` replaced by the files as separate words
+and the words joined again, so that each path is one argument and no shell reads it (the gate runner runs no shell). The
+files SHALL be repository-relative POSIX paths as git lists them, with no `./`, sorted by their text. It SHALL run as
+the gate `test-targeted`, in the unit's work tree and the gate sandbox, with the environment of the gate `test` and the
+limit `gates.timeout`. It SHALL write the reports that `gates.test.reports` lists, in `gates.test.format`: the runner
+removes them before the run and fails the run with `report missing: <path>` when one is not there afterwards, as for
+every test gate, and merges several reports into one. Its report SHALL not be published or kept. The gate SHALL not
+count toward L4-IMP-099's longest run, which counts only `baseline` and `test`. A command SHALL never be built for more
+than 50 files, for paths that together hold more than 8,000 bytes, or for a path that starts with `-` or `@` (pytest
+reads `@file` as an argument file) or holds a control character (L4-IMP-117).
+
+**L4-GAT-008 The report the red checks judge holds the base report with the targeted results added.**
+`with_targeted(base, targeted)` SHALL give a report whose tests are the tests of the base report and the tests of the
+targeted report (the two share no id, L4-GAT-009), whose collection errors are none, and which is local to the red
+step. The base report of the step, the measured baseline, SHALL stay unchanged and be the one `RedOutcome.base_report`
+carries.
+
+**L4-GAT-009 A targeted run is used only when it is complete; otherwise the same step runs the whole suite.** A
+targeted run SHALL be usable only when all of these hold, tested in this order: a report was read (`no_report`); the
+report has no collection error (`collection_errors`); no test id of it is a test id of the base report
+(`existing_tests_ran`); every listed file owns at least one id and every id belongs to a listed file, found by
+`file_of_id` among the tracked paths and the listed files, the listed files preferred (`file_without_tests`,
+`id_without_file`); and every id has the status `failed` or `error` (`new_test_not_failing`: a new test that passes or
+is skipped needs the proofs of L4-IMP-003, whose variant runs take the whole report). When the run is not usable and
+did not time out, the step SHALL put the tree back as `tree_before` took it (a failed put-back does not stop the run),
+run the gate `test` as a step with `full` does, go on with that report, and record `task.red_check_full` (L4-IMP-120).
+A targeted run that timed out SHALL fail the attempt with the reason of a gate that produced no readable report, with
+no fallback: a new test that hangs is the step's to fix. The step's guard after a gate run SHALL run after each of the
+two runs.
+
 **L4-GAT-003** `l4 init` MUST propose gate commands from ecosystem markers (`pyproject.toml`/`uv.lock` → uv +
 pytest with `--junitxml`; `package.json` scripts + lockfile → npm/pnpm/yarn/bun, vitest/jest junit reporters,
 `@playwright/test` → `npx playwright test --reporter=junit,json`; `go.mod` → `go test` via `gotestsum --junitfile`;
@@ -2030,7 +2072,8 @@ for a red test that failed by the wrong kind of error
       passing new test (unless its criterion is pre-satisfied, below) fails the red phase (attempt counted);
    4. regression: every test that passed at the step's base still passes, otherwise red fails with
       `red broke existing tests` [V, spikes/01, spikes/02]; the base report MAY be a reused measurement of the
-      previous green gate (L4-IMP-088);
+      previous green gate (L4-IMP-088); with `gates.test.red_check: targeted` run (a) may be the targeted run of
+      L4-IMP-118, and a test it did not run is judged by its base status (L4-IMP-119);
    5. run (b), the **vacuity check, per criterion**, run only when check 2 passed (a stub-purity leak is never labelled
       vacuous): for **each criterion the task cites** that is not pre-satisfied (below; the discrimination check
       replaces vacuity for a pre-satisfied criterion, whose tests have no red stub to zero), at least one new test
@@ -2876,6 +2919,108 @@ only on the re-run is listed at verification (L4-VER-082), whose steps 1 and 3 r
 units of a consumer were lost to pre-existing tests of its e2e stack helper (one starts the stack on fixed ports with a
 90-second ready timeout, one checks that no DNS lookup happens) that failed once in a red or green step; the cause is
 not known]
+
+**L4-IMP-117 Each red step chooses its check from rules that hold for that step.** With `gates.test.red_check:
+targeted`, a red step SHALL run the targeted check (L4-IMP-118) only when all of these hold, tested in this order, and
+SHALL otherwise run the whole suite exactly as with `full` and record `task.red_check_full{why}` (L4-IMP-120): the
+unit's ledger holds no `task.red_check_disabled` (`unit_switched`, L4-IMP-121); the task names no existing test that red
+may change (`named_tests`) and is no reopened task with stale tests (`stale_tests`); the base report has no collection
+error (`base_collection_errors`: `baseline` refuses one, so this never fires today); the step added no stub (`stubs`:
+`RedScope.stub_files` and `stubs` are empty); red scope put nothing back (`restored`: `RedScope.restored` is empty);
+every path the step changed, less the run's ledger and the tool-cache and bytecode entries that the production guard
+ignores, did not exist at the base (`existing_file_changed`); each of them is a test module (`not_a_test_module`: it
+matches `tdd.test_globs` and no glob of `tdd.test_support_globs` or `tdd.runner_config_files`, and the verifier's
+support rule, `is_support_file`, applied to the file in the work tree, does not call it a support file); at least one is
+left (`no_test_file`); there are at most 50 of them and 8,000 bytes of paths, counted in bytes of UTF-8
+(`too_many_files`); and none starts with `-` or `@` (pytest reads `@file` as an argument file) or holds a control
+character (`odd_path`). The choice SHALL be made for each step from these rules only: no model output and no clock. With
+`full`, the rules SHALL not run and nothing SHALL be recorded. A Python repository SHALL get the same rules and no
+others: a step that adds a stub is not eligible, and since L4-IMP-002 keeps additive stubs in production `.py` files,
+most Python red steps run the whole suite. [V, in one TypeScript consumer plan of seven units 66 red-step runs of the
+whole suite took about 4.9 minutes each, about 320 minutes in all, and 8 red steps failed with `red broke existing
+tests` on end-to-end stack or journey tests, probably flakes (inferred); 27 of 45 clean-tree baseline runs of the same
+plan had failing tests]
+
+**L4-IMP-118 A targeted red step runs its new test files, then judges as it does today.** An eligible step SHALL run
+the gate `test-targeted` (L4-GAT-007) in the place of the gate `test`, after red scope and the production guard are
+set, then the step's tamper check, then the usability test of L4-GAT-009. When the run is usable, the step SHALL bind
+its report to the base report with the targeted results added (L4-GAT-008) and judge it with every check it has today
+and in the same order: the new tests and their failure kinds, the criteria and their caps, the static gates, the
+zero-value variant runs, the verdict (`classify_red`) and the commit with `task.red_ok`. A usable run holds only
+failing new tests, so the pre-satisfied confirmation, a base run and the already-satisfied commit are not reached with
+it: a step with a new test that passes runs the whole suite (L4-GAT-009). When the run is not usable, the step SHALL
+continue as a step that never tried the targeted check. The soft deadline SHALL stop the targeted run as it stops any
+gate. The step's duration is the sum of its runs, and `deadline.cap_s` is unchanged.
+
+**L4-IMP-119 A targeted red changes what no later reader of the red step sees.** `RedOutcome.base_report` SHALL stay the
+measured baseline, so green judges with it as before (`green_failures` against the baseline, the red ids from
+`new_ids`). A targeted red SHALL NOT change what these read: the near-pass carry; the next task's baseline, which is
+green's report and never red's; and verification, which reads `task.red_ok` (`tests`, `frozen`, `criteria`, `notes`) and
+the red commit and runs its steps 1 and 3 on the whole suite. Inside red, a test that the targeted run did not run SHALL
+be judged by its base status: `red broke existing tests` and `no new test: existing tests were changed` cannot fire for
+it, and the checks that read passing old tests (`passing_now`, `unchanged_on_base`, the proofs of earlier reds) read
+base statuses. The duration of the targeted run SHALL never bound a whole-suite run. `resume_red` runs at the start of
+every execution of a task (after a deadline, a retry, a resume or an answered question), so it SHALL measure the base of
+a targeted red as the red step measured its own: with the red's files absent. When `task.red_ok` has `check: targeted`
+and `files`, `resume_red` SHALL remove those files from the work tree for its one whole run, run the whole suite, and
+put each back byte for byte with its mode before it returns; a targeted red only adds new files, so the tree without
+them is the red commit's parent, and an old test that the red files break passes in that base and is in green's
+regressed set (L4-IMP-121). It SHALL do so only when each file is a regular file of the work tree with the red commit's
+own bytes, did not exist at the red commit's parent, and no other path of the red commit is anything but the unit's own
+folder or a tool cache. When any of that fails, or a file is not back exactly (git then restores it from the red
+commit), `resume_red` SHALL fall back to a whole run at the red commit, as for a whole red, and SHALL record
+`task.red_check_disabled` with `why` `resume_files` or `resume_put_back` (L4-IMP-121). The tamper guards and the test
+freeze are unchanged: the freeze reads the red commit, and the files are back before green starts. A run killed inside
+the files-absent run leaves them removed; `resume_red` then puts each listed file that the red commit holds and the
+work tree lacks back from the red commit before it returns, so the freeze does not report it as tampering. A red that
+was not targeted is measured at the red commit as before.
+
+**L4-IMP-120 The ledger names the red check that ran and why the whole suite ran.** The gate of a targeted run is
+`gate.finished{name: "test-targeted"}`. `task.red_ok` of a step of a `targeted` configuration SHALL carry `check`
+(`targeted` or `full`) and, for `targeted`, `files` (sorted, at most 50). A step of a `targeted` configuration that ran
+the whole suite SHALL record `task.red_check_full{task, attempt, why, detail}`: `why` is a word of L4-IMP-117 or
+L4-GAT-009 or `unit_switched`, and `detail` is at most 300 characters and names at most five paths or ids. A red step of
+a `full` configuration SHALL write none of these keys and events, so a unit that never ran a targeted red has the ledger
+of 0.4.60; `task.red_check_disabled` is written by green and by `resume_red` from the unit's ledger, whatever the
+configuration says at that moment (L4-IMP-121). A reader SHALL treat a missing `check` as `full` and a missing event as
+none: a ledger written by 0.4.60 folds unchanged, and a harness that does not know the keys and events ignores them, as
+the fold ignores a type it does not know. `resume_red` SHALL set `RedOutcome.check` and `RedOutcome.files` from the
+`task.red_ok` it reads, so that green decides from the red commit's own record also in a later job.
+
+**L4-IMP-121 A regression after a targeted red switches the unit back to full red runs.** The step SHALL record
+`task.red_check_disabled{task, attempt, why, tests, red_sha}` once for the unit, in each of these cases: (a)
+`regressed`: green's whole-suite run in a unit whose ledger holds a `task.red_ok` with `check: targeted` (of any task,
+fix units included) still holds, after green's own re-run (L4-IMP-105), a regressed test (a test that was not new and
+passed in the red step's base report: `GreenWhy.regressed`); and, when the green is of a task whose own red was targeted
+(`RedOutcome.check` is `targeted`), a frozen red file may be the cause of a failure that green cannot fix: (b)
+`ids_missing`: it fails `red tests still failing` for a red test that is missing from the run's report; (c)
+`green_collection`: the run's report has a collection error that names a file of that red (`RedOutcome.files`, by path
+or dotted module); (d) `green_no_report`: the run has no readable report or timed out. `tests` holds at most 20 ids (the
+files, for (c); none, for (d)) and `red_sha` is the task's red commit. `resume_red` SHALL record it too, with `attempt`
+0 and `why` `resume_files` or `resume_put_back`, when it cannot measure a targeted red's base without its files
+(L4-IMP-119). Every later red step of the unit and of its fix units SHALL then run the whole suite and record
+`task.red_check_full{why: unit_switched}`. The switch SHALL last as long as the unit's ledger: `l4 retry` and `l4
+resume` keep it, and `l4 restart`, which starts a new ledger, reads the key again. The record is driven by the unit's
+ledger and never by the configuration: a unit whose key was set back to `full` after a targeted red still records it.
+The record SHALL be made also when green's own code broke the test: both causes call for the same safe action. The
+unit-wide trigger of (a) is on purpose: an interaction that depends on order or on a shared port can first show in a
+later task's green. Green and verification stay whole-suite in every case. [I, a new test file can break an old test by
+interaction (a shared database, a port, a module-level mock, a snapshot directory) that only a whole run shows; no
+ledger of a consumer shows one yet]
+
+**L4-IMP-122 Green says that a targeted red may be the cause.** An attempt of a task whose own red was targeted that
+fails with a regressed set SHALL end its reason with `; the red step of this task ran only its new test files
+(L4-IMP-122): if no change of the code can make these tests pass, report status blocked with a question that names the
+test file`. One that fails with `red tests still failing` for a red test that is missing from the report SHALL end it
+with `; the red step of this task ran only its new test files (L4-IMP-122): the whole suite reports these tests under
+other ids than the targeted command did, so no change of the code can make them pass: report status blocked and say so;
+a person fixes gates.test.targeted and runs l4 restart`. One that fails with a collection error that names a file of
+that red SHALL end it with `; the red step of this task ran only its new test files (L4-IMP-122): if no change of the
+code can make this file collect, report status blocked with a question that names the test file`. A failure with no
+readable report or a timeout gets no suffix. The suffix follows any suffix of L4-IMP-105. The attempt fails as it does
+today, so the loss is bounded by `implementer.max_task_attempts` and the unit's escalation, and the cause is named in
+the reason, the escalation and `task.red_check_disabled`. A task whose own red was not targeted gets no suffix, whatever
+the unit's other tasks did. The structured marker of L4-IMP-105 SHALL NOT be read from the text.
 
 **L4-IMP-108 A test chore counts the browser tests it writes.** When `gates.e2e` is configured (`e2e_configured`), a
 test chore (a `[chore]` task of kind `tests`) SHALL compute the browser tests of its step: the tests of
@@ -7579,6 +7724,8 @@ Base run scope adds `base_run.scope` (`{decided, kept, aside, more, timeout_s, u
 
 An answer's renewal adds `task.attempts_renewed` (`{task, phase, questions, failed}`, L4-IMP-104): the green window of a task starts anew once per answered question whose grant opens a frozen file, `failed` is the number of failed attempts it cleared (0 is recorded too), and attempt numbers go on. A step's re-run adds `task.tests_rechecked` (`{task, phase, attempt, tests, flaky, failing, new_failures, stopped}`, L4-IMP-105; `stopped` is `passed`, `failed`, `unusable`, `tree` or `budget`; lists at most 20 ids) and the `gate.finished` of the gate `test-recheck`. `verify.base_tests` gains `support_reverted` (`[{path, tasks, people}]`, at most 20, L4-VER-080). An older harness ignores the two events and the key.
 
+A targeted red check adds these records (L4-IMP-120, L4-IMP-121): the gate `test-targeted` (its own `gate.finished`), `check` (`targeted` or `full`) and, for `targeted`, `files` (sorted, at most 50) on `task.red_ok` of a step of a configuration with `gates.test.red_check: targeted`, `task.red_check_full` (`{task, attempt, why, detail}`: a step of such a configuration ran the whole suite; `why` is `unit_switched`, `named_tests`, `stale_tests`, `base_collection_errors`, `stubs`, `restored`, `existing_file_changed`, `not_a_test_module`, `no_test_file`, `too_many_files`, `odd_path`, `no_report`, `collection_errors`, `existing_tests_ran`, `file_without_tests`, `id_without_file` or `new_test_not_failing`; `detail` at most 300 characters) and `task.red_check_disabled` (`{task, attempt, why, tests, red_sha}`: green's whole run found a regressed test, or, after a targeted red of the task, a missing red test, a collection error that names a file of that red or no readable report; or `resume_red` could not measure a targeted red's base without its files; `why` is `regressed`, `ids_missing`, `green_collection`, `green_no_report`, `resume_files` or `resume_put_back`, `tests` at most 20 ids (or files), `attempt` 0 for `resume_red`, once per unit, written from the unit's ledger whatever the configuration says). A red step of a `full` configuration writes none of them. An older harness ignores the keys and the two events.
+
 A near pass adds these records (L4-IMP-100): `near_pass: true` on `task.attempt_failed` of a green attempt that passed every test and failed only its static gates (absent otherwise), `task.near_pass_applied` (`{task, attempt, from_attempt, from_profile, patch_sha256, files}`: the near pass is applied to the work tree before the agent runs; `files` at most 50) and `task.near_pass_dropped` (`{task, attempt, from_attempt, reason}`: `reason` is `replay` or the first line of the `git apply` error, at most 300 characters), and `near_pass` (`{attempt, profile}`) on `breaker.tripped`; paths and the patch's digest only, never the patch. A
 lint-only failure with a link out of the work tree also records `guard.violation{action: refused}`: the outside-link check
 runs to decide the near pass.
@@ -10259,6 +10406,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 141 | `ui-carry-unchanged` | a UI criterion that the unit did not change, whose tracing tests are the base's and pass, is carried from the base instead of a step-5 gap that can only end as a hold (SLIPPABLE: it loosens L4-VER-067 for that case). `l4.verifier.ui_step.carried_from_base(gaps, trace, unchanged, file_of, changed, rejected)` (new, pure): a criterion unchanged on the base (`_Run.unchanged`, the `unchanged_ids` of step 4's baseline), `covered` with no `held` reason, every tracing test passed with `pass_to_pass`, no note, within the cap and adequate, every ignored test a passing over-cap candidate, every test file found (`ladder._carry_files`: `carry_file` over the work tree) and not among the unit's changed files; `rejected_ui_criteria(events, criteria)` (new): a criterion among `criteria` that a reviewer ever rejected, or one of its UI holds, is never carried; `carry_file(test_id, walked, paths)` (new, pure): the file of a test for the carry, found only when `file_of_id` places the id, no other file of the tree could be it, and the dotted-module walk agrees or finds no module for a file that is not `.py`. `ladder._generate_step` carries after the waiver and before the gap findings and the writer (also with no writer), records `verify.generated{status: carried, covered_by, attempts: 0}`, keeps the outcome (`GenStatus` `carried`), counts it in step 5's note and checks nothing out when every gap is waived or carried; `ui_gap_finding(carried=True)`, `unclosed_holds` and the fix planner's closed set treat it as closed (`lost_notes` is unchanged: taking `carried` would bring the hold back after step 9); `report._generated_rows` writes `carried from the base: <ids> …; a note, not a hold (L4-VER-086)`. A carry passes nothing: the judge's pass and an adequate test are still needed. A consumer's feedback follow-up that changed one web file raised UI holds for three of its merged parent's criteria that were word for word the base's and traced by passing `pass_to_pass` tests, which only the owner could answer (L4-VER-086, L4-VER-067, L4-VER-009, SCN-VER-343..349 and SCN-VER-351; `openspec/changes/ui-carry-unchanged/`). Not done: fuzzy matching of a restated scenario (a scenario with any changed word stays a new criterion); a pass-to-pass browser check of a carried criterion. Residual risk: a break of the browser side of an unchanged scenario that its base unit tests and the judge miss is no longer asked about | the unit tests (`test_ui_step`, `test_ui_flow`, `test_report_m15`, `test_resume`, `test_fixunit`) |
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
 | 143 | `implementer-stall-limit` | an implementer step that stalls on a profile, by an idle stop after a tool call or at the agent's 1800 s limit, is a limit of that profile when a later profile can take the step, once per task window, and no failed attempt. `l4.implementer.tdd.agent_step` names a stall of kind `silent` (L4-IMP-087, unchanged), `idle` (an idle mark with a tool call seen, or from an adapter with no stream reader) or `time` (status `timeout` with no idle mark), and raises `RoleLimit(run, carried)` with a `LimitSignal` of that kind (`LimitSignal.kind` gains `idle` and `time`; source `run.idle` or `run.timeout`; excerpt `no output for <t> after <n> tool calls` or `the agent step reached its time limit (<t>)`) when `roles.implementer` lists more than one profile, `_stalled_before` (replaces `_silent_before`: an `agent.idle` or `agent.time_limit` with `as_limit` true, or a 0.4.60 `agent.idle{silent: true}`, of the task and fix unit in `deadline.window`; `task.attempts_renewed` does not end the window) finds none, and, for `idle` and `time`, `StallPlan.replaceable` holds (a profile after the stalled one). `Workbench.stall_plan(task, phase)` (new optional field, set by `Orchestrator._workbench` and `fixloop._child_workbench`; the fix loop's says not replaceable for an `idle` or `time` stall of a task already in `retried`) gives a `StallPlan(replaceable, veto, forward)`: `replaceable` is `Factory.can_replace(selected, constraints)` (new: a profile AFTER `selected` in the chain with another `(tool, model)` cool-down key, not cooling, with no failed probe in the cache (`FallbackSelector.cached_failure`), accepted by the request's constraints and by the veto; no probe sent), `forward` is `Factory.later_than(selected)`, the constraint that refuses the stalled profile and every earlier one (a stall moves forward only: the chain runs from cheap to strong), which `StallPlan.refusing(kind)` joins to the veto for `idle` and `time` and not for `silent` and `veto` a `Constraint` that refuses the profiles whose failed attempts of the phase in the window (`seed_attempts`) reached `max_task_attempts`, which `agent_step` puts on the signal (`LimitSignal.veto`, outside equality and repr) and `switch_profile` adds to the task's veto, for all three kinds and for an adapter's own limit that a stall kept, because a limit fallback selects again from the chain's start and could hand the step to a spent profile, which `run_task` ends at once with `max_task_attempts`. The cool-down is `availability.default_cooldown` through the existing `cooldown_until`, the hello is cleared, `availability.limit`, `availability.cooldown` and `availability.fallback` carry the kind, and the existing `_fall_back` discards the step's work (`Workbench.discard_changes`, the red commit stays) and hands on the near pass the step began from (`RoleLimit.carry`), never the stalled edits. `agent.idle` gains optional `kind`, `as_limit`, `discarded_files` and `discarded_paths`; a new `agent.time_limit` is written before `agent.finished`; a stall that is not a limit carries `as_limit: false` and the reason `<kind>: already once for this task` or `<kind>: no other profile can take the step`. `ProgressTrace._agent_idle` gains the suffixes and `_agent_time_limit` is new; `_previous_attempt_block`, `orchestrator.switch_profile` and `fixloop._fall_back` carry the detail of all three kinds. A consumer plan with a free-profile-first chain lost 32 of 171 implementer calls, 586 agent minutes, to idle and time-limit stops that each cost an attempt; the same free profile went silent again in 9 of 12 next attempts (L4-IMP-112..116, L4-AVL-014..015, L4-IMP-017, L4-IMP-024, L4-IMP-087, L4-IMP-094, L4-IMP-100, L4-AVL-003, L4-AVL-006; `openspec/changes/implementer-stall-limit/`). Limits: a chain of one profile, the silent stop's own rule (it still parks when nothing else is usable), every other role and every other status are unchanged; a profile that `can_replace` accepts can still fail a probe it was never asked (none cached, or a transient failure) and park the unit; the stalled step's edits are not kept | the unit tests (`test_liveness_step`, `test_stall_limit`, `test_escalation`, `test_near_pass_carry`, `test_fallback` of availability, `test_fixloop_fallback`, `test_progress`) |
+| 144 | `red-check-targeted` | a red step that adds only test modules runs only those files, and every other red step runs the whole suite as before. `gates.test.red_check` (`full`, the default, or `targeted`; with `targeted` a `gates.test.targeted` that has no `{files}` word of its own, has it twice, or holds `{grep}` does not load, L4-CFG-007). `l4.implementer.red_check` (new): `choose` (per step, in order: no `task.red_check_disabled` in the unit's ledger, no named or stale test, no collection error at the base, no stub, nothing put back by red scope, every changed path new and a test module by `tdd.test_globs`, no support or runner-configuration glob and `is_support_file` on the work-tree file, 1 to 50 paths and 8,000 bytes, none starting with `-`; the first failing rule is the `why`), `targeted_command` (the `{files}` word replaced after `shlex.split`, paths sorted, one argument each), `unusable` (a report was read, no collection error, no id of the base report, every file owns an id and every id a file by `file_of_id`, every id failing; else the whole suite in the same step and `task.red_check_full{why, detail}`), `with_targeted` (the base report plus the new failing tests, local to `run_red`; `RedOutcome.base_report` stays the baseline). The gate is `test-targeted`, `task.red_ok` gains `check` and `files`, and a targeted run that times out fails the attempt with no fallback. `resume_red` (it runs at the start of every execution of a task) measures a targeted red's base with the red's files removed from the work tree for its one whole run and put back byte for byte, so green sees an old test that those files break; a record or files that do not match fall back to a whole run at the red commit and record `task.red_check_disabled` (`resume_files`, `resume_put_back`). In a unit that has a targeted red, a regressed base-passing test of green's whole run after its re-run records `task.red_check_disabled` once, and so, for a task whose own red was targeted, does a missing red test, a collection error that names a file of that red (`green_collection`) or a whole run with no readable report or a timeout (`green_no_report`): the unit's later reds run whole (`unit_switched`), `l4 restart` starts a new ledger, and the reason of such a task ends with the text of L4-IMP-122 (not for a missing report). The record is read from the unit's ledger, not from the key. A path that starts with `@` is never a targeted argument. Green, the near-pass carry, the next baseline and verification are unchanged (L4-IMP-117..122, L4-GAT-007..009, L4-CFG-007, SCN-IMP-626..652, SCN-GAT-12..20, SCN-CFG-08..12; `openspec/changes/red-check-targeted/`). [V, in one TypeScript consumer plan 66 red steps ran the whole suite, about 4.9 minutes each, and 8 failed on end-to-end tests that were probably flakes.] Limits: off by default; a new file that breaks an old test by interaction shows at green (also after a resume), which cannot change the frozen files, so a person fixes the files or restarts the unit; a Python step that adds a stub runs the whole suite; no targeted green or verification; no `{grep}` | the unit tests (`test_gates_red_check`, `test_red_check`, `test_tdd_red_targeted`, `test_tdd_green_red_check`, `test_red_check_targeted_docs`, `test_tdd_red`, `test_step_recheck`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -10623,6 +10771,35 @@ scenario is a spec defect (§26).
 - **When** each configuration loads
 - **Then** each loads; `l4 run`'s preflight still refuses `roles.clarifier names a profile that is not defined under profiles`
 
+#### SCN-CFG-08 (+) A targeted red check with a command that holds {files} loads · L4-CFG-007
+- **Given** `gates.test.red_check: targeted` and `gates.test.targeted: npx vitest run --reporter=junit
+  --outputFile=.l4-out/junit.xml {files}`
+- **When** `l4 doctor` loads the configuration
+- **Then** it loads, and with `red_check` omitted the key is `full`
+
+#### SCN-CFG-09 (−) A targeted red check with no command does not load · L4-CFG-007
+- **Given** `gates.test.red_check: targeted` and `gates.test.targeted` empty or unset
+- **When** `l4 doctor` and `l4 run` load the configuration
+- **Then** both exit 2 naming `gates.test.red_check` and `gates.test.targeted` and the fix, and no check runs
+
+#### SCN-CFG-10 (−) `{files}` must be one word of its own, once, and `{grep}` is refused · L4-CFG-007
+- **Given** `red_check: targeted` and, one per configuration, a command with `--include={files}`, one with `{files}`
+  twice, one with `{grep}`, one with no placeholder, and one with an unbalanced quote
+- **When** each configuration loads
+- **Then** each exits 2 with a message that names the keys and the broken rule and does not contain the command
+
+#### SCN-CFG-11 (+) `full` does not read the targeted command · L4-CFG-007
+- **Given** a 0.4.60 configuration with `gates.test.targeted: "pytest {grep}"` and no `red_check`, and another with
+  `red_check: full` and an unbalanced quote in `targeted`
+- **When** each loads
+- **Then** both load, and red runs the whole suite as before with no `task.red_check_full` and no new key in
+  `task.red_ok`
+
+#### SCN-CFG-12 (+) Quoted words around the one `{files}` word load · L4-CFG-007
+- **Given** `red_check: targeted` and `targeted: uv run pytest -k 'slow or fast' --junitxml=.l4-out/junit.xml {files}`
+- **When** the configuration loads
+- **Then** it loads: `{files}` is the one word that equals the placeholder, and a quoted word with spaces is one word
+
 ### 23.3 Detection (DET)
 
 #### SCN-DET-01 (+) OpenSpec detected · L4-DET-001
@@ -10880,6 +11057,62 @@ scenario is a spec defect (§26).
 - **When** the green gate runs
 - **Then** the run fails in `gates.test_timeout`, not in 30 m, with the test named, and the unit raises one question
   naming the test file and the frame, instead of halting on `max_task_attempts` with no question.
+
+#### SCN-GAT-12 (+) The command holds the new files as separate arguments, in order · L4-GAT-007
+- **Given** `targeted: npx vitest run --reporter=junit --outputFile=.l4-out/junit.xml {files}` and new files
+  `test/b.test.ts` and `test/a dir/a.test.ts`
+- **When** the targeted command is built
+- **Then** the argv ends `test/a dir/a.test.ts`, `test/b.test.ts` as two items, in that order, and no shell ran
+
+#### SCN-GAT-13 (+) The targeted run is its own gate with the gate's reports · L4-GAT-007
+- **Given** an eligible red step whose command writes `.l4-out/junit.xml`
+- **When** the step runs
+- **Then** `gate.finished{name: test-targeted}` is recorded, no `test` gate ran in the step, the report is read from
+  `gates.test.reports`, and L4-IMP-099's longest run is unchanged
+
+#### SCN-GAT-14 (+) The report of the red checks is the baseline with the new failing tests added · L4-GAT-008
+- **Given** a base report of 300 passing tests and 2 failing ones, and a targeted report of 3 new failing tests
+- **When** `with_targeted` builds the report
+- **Then** it holds 305 tests with the base statuses and the 3 new failing cases, has no collection error, and the
+  base report object is unchanged
+
+#### SCN-GAT-15 (−) A targeted run with no report, or a collection error, runs the whole suite · L4-GAT-009
+- **Given** an eligible step whose targeted command writes no report (`report missing`), and another whose report has
+  a collection error
+- **When** each step runs
+- **Then** each runs the gate `test` in the same step and records `task.red_check_full{why: no_report}`, respectively
+  `why: collection_errors`, and the step's verdict is the one a `full` step gives
+
+#### SCN-GAT-16 (−) A targeted run that ran an old test, or ran nothing of a file, runs the whole suite · L4-GAT-009
+- **Given** a targeted report with one id of the base report (a filter that matched an old file), another that holds
+  no id for one of two listed files, and another with an id that no listed file owns
+- **When** each step runs
+- **Then** each runs the gate `test` in the same step with `why: existing_tests_ran`, `file_without_tests` and
+  `id_without_file`, and none of the three targeted reports is judged
+
+#### SCN-GAT-17 (−) A new test that passes or is skipped runs the whole suite · L4-GAT-009, L4-IMP-003
+- **Given** a targeted report in which a new test passes and another in which one is skipped
+- **When** each step runs
+- **Then** each runs the gate `test` with `why: new_test_not_failing`, so the pre-satisfied checks see the whole
+  report, and `confirmed_by_base_run` gets the whole run's duration
+
+#### SCN-GAT-18 (−) A targeted run that times out fails the attempt with no whole run · L4-GAT-009
+- **Given** a targeted command that runs past `gates.timeout`
+- **When** the step runs
+- **Then** the attempt fails with `the test gate produced no readable report (timed out after <n>s)`, no gate `test`
+  ran and no `task.red_check_full` is recorded
+
+#### SCN-GAT-19 (+) The step's guard runs after the targeted run and after the whole run · L4-GAT-009, L4-IMP-118
+- **Given** a targeted run whose test wrote a production file, and a fallback whose whole run did
+- **When** each step runs
+- **Then** each production file is put back and the attempt fails with `test code changed production files while a
+  gate ran`, as after any gate
+
+#### SCN-GAT-20 (+) The fallback starts on the tree the step had before the targeted run · L4-GAT-009
+- **Given** a targeted run that left an untracked file, then a fallback
+- **When** the fallback starts
+- **Then** the file is removed before the gate `test` runs; when the tree cannot be put back the gate `test` runs
+  anyway
 
 #### SCN-ODD-05 (+) Missing oracle bootstraps tests instead of dead-ending · L4-ODD-002, L4-CFG-004
 - **Given** a web repo (`package.json` with a web framework) without any test runner, `odd.bootstrap_tests: true`
@@ -14545,6 +14778,188 @@ scenario is a spec defect (§26).
 - **When** the step judges its gate
 - **Then** the attempt fails with run 1's reason and `; failed again on a re-run (L4-IMP-105): <that test>`, and
   `new_failures` names it
+
+#### SCN-IMP-626 (+) A red step that adds only test modules runs only those · L4-IMP-117, L4-IMP-118
+- **Given** `red_check: targeted` and a red step that adds `test/pricing.test.ts` and `test/cart.test.ts`, whose tests
+  all fail by assertion
+- **When** the step runs
+- **Then** it runs `test-targeted` once with the two files, no `test` gate, commits red, and `task.red_ok` has `check:
+  targeted` and `files: [test/cart.test.ts, test/pricing.test.ts]`
+
+#### SCN-IMP-627 (+) With `full` nothing is recorded and nothing changes · L4-IMP-117, L4-IMP-120
+- **Given** the step of SCN-IMP-626 with `red_check: full`, and a 0.4.60 configuration
+- **When** the step runs
+- **Then** it runs the gate `test` once, records no `task.red_check_full`, and `task.red_ok` has no `check` and no
+  `files`
+
+#### SCN-IMP-628 (−) A step that changes an existing file runs the whole suite · L4-IMP-117
+- **Given** a step that adds `test/new.test.ts` and appends a test to the existing `test/old.test.ts`, and another
+  that deletes an old test file
+- **When** each step runs
+- **Then** each runs the gate `test` with `task.red_check_full{why: existing_file_changed}`
+
+#### SCN-IMP-629 (−) A support file, a helper, a stub or a restored production file runs the whole suite · L4-IMP-117
+- **Given** a step that adds `test/new.test.ts` and `test/helpers/db.ts`; one that adds `tests/conftest.py`; one that
+  adds a Python stub; one whose production file red scope put back; and one that adds `test/data.ts` (no test module)
+- **When** each step runs
+- **Then** each runs the gate `test` with `why: not_a_test_module`, `not_a_test_module`, `stubs`, `restored` and
+  `not_a_test_module`
+
+#### SCN-IMP-630 (−) A task that names a test, or a reopened task, runs the whole suite · L4-IMP-117
+- **Given** a task whose reviewed text names an existing test, and a reopened task with stale tests, each with an
+  otherwise eligible step
+- **When** each step runs
+- **Then** each runs the gate `test` with `why: named_tests`, respectively `stale_tests`
+
+#### SCN-IMP-631 (−) A step with no new file, 51 files or an odd path runs the whole suite · L4-IMP-117
+- **Given** a step that changes only the run's ledger, one with 51 new test files, one with six new files whose
+  paths hold fewer than 8,000 characters and more than 8,000 bytes, and one with a new file named `-x.test.ts` and
+  one named `@list.test.ts` (pytest reads `@file` as an argument file)
+- **When** each step runs
+- **Then** each runs the gate `test` with `why: no_test_file`, `too_many_files`, `too_many_files` and `odd_path`, and
+  no command is built
+
+#### SCN-IMP-632 (+) A Python step that adds only a test module is eligible by the same rules · L4-IMP-117
+- **Given** a Python repository with `red_check: targeted` and `targeted: uv run pytest --junitxml=.l4-out/junit.xml
+  {files}`, and a red step that adds `tests/test_pricing.py` and no stub
+- **When** the step runs
+- **Then** it runs `test-targeted` with that file; the same step with a stub in `src/pricing.py` runs the whole suite
+
+#### SCN-IMP-633 (+) A flaky old test cannot fail a targeted red · L4-IMP-118, L4-IMP-119
+- **Given** a baseline in which `tests.test_stack::test_ready` passes, and an eligible step whose whole suite would
+  fail that test once
+- **When** the step runs with `targeted`
+- **Then** the step is judged on its new tests alone and commits red; no `red broke existing tests` and no
+  `test-recheck` arise
+
+#### SCN-IMP-634 (−) Every other red verdict is the one a whole run gives · L4-IMP-118
+- **Given** eligible steps whose new tests fail by an error that is no assertion, whose new tests cite no criterion of
+  the task, or whose test code writes a production file
+- **When** each step runs
+- **Then** each attempt fails with the reason a `full` step gives for it, word for word
+
+#### SCN-IMP-635 (+) Green judges with the baseline after a targeted red · L4-IMP-119
+- **Given** a task whose red was targeted
+- **When** green runs
+- **Then** `RedOutcome.base_report` is the measured baseline, green's whole run is judged against it, and `red tests
+  still failing` and `new failing tests added in green` are as after a full red
+
+#### SCN-IMP-636 (+) A resumed red reads its check from its record · L4-IMP-120
+- **Given** a run that died after a targeted red commit, and a 0.4.60 red commit
+- **When** the next run resumes at green
+- **Then** `RedOutcome.check` is `targeted`, respectively `full`, read from `task.red_ok` (with `RedOutcome.files` for
+  `targeted`); the base report of a 0.4.60 red commit is measured with a whole run at the red commit, as before, and
+  that of a targeted one with the red's files absent (SCN-IMP-648)
+
+#### SCN-IMP-637 (+) The variant runs judge against the overlay and run the whole command · L4-IMP-118, L4-IMP-119
+- **Given** an eligible Python step with no stub of its own and a stub of an earlier task at HEAD, whose new tests
+  fail
+- **When** the vacuity check runs
+- **Then** it runs the whole command with the HEAD stubs zeroed and compares the new tests with the report that holds
+  the base tests and the new ones
+
+#### SCN-IMP-638 (+) The ledger shows the gate, the check and the fallback reasons · L4-IMP-120
+- **Given** a `targeted` configuration, one step that ran targeted and one that fell back
+- **When** the run finishes
+- **Then** `gate.finished` has `test-targeted` for both, `task.red_ok` has `check` and `files` for the first and
+  `check: full` for the second, and the second has `task.red_check_full{why, detail}` with at most 300 characters
+
+#### SCN-IMP-639 (+) A 0.4.60 ledger folds and an older harness ignores the new records · L4-IMP-120
+- **Given** a unit whose ledger is of 0.4.60 and a unit whose ledger holds the new records
+- **When** the first is read by this harness and the second by 0.4.60
+- **Then** the first folds with every `check` read as `full` and no switch; the second folds in 0.4.60, which ignores
+  the keys and events
+
+#### SCN-IMP-640 (−) A regression in green after a targeted red records the switch and says why · L4-IMP-122, L4-IMP-121
+- **Given** a task whose red was targeted and a green whose whole run fails `tests.test_db::test_rows` (it passed in
+  the base report and its file is no file of the unit) on the run and on the re-run
+- **When** green judges its gate
+- **Then** `task.red_check_disabled{why: regressed, tests: [tests.test_db::test_rows]}` is recorded, and the attempt
+  fails with the reason of 0.4.60, the suffix of L4-IMP-105 and `; the red step of this task ran only its new test
+  files (L4-IMP-122): if no change of the code can make these tests pass, report status blocked with a question that
+  names the test file`
+
+#### SCN-IMP-641 (+) A regression that passes on green's re-run records nothing · L4-IMP-121
+- **Given** the green of SCN-IMP-640 whose re-run passes the test
+- **When** green judges its gate
+- **Then** `task.tests_rechecked{stopped: passed}` is recorded, the task is committed, and there is no
+  `task.red_check_disabled`
+
+#### SCN-IMP-642 (+) After the switch every red step of the unit runs the whole suite · L4-IMP-121
+- **Given** a unit with `task.red_check_disabled`, a later task and a fix unit, and an eligible step of each
+- **When** each step runs, and then `l4 retry` and a new run, and then `l4 restart`
+- **Then** each step before the restart runs the gate `test` with `task.red_check_full{why: unit_switched}`; after `l4
+  restart` the new ledger has no record, so the key is read again
+
+#### SCN-IMP-643 (−) A red test missing from green's report records the switch and names the command · L4-IMP-121, L4-IMP-122
+- **Given** a task whose red was targeted, whose red id `test/a.test.ts::x` is not in green's whole report (the runner
+  names it otherwise), and no failing base test
+- **When** green judges its gate
+- **Then** the attempt fails with `red tests still failing: test/a.test.ts::x` and the suffix of L4-IMP-122 for a
+  missing id (the targeted command names the tests differently; a person fixes `gates.test.targeted` and runs `l4
+  restart`), and `task.red_check_disabled{why: ids_missing}` is recorded
+
+#### SCN-IMP-644 (+) A regression in a later task whose own red ran whole still records the switch · L4-IMP-121, L4-IMP-122
+- **Given** a unit whose task 1.1 has `task.red_ok{check: targeted}`, and a task 1.2 whose red ran the whole suite
+  (`task.red_ok{check: full}`) and whose green has the failure of SCN-IMP-640
+- **When** green of task 1.2 judges its gate
+- **Then** `task.red_check_disabled{task: 1.2, why: regressed}` is recorded and the reason has no suffix of
+  L4-IMP-122, since the red of task 1.2 was not targeted
+
+#### SCN-IMP-645 (+) The switch is recorded once · L4-IMP-121
+- **Given** a unit with `task.red_check_disabled` and a green that fails again after a regression
+- **When** green judges its gate
+- **Then** no second `task.red_check_disabled` is recorded
+
+#### SCN-IMP-646 (+) Verification still runs the whole suite on a unit with targeted reds · L4-IMP-119
+- **Given** a unit whose red steps were all targeted and whose green steps passed
+- **When** verification runs its steps 1 and 3
+- **Then** both run the whole suite with the same commands as for a unit of 0.4.60, and an old test that fails at head
+  is a finding as it is today
+
+#### SCN-IMP-647 (−) A unit with no targeted red records no switch · L4-IMP-121, L4-IMP-122
+- **Given** a unit whose `task.red_ok` events have no `check` (a unit of 0.4.60) or `check: full`, in a `targeted`
+  configuration, and a green with the failure of SCN-IMP-640
+- **When** green judges its gate
+- **Then** no `task.red_check_disabled` is recorded and the reason has no suffix of L4-IMP-122
+
+#### SCN-IMP-648 (+) A resumed targeted red measures its base without its files, and green sees the old test · L4-IMP-119, L4-IMP-121
+- **Given** a run killed after a targeted red commit whose new test file breaks `tests.test_db::test_rows` only when
+  the whole suite runs, and a next run (a deadline, a retry or an answered question starts one) that resumes at green
+- **When** `resume_red` measures the base
+- **Then** the whole run happens with the red's files absent from the work tree and the files are back, with their
+  bytes and mode, before it returns; the base report holds `tests.test_db::test_rows` as passing and none of the new
+  tests; green's whole run then fails the test after its re-run, records `task.red_check_disabled{why: regressed}`, and
+  the reason ends with the suffix of L4-IMP-122; verification's whole-suite steps report the test as they do today
+
+#### SCN-IMP-649 (−) A record the red commit does not match, or files that do not come back exactly, fall back and record the switch · L4-IMP-119, L4-IMP-121
+- **Given** a resumed targeted red whose `task.red_ok` names a file that the red commit does not hold, a file that the
+  red commit's parent already had, a path that leaves the work tree or no list of files, or whose red commit changed a
+  file that the record does not name; and one whose files cannot be written back exactly
+- **When** `resume_red` measures the base
+- **Then** no file is left removed, the base is measured with a whole run at the red commit as for a whole red, and
+  `task.red_check_disabled{attempt: 0, why: resume_files | resume_put_back}` is recorded once for the unit
+
+#### SCN-IMP-650 (−) A collection error that names a file of the targeted red records the switch and says why · L4-IMP-121, L4-IMP-122
+- **Given** a task whose red was targeted, and a green whose whole run has a collection error for `tests/test_new.py`,
+  a file of that red
+- **When** green judges its gate
+- **Then** the attempt fails with `tests not collected: tests/test_new.py` and the collection suffix of L4-IMP-122,
+  and `task.red_check_disabled{why: green_collection, tests: [tests/test_new.py]}` is recorded; a collection error that
+  names another file, or one after a whole red, records nothing and has no suffix
+
+#### SCN-IMP-651 (−) A whole run with no readable report or a timeout, after a targeted red, records the switch · L4-IMP-121
+- **Given** a task whose red was targeted, and a green whose whole run wrote no report, or hit `gates.timeout`
+- **When** green judges its gate
+- **Then** the attempt fails with the reason of any gate that produced no readable report, with no suffix, and
+  `task.red_check_disabled{why: green_no_report, tests: []}` is recorded once; after a whole red nothing is recorded
+
+#### SCN-IMP-652 (+) The switch is read from the ledger, whatever the key says now · L4-IMP-120, L4-IMP-121
+- **Given** a unit with a targeted red whose key `gates.test.red_check` was then set back to `full`, and a green with
+  the failure of SCN-IMP-640
+- **When** green judges its gate, and later a red step of the `full` configuration runs
+- **Then** `task.red_check_disabled` is recorded and the reason has the suffix of L4-IMP-122; the red step runs the
+  whole suite and writes neither `check` nor `task.red_check_full`
 
 #### SCN-IMP-586 (+) A new browser test of a test chore counts · L4-IMP-108
 - **Given** a test chore whose step adds `e2e/test_layout.py` with `test_regions`, a unit gate that does not collect

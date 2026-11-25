@@ -111,11 +111,19 @@ def is_support_file(git: Git, cfg: L4Config, path: str, rev: str) -> bool:
     """A test or support path of the unit is support, not a test module (`runner_support`'s rule): one of
     `tdd.test_support_globs`, a `.py` file that defines no test at `rev` (or does not parse), or another language's file
     whose name does not look like a test module."""
+    if any(glob_match(g, path) for g in cfg.tdd.test_support_globs) or not path.endswith(".py"):
+        return is_support_source(cfg, path, None)
+    shown = git.run("show", f"{rev}:{path}", check=False) if rev else None
+    return is_support_source(cfg, path, shown.stdout if shown is not None and shown.returncode == 0 else None)
+
+
+def is_support_source(cfg: L4Config, path: str, source: str | None) -> bool:
+    """The rule of `is_support_file` for a file whose content the caller holds (`source`: None when it cannot be read,
+    which a `.py` file counts as support). A work-tree file takes the same rule as one at a revision (L4-IMP-117)."""
     if any(glob_match(g, path) for g in cfg.tdd.test_support_globs):
         return True
     if path.endswith(".py"):
-        shown = git.run("show", f"{rev}:{path}", check=False) if rev else None
-        found = facts_of(shown.stdout) if shown is not None and shown.returncode == 0 else None
+        found = facts_of(source) if source is not None else None
         return not found or not any(f.test for f in found.values())
     return not _TESTISH.search(PurePosixPath(path).name)
 

@@ -934,6 +934,11 @@ def enforce_red_scope(wb: Workbench, task: Task, base: str) -> RedScope:
 _NOISE = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 
 
+def is_tool_noise(path: str) -> bool:
+    """A tool-cache or bytecode path: the production guard never counts it as a changed file."""
+    return any(part in _NOISE for part in path.split("/")) or path.endswith(".pyc")
+
+
 class ProductionGuard:
     """The production files as `enforce_red_scope` left them. Gates run agent-written test code with a writable
     worktree, so after every gate (and before every commit) the production state is recomputed: any added, changed
@@ -953,9 +958,7 @@ class ProductionGuard:
         return {
             path: existed
             for path, existed in changed_paths(wb.git, self.base, excludes=wb.excludes).items()
-            if not _exempt(wb, path)
-            and not any(part in _NOISE for part in path.split("/"))
-            and not path.endswith(".pyc")
+            if not _exempt(wb, path) and not is_tool_noise(path)
         }
 
     def _read(self, path: str) -> bytes | None:

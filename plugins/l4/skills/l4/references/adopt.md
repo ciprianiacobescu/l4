@@ -77,6 +77,10 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     transcripts (secrets masked), and any signed-in user can download it.
   - The test gate and the role chains; `l4 doctor --adoption` checks them. The test gate must write
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
+  - **`gates.test.red_check: targeted`** (optional, default `full`): a red step that only adds new test files runs only
+    those, with `gates.test.targeted`, a command that holds `{files}` as a word of its own and writes the same report.
+    Set it after you run both commands once and their test ids match, and after the pin has moved (an older harness
+    refuses the key). A slow or flaky whole suite is the reason to want it.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
 - **Re-render after editing:** `l4 upgrade --harness-ref v0.4.60`. The workflow is always re-rendered from the config,
