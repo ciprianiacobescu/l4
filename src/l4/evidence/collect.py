@@ -58,8 +58,8 @@ class Hold:
 
     id: str
     text: str
-    kind: Literal["scope", "coverage", "unsafe"]
-    subjects: tuple[str, ...]  # file paths (scope, unsafe) or `path::qualname` (coverage); empty when about the run
+    kind: Literal["scope", "coverage", "unsafe", "skipped"]
+    subjects: tuple[str, ...]  # file paths (scope, unsafe, skipped) or `path::qualname` (coverage); empty: the run
 
     def to_json(self) -> dict[str, Any]:
         return {"id": self.id, "text": self.text, "kind": self.kind, "subjects": list(self.subjects)}
@@ -77,12 +77,19 @@ class Evidence:
     labels: dict[str, Any] = field(default_factory=dict)  # ground truth: files, functions, tests_ok
     item_keys: dict[str, str] = field(default_factory=dict)  # `<question set>|<subject>` -> item_key, set by the caller
     scope_holds: int = 0  # how many of `holds` / `hold_records` come from step 1 (scope and unsafe names)
+    ran_holds: int = 0  # how many come from the tests-ran check (skipped tests that predate the unit), after those
+    hold_views: dict[str, dict[str, Any]] = field(default_factory=dict)  # a `skipped` hold's text -> {sha, paths}
     unrun_test_files: list[str] = field(default_factory=list)  # changed test files the caller did not run (not judged)
 
     @property
+    def ran_hold_records(self) -> list[Hold]:
+        """The holds of step 3 (the tests-ran check): they join the round there, whether diff coverage is on or not."""
+        return self.hold_records[self.scope_holds : self.scope_holds + self.ran_holds]
+
+    @property
     def later_holds(self) -> list[Hold]:
-        """The holds of step 6 (diff coverage): step 1 has already reported the scope ones."""
-        return self.hold_records[self.scope_holds :]
+        """The holds of step 6 (diff coverage): step 1 has already reported the scope ones, step 3 the skipped ones."""
+        return self.hold_records[self.scope_holds + self.ran_holds :]
 
     def section(self) -> list[str]:
         return render_evidence_section(self.scope, self.coverage, self.ran)
@@ -160,6 +167,35 @@ def skip_predating(
         return found
     except Exception:  # a git or parse failure must not stop the evidence step: the skip stays a finding
         return set()
+
+
+def skipped_hold_text(path: str, count: int) -> str:
+    return (
+        f"skipped: existing tests in `{path}` are skipped, and this unit did not add or change a skip that can "
+        f"affect them ({count} tests)"
+    )
+
+
+def _skipped_holds(
+    git: Git, head: str, ids: Collection[str], files: Collection[str], tree: Collection[str]
+) -> tuple[list[Hold], dict[str, dict[str, Any]]]:
+    """One hold per test file for the skipped ids that predate the unit (L4-VER-092, D2), with the binding of its
+    accept: the sha of the text, the head blob of the file and the sorted ids, so that an edit of the file or a change
+    of what is skipped voids the accept. The ids are not in the text: the question lists them (`paths` of the view)."""
+    by_file: dict[str, list[str]] = {}
+    for test_id in sorted(ids):
+        if (path := file_of_test(test_id, files, tree)) is not None:
+            by_file.setdefault(path, []).append(test_id)
+    holds: list[Hold] = []
+    views: dict[str, dict[str, Any]] = {}
+    for path, found in sorted(by_file.items()):
+        text = skipped_hold_text(path, len(found))
+        done = git.run("rev-parse", f"{head}:{path}", check=False)
+        blob = done.stdout.strip() if done.returncode == 0 else "unreadable"
+        sha = hashlib.sha256("\0".join([text, blob, *found]).encode()).hexdigest()
+        holds.append(Hold(hold_id(text), text, "skipped", (path,)))
+        views[text] = {"sha": sha, "paths": found}
+    return holds, views
 
 
 def changed_unit_files(git: Git, base: str, head: str, cfg: L4Config, unit_dir: str = "") -> list[tuple[str, Kind]]:
@@ -334,6 +370,8 @@ def collect_evidence(
 
     ran = None
     unrun: list[str] = []
+    skipped_holds: list[Hold] = []
+    hold_views: dict[str, dict[str, Any]] = {}
     if report is not None:
         test_files = {f.path for f in scope_out.files if f.kind == "test"}
         unrun = sorted(p for p in test_files if any(glob_match(g, p) for g in unrun_test_globs))
@@ -347,9 +385,13 @@ def collect_evidence(
             and defines_tests(show_blob(git, head, f.path) or "")
         }
         head_tree = frozenset(git.run("ls-tree", "-r", "--name-only", head).stdout.splitlines())
+        old_skipped = report.ids_with("skipped") - set(new_tests)
+        predating = skip_predating(git, base, head, test_files, old_skipped, cfg, head_tree) if old_skipped else set()
         ran = check_tests_ran(
-            report, new_tests, test_files, added_test_files=added, tree=head_tree, gate_passed=gate_passed
-        )
+            report, new_tests, test_files, added_test_files=added, tree=head_tree, gate_passed=gate_passed,
+            predating=predating,
+        )  # fmt: skip
+        skipped_holds, hold_views = _skipped_holds(git, head, ran.summary.skipped_predating, test_files, head_tree)
 
     labels: dict[str, Any] = {
         "files": {f.path: f.label for f in scope_out.files},
@@ -359,6 +401,7 @@ def collect_evidence(
     }
     records = [
         *step1.holds,
+        *skipped_holds,
         *(
             Hold(hold_id(t), t, "coverage", tuple(subjects))
             for t, subjects in zip(cov_check.holds, cov_check.hold_subjects, strict=True)
@@ -368,5 +411,5 @@ def collect_evidence(
         scope_out, dc, cov_check, ran,
         findings=[*scope_out.findings, *cov_check.findings, *(ran.findings if ran else [])],
         holds=[h.text for h in records], hold_records=records, labels=labels, scope_holds=len(step1.holds),
-        unrun_test_files=unrun,
+        ran_holds=len(skipped_holds), hold_views=hold_views, unrun_test_files=unrun,
     )  # fmt: skip

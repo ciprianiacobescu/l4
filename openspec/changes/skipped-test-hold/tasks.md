@@ -18,12 +18,12 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 2. The check and the evidence (L4-VER-092, D2)
 
-- [ ] 2.1 Tests first, in `tests/unit/evidence/test_testsran.py` and `tests/unit/evidence/test_report.py`: `check_tests_ran(...,
+- [x] 2.1 Tests first, in `tests/unit/evidence/test_testsran.py` and `tests/unit/evidence/test_report.py`: `check_tests_ran(...,
   predating=ids)` removes those ids from the finding and puts them in `summary.skipped_predating`; the default `()` is
   the old behaviour (SCN-VER-380); `verdict.json` round trip (`evidence_json`, `render_evidence_json`) with and without
   the new key; the Evidence section prints `Skipped in a changed file before this unit (hold): ...`; `Evidence`
   records: one `Hold(kind="skipped")` per file in `hold_records`, `ran_holds`, `later_holds` without them, `to_json`.
-- [ ] 2.2 Then change `TestsSummary` and `check_tests_ran` (`src/l4/evidence/testsran.py`), `report.py` (`:88-90`, `:131-132`,
+- [x] 2.2 Then change `TestsSummary` and `check_tests_ran` (`src/l4/evidence/testsran.py`), `report.py` (`:88-90`, `:131-132`,
   `:179`), `Hold.kind`, `Evidence.ran_holds`, `later_holds` and the `records` order (`src/l4/evidence/collect.py`
   `:54-84`, `:321-341`); `collect_evidence` calls the rule of 1.2. Run `tests/unit/evidence/test_testsran.py`,
   `test_report.py`, `test_scope.py` one at a time and `tests/unit/s1/` test files that read `Evidence` (`test_items`,

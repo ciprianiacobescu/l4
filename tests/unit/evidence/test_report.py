@@ -89,3 +89,30 @@ def test_not_applicable_and_mixed_coverage_say_not_measured_and_survive_verdict_
         data = json.loads(json.dumps(evidence_json(SCOPE, dc, RAN)))
         assert data["diff_coverage"]["other_files"] == list(dc.other_files)
         assert render_evidence_json(data) == render_evidence_section(SCOPE, dc, RAN)
+
+
+# skipped-test-hold (L4-VER-092, D2): the tests that were skipped before the unit in a file it changed
+PREDATING = ("tests.test_live::test_a", "tests.test_live::test_b")
+HELD = TestsRanOutcome([], True, TestsSummary(total=5, passed=3, skipped=2, skipped_predating=PREDATING))
+
+
+def test_the_section_lists_the_skips_that_predate_the_unit():
+    text = "\n".join(render_evidence_section(SCOPE, DC, HELD))
+    assert (
+        "Skipped in a changed file before this unit (hold): `tests.test_live::test_a`, `tests.test_live::test_b`"
+        in text
+    )
+    assert "before this unit" not in "\n".join(render_evidence_section(SCOPE, DC, RAN))
+
+
+def test_skipped_predating_survives_verdict_json_and_an_older_file_reads_as_empty():  # SCN-VER-380
+    from l4.evidence.report import render_evidence_json
+
+    data = json.loads(json.dumps(evidence_json(SCOPE, DC, HELD)))
+    assert data["tests_ran"]["summary"]["skipped_predating"] == ["tests.test_live::test_a", "tests.test_live::test_b"]
+    assert render_evidence_json(data) == render_evidence_section(SCOPE, DC, HELD)
+    del data["tests_ran"]["summary"]["skipped_predating"]  # a verdict.json written by an older harness
+    older = render_evidence_json(data)
+    assert older == render_evidence_section(
+        SCOPE, DC, TestsRanOutcome([], True, TestsSummary(total=5, passed=3, skipped=2))
+    )

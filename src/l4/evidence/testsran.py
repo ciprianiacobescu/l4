@@ -26,6 +26,7 @@ class TestsSummary:
     new: int = 0
     new_passed: int = 0
     skipped_unchanged: tuple[str, ...] = ()  # skipped tests in files the unit did not touch: listed, never judged
+    skipped_predating: tuple[str, ...] = ()  # skipped before the unit, in a file it changed: a hold, not a finding
 
 
 @dataclass
@@ -86,12 +87,16 @@ def check_tests_ran(
     added_test_files: Collection[str] = (),
     tree: Collection[str] | None = None,
     gate_passed: bool,
+    predating: Collection[str] = (),
 ) -> TestsRanOutcome:
     """`new_tests`: the ledger's red tests. The testcases of `added_test_files` (added files that define tests) count
     as new too; one of those files with no testcase in the report (wrong name, unmatched pattern) is a blocker. A
     new test that is missing, skipped, errored or failed is a blocker (a failure is also the gate's own finding). A
     skipped test that was already there is a major only in a file the unit changed (`changed_test_files`). `tree`:
-    the files of the head tree, so that an unchanged file of the same name is never mistaken for an added one."""
+    the files of the head tree, so that an unchanged file of the same name is never mistaken for an added one.
+    `predating`: the ids whose skip predates the unit (`collect.skip_predating`, L4-VER-092); those of them that would
+    be named in the major finding leave it and go to `summary.skipped_predating`, where the caller raises a hold. The
+    default `()` is the behaviour without the rule."""
     tests = report.tests
     changed = set(changed_test_files) | set(added_test_files)
     tree = frozenset(tree) if tree is not None else frozenset(changed)
@@ -114,7 +119,9 @@ def check_tests_ran(
     if failed:
         findings.append(_blocker("new tests failed", failed))
     old_skipped = {i for i in report.ids_with("skipped") if i not in new}
-    touched = {i for i in old_skipped if file_of_test(i, changed, tree)}
+    in_changed = {i for i in old_skipped if file_of_test(i, changed, tree)}
+    held = in_changed & set(predating)
+    touched = in_changed - held
     if touched:
         findings.append(
             Finding(
@@ -131,7 +138,8 @@ def check_tests_ran(
         skipped=len(report.ids_with("skipped")),
         new=len(new),
         new_passed=new_passed,
-        skipped_unchanged=tuple(sorted(old_skipped - touched)),
+        skipped_unchanged=tuple(sorted(old_skipped - in_changed)),
+        skipped_predating=tuple(sorted(held)),
     )
     label = gate_passed and not failing and not report.collection_errors and new_passed == len(new) and not uncollected
     return TestsRanOutcome(findings, label, summary)

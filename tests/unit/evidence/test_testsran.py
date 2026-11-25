@@ -161,3 +161,58 @@ def test_all_passed_is_the_literal_question_any_non_passing_test_makes_it_false(
     assert (
         check_tests_ran(TestReport(passing), {"tests.test_a::test_new"}, set(), gate_passed=False).all_passed is False
     )
+
+
+# skipped-test-hold (L4-VER-092, D2): `predating` moves the ids whose skip predates the unit out of the finding
+OLD = {
+    "tests.test_b::test_old": TestCase("tests.test_b::test_old", "skipped"),
+    "tests.test_c::test_one": TestCase("tests.test_c::test_one", "skipped"),
+    "tests.test_c::test_two": TestCase("tests.test_c::test_two", "skipped"),
+    "tests.test_d::test_new": TestCase("tests.test_d::test_new", "passed"),
+}
+CHANGED = {"tests/test_c.py", "tests/test_d.py"}
+
+
+def test_predating_ids_leave_the_finding_and_go_to_the_summary():  # SCN-VER-372
+    out = check_tests_ran(
+        TestReport(OLD), {"tests.test_d::test_new"}, CHANGED, gate_passed=True,
+        predating={"tests.test_c::test_one", "tests.test_c::test_two"},
+    )  # fmt: skip
+    assert out.findings == []
+    assert out.summary.skipped_predating == ("tests.test_c::test_one", "tests.test_c::test_two")
+    assert out.summary.skipped_unchanged == ("tests.test_b::test_old",)
+    assert out.summary.skipped == 3 and out.label is True
+
+
+def test_only_the_ids_in_predating_leave_the_finding():  # SCN-VER-375
+    out = check_tests_ran(
+        TestReport(OLD), {"tests.test_d::test_new"}, CHANGED, gate_passed=True, predating={"tests.test_c::test_two"}
+    )
+    assert [f.title for f in out.findings] == ["existing tests are skipped in a changed test file"]
+    assert "tests.test_c::test_one" in out.findings[0].detail and "test_two" not in out.findings[0].detail
+    assert out.summary.skipped_predating == ("tests.test_c::test_two",)
+
+
+def test_an_id_in_predating_that_is_not_in_a_changed_file_is_listed_as_unchanged_only():
+    out = check_tests_ran(
+        TestReport(OLD), {"tests.test_d::test_new"}, CHANGED, gate_passed=True, predating={"tests.test_b::test_old"}
+    )
+    assert out.summary.skipped_predating == () and out.summary.skipped_unchanged == ("tests.test_b::test_old",)
+    assert len(out.findings) == 1
+
+
+def test_a_new_test_in_predating_is_still_a_blocker():
+    rep = TestReport({"tests.test_d::test_new": TestCase("tests.test_d::test_new", "skipped")})
+    out = check_tests_ran(
+        rep, {"tests.test_d::test_new"}, CHANGED, gate_passed=True, predating={"tests.test_d::test_new"}
+    )
+    assert [f.severity for f in out.findings] == [Severity.BLOCKER] and out.summary.skipped_predating == ()
+
+
+def test_without_predating_the_check_is_as_before():  # SCN-VER-380
+    plain = check_tests_ran(TestReport(OLD), {"tests.test_d::test_new"}, CHANGED, gate_passed=True)
+    empty = check_tests_ran(TestReport(OLD), {"tests.test_d::test_new"}, CHANGED, gate_passed=True, predating=())
+    assert plain == empty
+    assert plain.summary.skipped_predating == ()
+    assert [f.title for f in plain.findings] == ["existing tests are skipped in a changed test file"]
+    assert "tests.test_c::test_one" in plain.findings[0].detail

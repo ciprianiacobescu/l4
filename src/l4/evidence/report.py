@@ -89,6 +89,11 @@ def render_evidence_section(
             out.append(
                 "Skipped in files the unit did not touch: " + ", ".join(f"`{_cell(i)}`" for i in s.skipped_unchanged)
             )
+        if s.skipped_predating:
+            out.append(
+                "Skipped in a changed file before this unit (hold): "
+                + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
+            )
     return out
 
 
@@ -129,7 +134,11 @@ def evidence_json(
         if ran is None
         else {
             "tests_ok": ran.label,
-            "summary": {**asdict(ran.summary), "skipped_unchanged": list(ran.summary.skipped_unchanged)},
+            "summary": {
+                **asdict(ran.summary),
+                "skipped_unchanged": list(ran.summary.skipped_unchanged),
+                "skipped_predating": list(ran.summary.skipped_predating),
+            },
             "findings": [{"severity": f.severity.value, "title": f.title, "detail": f.detail} for f in ran.findings],
         },
     }
@@ -176,7 +185,13 @@ def render_evidence_json(data: dict[str, Any]) -> list[str]:
                 for f in ran.get("findings", [])
             ],
             ran["tests_ok"],
-            TestsSummary(**{**ran["summary"], "skipped_unchanged": tuple(ran["summary"]["skipped_unchanged"])}),
+            TestsSummary(
+                **{
+                    **ran["summary"],
+                    "skipped_unchanged": tuple(ran["summary"]["skipped_unchanged"]),
+                    "skipped_predating": tuple(ran["summary"].get("skipped_predating", ())),  # older files have none
+                }
+            ),
         )  # fmt: skip
     )
     return render_evidence_section(scope_out, dc_out, ran_out)
