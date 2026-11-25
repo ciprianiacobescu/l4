@@ -70,7 +70,7 @@ from l4.delegate.prompt import (
     report_test_ids,
     verdict_material,
 )
-from l4.delegate.reply import Discarded, HeadTree, Kept, check_reply, clean_reason
+from l4.delegate.reply import SKIPPED_HOLD_REASON, Discarded, HeadTree, Kept, check_reply, clean_reason
 from l4.delegate.scope import PlansView, in_scope, plan_cost, plans_view
 from l4.delegate.settings import DelegateSettings, delegate_settings
 from l4.exitcodes import ExitCode, L4Exit
@@ -853,7 +853,8 @@ class _Pass:
         """Why the question is a person's without a delegate call: the check an answer needs cannot be made
         (L4-DLG-024). A cap-only criterion's accept must cite the candidate test's file, which the test report has to
         name; a judge-view hold is accepted after reading one of the files it names, and a hold that names none (the
-        0.4.14 `LEGACY_LENGTH_HOLD`) has nothing to read. A repair proposal of a test (a harness question whose raise
+        0.4.14 `LEGACY_LENGTH_HOLD`) has nothing to read; a skipped-test hold has no check a read-only model can make
+        (L4-VER-094). A repair proposal of a test (a harness question whose raise
         has `check: repair`, L4-IMP-091) is a person's decision, whatever the delegate's scope and kinds say."""
         if raised is not None and raised.data.get("check") == "repair" and question.kind is QuestionKind.HARNESS:
             return "a repair of a test is a person's decision"
@@ -867,6 +868,8 @@ class _Pass:
             )
         if self._hold_kind(found) == "judge_view" and not found.files:
             return "this judge-view hold names no file the delegate could read: only a person decides it"
+        if self._hold_kind(found) == "skipped":  # no check a read-only model can make (L4-VER-094)
+            return SKIPPED_HOLD_REASON
         return None
 
     def _material(

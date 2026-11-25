@@ -46,11 +46,11 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 4. Who answers (L4-VER-094, D5)
 
-- [ ] 4.1 Tests first: `tests/unit/delegate/test_pass.py` or `test_review_fixes.py` (no call, escalated, SCN-VER-386),
+- [x] 4.1 Tests first: `tests/unit/delegate/test_pass.py` or `test_review_fixes.py` (no call, escalated, SCN-VER-386),
   `tests/unit/delegate/test_reply.py` (`check_reply` refuses accept and reject, SCN-VER-387), `tests/unit/delegate/test_prompt.py`
   (the prompt names the kind), `tests/unit/verifier/test_verdict_actor.py` (SCN-VER-388: `by: agent`, `delegate` and
   `clarifier` dropped with one `human.void`, `by: human` applied; a second round does not record a second void).
-- [ ] 4.2 Then: `_without_a_call` (`src/l4/delegate/run.py:852-872`), `_check_reply` (`src/l4/delegate/reply.py:456-470`), the rule
+- [x] 4.2 Then: `_without_a_call` (`src/l4/delegate/run.py:852-872`), `_check_reply` (`src/l4/delegate/reply.py:456-470`), the rule
   line of `src/l4/delegate/prompt.py:93-94`, and the filter after `effective_verdicts` in `_finalize`
   (`src/l4/verifier/ladder.py:1098`). Check that a voided consumed question is asked again (`raise_verdict_questions`,
   `verdicts.py:862-884`) with a ladder test; if it is not, ask the hold under a new question in `_finalize`.

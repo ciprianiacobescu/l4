@@ -819,3 +819,23 @@ def test_a_multi_line_configured_secret_in_a_long_escalate_reason_reaches_no_rec
     assert "[REDACTED:OPENAI_API_KEY]" in result["reason"] and result["reason"] == line_of(run)
     for text in (run.pushed(QUESTIONS), str(run.ledger())):
         assert "line-one" not in text and "line-two" not in text and "secret" not in text.replace("secretary", "")
+
+
+SKIPPED_HOLD = (
+    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
+    "can affect them (2 tests)"
+)
+
+
+def test_scn_ver_386_a_skipped_test_hold_is_a_persons_and_gets_no_call():
+    from l4.delegate.prompt import VerdictMaterial
+
+    held = VerdictMaterial("H-1", "hold", f"H-1 {SKIPPED_HOLD}", "", "")
+    reason = pass_module._Pass._without_a_call(fake_pass(held), None, None, None)
+    assert reason == "a skipped-test hold is a person's decision"
+    assert (
+        pass_module._Pass._without_a_call(
+            fake_pass(VerdictMaterial("H-2", "hold", "H-2 scope: `a.py`", "", "")), None, None, None
+        )
+        is None
+    )

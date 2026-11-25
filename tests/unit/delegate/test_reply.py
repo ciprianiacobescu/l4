@@ -630,3 +630,21 @@ def test_a_short_quote_is_named_not_reported_as_unresolved(tmp_path):  # SCN-DLG
     harness = check(tmp_path, reply(checked=[cite("spec:questions.md", "short")]), head=head)
     assert isinstance(harness, Discarded) and "cites a harness-written file" in harness.reason
     assert isinstance(check(tmp_path, reply(checked=[cite("test:tests/test_store.py::test_add", "")]), head=head), Kept)
+
+
+# -- skipped-test-hold (L4-VER-094, SCN-VER-387): the whole hold is a person's -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(reply(decision="accept", text="the tests ran in the stack"), id="accept"),
+        pytest.param(reply(decision="reject", text="WHEN the gate runs THEN they pass"), id="reject"),
+    ],
+)
+def test_scn_ver_387_a_reply_to_a_skipped_hold_is_escalated_whatever_it_decides(tmp_path, body):
+    kw = {"kind": QuestionKind.VERDICT, "tasks": ()}
+    got = check(tmp_path, body, hold_kind="skipped", **kw)
+    assert isinstance(got, Discarded) and got.status == "escalated"
+    assert got.reason == "a skipped-test hold is a person's decision"
+    assert isinstance(check(tmp_path, body, hold_kind="scope", **kw), Kept)  # the other kinds are as before

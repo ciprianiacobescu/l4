@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@7` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@8` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-023 to L4-DLG-025; SCN-DLG-15, SCN-DLG-15a, SCN-DLG-80, SCN-DLG-83)."""
 
 import dataclasses
@@ -84,9 +84,9 @@ def test_the_schema_is_strict():
 
 
 def test_the_version_and_the_digest():
-    assert PROMPT_VERSION == 7
+    assert PROMPT_VERSION == 8
     p = prompt()
-    assert p.version == "delegate@7"
+    assert p.version == "delegate@8"
     assert p.sha256 == hashlib.sha256((p.system + p.user).encode("utf-8")).hexdigest()
     assert p.system == SYSTEM and p.text == p.system + p.user
     assert prompt(view(title="Another?")).sha256 != p.sha256
@@ -242,6 +242,12 @@ def test_the_rules_of_a_chore_a_cap_only_criterion_and_the_judge_view_are_stated
     assert "per-test cap left uncovered" in text and "`path:line` (a `test:` id alone is not enough)" in text
     assert "judge could not see" in text and "Never `reject` such a hold" in text
     assert "the files the judge did not see" in text  # a split criterion
+
+
+def test_the_rule_of_a_skipped_test_hold_is_stated():  # SCN-VER-386
+    text = flat()
+    assert "A hold on existing tests that are skipped in a changed test file" in text
+    assert "Never `accept` or `reject` such a hold" in text and "only a person decides that, so `escalate`" in text
 
 
 CAP_REASON = (

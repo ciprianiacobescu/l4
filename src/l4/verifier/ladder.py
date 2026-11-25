@@ -226,6 +226,7 @@ from l4.verifier.types import (
     FeedbackRef,
     Finding,
     GeneratedOutcome,
+    HumanVerdict,
     Severity,
     StepRecord,
     TracingTest,
@@ -257,6 +258,7 @@ from l4.verifier.verdicts import (
     finding_sha256,
     hold_covers,
     hold_id,
+    hold_kind,
     hold_sha256,
     raise_verdict_questions,
     regressions,
@@ -1099,7 +1101,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     current = {c.id: text_sha256(c) for c in criteria}
     current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
     current |= {hold_id(h): hold_sha256(h, result.hold_views) for h in result.holds}
-    effective = effective_verdicts(events, current)
+    effective = _person_only_holds(wb, result.holds, effective_verdicts(events, current), events)
     result.findings, effective = carry_rejects(
         result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
     )
@@ -1136,6 +1138,30 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
     if result.verdict is Verdict.PASS:
         _hold_unjudged(vc, result)
+
+
+def _person_only_holds(
+    wb: Workbench, holds: Sequence[str], effective: dict[str, HumanVerdict], events: Sequence[LedgerEvent]
+) -> dict[str, HumanVerdict]:
+    """L4-VER-094: a skipped-test hold is a person's decision. A verdict of one whose `by` is not `human` (an agent that
+    `clarifier.answer_by_agents` lets write one, the delegate, the clarifier) is not in force: it is dropped, with one
+    `human.void` for its question, and the hold stays unresolved, so the next round asks it again (its question is
+    consumed, and nothing waits on the hold). A question that a `human.void` already names is not voided twice."""
+    voided = {str(e.data.get("question")) for e in events if e.type == "human.void"}
+    kept = dict(effective)
+    for hold in holds:
+        target = hold_id(hold)
+        verdict = kept.get(target)
+        if verdict is None or verdict.by == "human" or hold_kind(hold) != "skipped":
+            continue
+        del kept[target]
+        if verdict.question not in voided:
+            voided.add(verdict.question)
+            wb.emit(
+                "human.void", question=verdict.question, target=target,
+                reason=f"a skipped-test hold is answered by a person, not by {verdict.label}",
+            )  # fmt: skip
+    return kept
 
 
 def _carry_judge_passes(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion]) -> None:
