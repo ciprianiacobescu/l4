@@ -886,6 +886,31 @@ A question of a fix unit does not move the unit to `awaiting_human`. The unit st
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
 `l4 plan` says `fixing: fix unit questions open: …`.
 
+**Procedure: a unit in `fixing` whose fix unit cannot move** (the release after 0.4.60; L4-VER-095). The case: the
+unit failed on the finding `existing tests are skipped in a changed test file` on an older harness, its fix unit has one
+task for that finding, and the task asked a question because a fix unit cannot change test files. No answer lets the task
+run. `l4 status` shows `fixing` with `fix unit questions: Q-NNN`. Do these steps **in this order**:
+
+1. **Upgrade the pin first.** `l4 upgrade --harness-ref <release>` for the release that has this change, merge it to the
+   base branch, and use an `l4` of that pin or newer for the next steps (an older `l4` refuses `l4 retry` of a unit in
+   `fixing`, and refuses state-changing commands when it is older than the pin).
+2. **Retry the unit.** `l4 retry --unit <unit> --reason "<why>"`. It is accepted only when every pending task of the
+   open fix unit waits on an open question. If a task can run (nothing holds it, or the question was answered), it
+   exits 2 with `the fix unit <name> is running: the harness continues it at the next run`, and records nothing. The
+   run that follows, in commits of the harness (`L4-TDD: already-done`), ticks each pending task of the fix unit with
+   the reason `closed by l4 retry: <why>`, sets the question that held it to `superseded by retry` (the text stays; it
+   is not open, and `l4:needs-answers` goes), ends the fix unit and verifies the unit again in a fresh round. If an
+   answer came between the retry and the run, the run closes nothing and records `fix.close_skipped`. The fix round
+   that the closed fix unit used stays counted.
+3. **Answer the hold.** The fresh round, under the new harness, raises the hold above and no finding for the skipped
+   tests. Answer it as the bullet in this section says.
+
+Why not tick the task yourself: a commit of yours that changes the fix unit's folder (other than its `questions.md`)
+is a blocker of step 1, `a protected path was changed`. No fix step can repair it, and it spends the last fix round.
+Why the pin comes first: on the old harness the fresh round raises the same major finding again, a new fix unit
+(the last of three rounds) is written for a finding that no fix can make, and that round is spent. `l4 status` of such a unit
+names `l4 retry` as the way to close the fix unit.
+
 **Procedure: the command**
 
 `l4 questions` reads `questions.md` on the unit branch on `origin`, not in your work tree. It needs the forge
@@ -1176,6 +1201,29 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
+- A hold `skipped: existing tests in `<path>` are skipped, and this unit did not add or change a skip that can affect
+  them (<n> tests)` (the release after 0.4.60; L4-VER-092 to L4-VER-095) says that the unit changed a test file, the
+  gate's report holds old tests of that file as skipped, and the unit's diff adds or changes no skip that can affect
+  them. The usual cause is an environment the gate does not have: a docker-compose stack, a service, a variable
+  (`skipif(os.getenv("…") != "true")`). Before this release the same case was a major finding that nobody could waive,
+  and the fix unit that came from it could not change a test file. The question lists the test ids. **No test was run
+  for this check, and no base run was made**: the harness compares the skip markers and skip calls of the file at the
+  base and at the head (a changed condition, a new alias use, a new `pytest.importorskip`, a `pytestmark` or a skip in
+  a fixture all count as a changed skip), and it never says that the tests passed before. Two answers:
+  - `accept` says that you ran these tests where they can run, or that you know they pass there. It holds for this
+    content of the file and this list of skipped ids: an edit of the file, or another set of skipped tests, asks again.
+  - `reject: <reason>` stops the unit with `skipped_tests_rejected` ([7.3.4](#734-escalated-with-skipped_tests_rejected)).
+    A `WHEN … THEN …` is not asked for and makes no fix: a fix unit cannot change test files.
+
+  Only a person answers this hold. The delegate does not (no call is made, the question is escalated), and an answer
+  that an agent wrote (`by: agent`, `delegate` or `clarifier`; `clarifier.answer_by_agents` lets an agent write one)
+  is not in force: the harness records `human.void` for it and asks the hold again. A skip that the unit added or
+  changed stays a major finding, as before. Limits of the rule: it compares skip constructs and not behaviour, so a test
+  that did not skip at the base can skip now through an unchanged construct whose condition depends on code the unit
+  changed (for example `skipif(not hasattr(mod, "x"))`); a skip with no construct in the file (a `conftest.py`, an
+  option of the runner, a plugin) is a hold only when the unit changed no file of `tdd.test_support_globs` or
+  `tdd.runner_config_files`; a file that is new, renamed or unreadable, and a test that did not exist at the base,
+  stay a finding; only Python test ids are compared. Your accept is the statement that none of these applies.
 - A hold `UI criterion C-… has no end-to-end test; see the generated UI tests table` (harness 0.4.43 and later) says
   that step 5 could not give a UI criterion an end-to-end test that fails at the merge base and passes at head. The hold
   names no status, so it keeps the same id in every round; the question's context gives the status of this round
@@ -1624,6 +1672,7 @@ spec since the stop, a retry sends the unit to `implementing`.
 |---|---|---|
 | `fix_rounds_exhausted` | `fix rounds used <n>/<m>` | Read `## Findings` and `## Criteria`. Decide whether more fix rounds can help. If the spec is wrong, correct the spec on `<branch>`. The retry adds the rounds (one, or `--rounds <n>`). |
 | `no_convertible_finding` | `no finding of this round can be converted into a fix task` | Read the `not converted` lines. A retry alone repeats the same verdict. Give the fix as feedback first ([7.3.1](#731-escalated-with-no-convertible-finding)). |
+| `skipped_tests_rejected` | `a person rejected a hold on skipped tests of a changed file: a fix unit cannot change test files` | A person rejected the hold `skipped: existing tests in …`. A fix unit cannot change test files, so none was made. Change the file in your own commit, or accept the hold once you ran the tests ([7.3.4](#734-escalated-with-skipped_tests_rejected)). A retry alone repeats the same hold. |
 | `no_fix_units` | `<framework> has no fix units` | Report it as a harness defect. The framework cannot make fix units. |
 | `fix_unit_not_created` | `the fix unit could not be created: <error>` | Read the error. If it names a spec file that you can correct, correct the file on `<branch>`. If not, report a harness defect. A plain retry with no correction repeats the failure. |
 | `feedback_rounds_exhausted` | `feedback round limit reached (<n>)` | Feedback items used all rounds (`feedback.max_rounds`). The retry adds the rounds. |
@@ -1746,6 +1795,33 @@ escalates. `l4 status --unit <unit>`, the refusal of `l4 run --unit` and the sti
 
 A plan stopped on the unit (`unit_escalated`) shows the same way out in the `Next:` line of `l4 yolo status`, before the
 retry and the `l4 yolo resume`.
+
+#### 7.3.4 Escalated with `skipped_tests_rejected`
+
+Cause `skipped_tests_rejected` (L4-VER-093). A person rejected a hold `skipped: existing tests in …`: old tests of a
+changed test file are skipped, and the unit's diff adds or changes no skip that can affect them. A fix unit cannot change
+test files, so no task is made from the reject, whatever its reason says (also with a `WHEN … THEN …`), and the unit
+escalates. `l4 status --unit <unit>`, the refusal of `l4 run --unit` and the sticky note name the way out.
+**A retry alone repeats the same hold.** If another finding of a person also cannot be converted into a fix task, the
+detail says so; this way out comes first, and the other one shows when this one is resolved.
+
+1. Change the file in your own commit on `<branch>`: remove the skip, or make the tests able to run in the gate (set up
+   what they need there). A person's commit on a test file is allowed and is listed by step 1. Then:
+
+   ```sh
+   l4 retry --unit <unit> --reason "<why>"
+   ```
+
+2. Or, once you ran the tests where they can run, replace the answer with an accept (the audited override), then
+   retry the unit:
+
+   ```sh
+   l4 questions answer Q-NNN --unit <unit> --text "accept ran against the stack on <date>" --replace
+   l4 retry --unit <unit> --reason "<why>"
+   ```
+
+   An agent may not do it unless `clarifier.answer_by_agents` is true, and even then its answer is not in force for
+   this hold: only a person's answer is.
 
 ### 7.4 `waiting_capacity`: no agent is available
 
@@ -2433,6 +2509,7 @@ Maintainers.
 | Give an escalated unit more feedback rounds | `l4 retry … [--rounds <n>]`, or the label `l4:retry` ([7.3](#73-escalated)). |
 | Try an escalated unit again after a repeated failure | Change something, then `l4 retry`. A retry with no change fails again ([7.3](#73-escalated)). |
 | Verify a unit in review again | `l4 retry --unit <unit> --reason "<why>"` ([7.5](#75-in_review-the-pr-is-ready)). |
+| Close the fix unit of a `fixing` unit that waits on a question no answer can settle | Upgrade the pin first, then `l4 retry --unit <unit> --reason "<why>"`, then answer the hold ([7.1](#71-awaiting_human-a-question-waits-for-you), the procedure of the fix unit; L4-VER-095). |
 | Continue a unit that waits for capacity | Correct the cause, then `l4 retry`, or start a run ([7.4](#74-waiting_capacity-no-agent-is-available)). |
 | Continue after I answered a question | Push the answers ([7.1](#71-awaiting_human-a-question-waits-for-you)). The push starts a run. |
 | Change the spec of a unit | Change the spec on `<branch>` and push ([7.14](#714-change-the-spec-of-a-unit-that-has-a-branch)). |
@@ -2922,6 +2999,13 @@ Risks:
 ## 11. Known limits of 0.4.60
 
 These limits make operation more difficult. Know them before you start.
+
+- From the release after 0.4.60, an old skipped test of a changed test file is a hold when the unit added no skip that
+  can affect it. The check compares skip constructs at the base and at the head. It runs no test and reads no base
+  report, it sees Python test files only, and it cannot see a skip that comes from outside the file when the unit changed
+  a test-support or runner-configuration file (that stays a finding). Your accept says the tests ran or pass where they
+  can run ([7.1](#71-awaiting_human-a-question-waits-for-you)). A unit that is already in `fixing` for the old finding
+  needs the pin upgraded first and then `l4 retry`; a retry on the old harness spends a fix round.
 
 - With `gates.test.red_check: targeted`, a new test file that breaks an old test only when they run together shows at
   green and not at red (also after a resume), and green cannot change the frozen file. The harness names the cause and

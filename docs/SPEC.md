@@ -5774,7 +5774,7 @@ such a flood is asked in batches (L4-DLG-028): the cap still counts questions, a
 adapters' `read_only` mode (Claude Code: `--permission-mode plan`, tools `Read,Grep,Glob`; Codex: `-s read-only`,
 `--ephemeral`; opencode: L4-DLG-016; kiro-cli: L4-DLG-017) with no tool server and no forge or CI token, in a detached
 worktree of the pushed unit head that the sandbox MUST mount read-only, only its private directory writable. Its prompt
-`delegate@7` (a batch of L4-DLG-028: `delegate-batch@1`, the same rules for each of its questions; 0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion; 0.4.44: a `quote` is at least 12 characters, copied word for word) SHALL hold the question and
+`delegate@8` (a batch of L4-DLG-028: `delegate-batch@1`, the same rules for each of its questions; 0.4.22 amendment: the read tools named for any CLI, and the rules of L4-DLG-023 to L4-DLG-025; 0.4.34: the reference forms of L4-DLG-005 and the reason a previous reply was discarded; 0.4.35: which `.l4/` files are evidence; 0.4.39: a frozen test file opens only through `accept` of the clarifier suggestion; 0.4.44: a `quote` is at least 12 characters, copied word for word; skipped-test-hold: a rule line that says a hold on old skipped tests is never accepted or rejected by the delegate, L4-VER-094) SHALL hold the question and
 its evidence inside `<l4:data>` blocks that the system text calls data, never instructions, redacted before any cut.
 
 **L4-DLG-005 The delegate returns one strict result, and anything else escalates.** The delegate SHALL return
@@ -5961,6 +5961,7 @@ the id has no such path the question MUST escalate without a call (the check can
 hold the criterion's `judge_split` record (the parts and the files not shown). A judge-view hold (L4-VER-044) MAY be
 accepted with a `checked` entry in a file the hold names; a `reject` of it MUST be discarded and the question escalated.
 A judge-view hold that names no file (`LEGACY_LENGTH_HOLD`, the 0.4.14 text) MUST escalate without a delegate call.
+A skipped-test hold (L4-VER-092) cannot be checked by reading: the delegate MUST NOT answer it, with or without a call (L4-VER-094).
 
 **L4-DLG-025 A CI failure and a test-support change stay a person's.** A unit escalated with `ci_not_fixed` MUST NOT get a delegate pass or the planner action `delegate`. `question.raised` of
 a blocked fix chore SHALL carry `chore: true`; a fix unit's technical question raised before it counts as a chore's when
@@ -6011,7 +6012,7 @@ escalated; a result for a question outside the batch SHALL be ignored. The call'
 `budget.cost{role: delegate, questions, batch}`, and each `delegate.result` SHALL carry `batch`, `batch_size` and its
 share of the cost (None when the call reported none, so an unpriced batch counts at N answers' cost, its budget).
 `delegate.pass` SHALL record `calls`. A batch of one and a question of another kind SHALL be asked as before
-(`delegate@7`, `l4/delegate-result@1`). A consumer's unit spent $43.83 of its $50 cap on 30 verdict questions of one
+(`delegate@8`, `l4/delegate-result@1`). A consumer's unit spent $43.83 of its $50 cap on 30 verdict questions of one
 round, about $1.46 each, and escalated the other 21 on the cap; each call paid again for the same rules, specification
 and reading of the same head.
 
@@ -6040,7 +6041,7 @@ discarded as before (`the reply was discarded: <reason>`): it acts on the unit, 
 different risk. The next prompt SHALL follow the reason with one instruction per rule in place of the sentence about
 references (`Shorten the reason to at most 1000 characters; it had <n>.`, `Keep at most 20 checked entries; it had
 <n>.`, `Shorten each checked <field> to at most <m> characters; the longest had <n>.`, for a quote `…, still copied word
-for word; …`); the system text and `delegate@7` SHALL NOT change. A length retry SHALL take one of the question's
+for word; …`); the system text and `delegate@8` SHALL NOT change by this requirement (`delegate@8` is the version that the change `skipped-test-hold` gave the prompt when it added the rule line for a skipped-test hold, L4-VER-094; the length retry itself adds no line and no version). A length retry SHALL take one of the question's
 attempts (`delegate.max_attempts_per_question`) as a deferral for a reference, a short quote, a timeout or an error
 does; no rule SHALL add an attempt or keep its own count, so with the default 2 a question's raise is called at most
 twice whatever discarded its first reply (a reference retry and a length retry never both happen), and with a larger
@@ -6156,7 +6157,7 @@ far is still written). Each step is resumable (L4-VER-011).
 | 1 | integrity | no outstanding `guard.violation`; no deleted/skipped/weakened pre-existing tests (diff analysis); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and stays [U] for other support changes; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), and runner sections changed by no red commit without `[test-infra]` or an answer (L4-IMP-040), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`); **Python encoding** (L4-SEC-042): a `.py` or `.pyi` file that base..head adds or changes, whoever committed it, and that declares an encoding other than `utf-8`, `utf-8-sig` or `ascii` (or whose first two lines cannot be read within a 64 KiB prefix) is a blocker, and so is a Python-named link, touched by base..head, whose target does or that ends at no regular file (one blocker lists every file) |
 | 1 | integrity | no outstanding `guard.violation`; no pre-existing test deleted, skipped, changed or bound again by a harness commit, and no test an earlier step of the unit wrote changed by a later red commit, compared per test on the AST by file and qualified name (L4-VER-030..032; people's changes and allowed ones are listed); and **every test that passed at the base still passes on the unit's code** when the gate runs at head with every test and support file the unit added or changed at its base version (L4-VER-038; any language with a JUnit report); **red→green freeze held** for every task (test files, test-support paths and runner-config sections identical at the red and green commits); **a test or support path changed by a green or fix-chore commit** of the harness (test path freeze, L4-IMP-006 (7); allowed: the paths of a `task.unfrozen` (listed with their source and counted `(+n opened by task text)`), the files of a `task.tests_added` for an exempt commit, and the commits of a `[test-infra]` task; a blocker); **content scan** of the unit's test-support and runner-config changes for result-manipulating constructs — pytest hooks `pytest_runtest_makereport`, `pytest_report_teststatus`, `pytest_collection_modifyitems` (deselect/skip), `pytest_runtest_call` wrappers; jest/vitest custom `reporters`, `testResultsProcessor`, `testPathIgnorePatterns` additions; Playwright reporter or `grepInvert` changes; Go `TestMain` exiting 0; equivalents per language — any hit is a blocker unless the task carries a human `[test-infra]` tag; **support files never replace the code under test**: test-support files may not monkeypatch, patch or assign the **symbols the unit added or changed** (functions, methods, classes from the stub list and the diff) — patching collaborators such as clocks, network clients or environment on those modules stays allowed — and may not make any patch conditional on files or environment variables the unit creates (AST rule for Python, per-language rules [U] from the change-0 fixtures); a hit is a blocker; the rule is checked for opened files (L4-IMP-016) and for every changed Python test-support file, a test-glob file with no test included (L4-VER-037, L4-VER-039: module-level code, an autouse fixture, a fixture one requests and a plain function that patch the unit's code block; a fixture a test requests by name is listed), and its list of result-manipulating constructs, which also covers the unit's production diff (a line naming `.l4-out`, a report path, `L4_*` or `PYTEST_*` is a blocker; a test for pytest is listed for the judge), gains `pytest_pyfunc_call`, a non-wrapper `pytest_runtest_call` or `pytest_runtest_setup`, and an assignment to `.obj` or `.runtest` (L4-VER-039); it stays [U] for other languages; test-only dependencies added in green are a major finding (red is where they belong); gate configuration unchanged (L4-IMP-006), including the **script entries the gate commands resolve to** (`package.json` scripts, Makefile/tox/poe/just targets); **new inline suppressions** in the unit's diff (`# noqa`, `# type: ignore`, `@ts-ignore`, `@ts-expect-error`, `eslint-disable`, `//nolint`, `#nosec`/`nosec`, `gitleaks:allow`) must each be **declared** in the implementer result (`suppressions: [{file, line, rule, reason}]`): an undeclared suppression is a major finding (the fix unit removes it, and declares it only if it cannot be removed); a suppression or a result-manipulating support or runner-config change that only people's commits wrote (per commit, as for tests: the commits that raised the number of that comment in the file are all people's; `git blame` only tells two lines of one text apart when both kinds of author added it; the author rule of L4-SEC-004) is the owner's edit on the unit branch: listed in `verification.md` (`## Suppressions added by humans`, `## Support and runner-config changes made by humans`), never a finding (W-D6, "human edits are listed, not reverted"); declared ones are listed in the PR and reviewed by the judge panel (a judge objection is judge-only → human verdict, never an automatic FAIL); `gitleaks:allow` and `nosec` are never accepted without a human `[config]` tag; no bulk snapshot updates without a task that says so; secret scan clean on the diff, run with the **harness-owned** gitleaks config and ignore file (the repository's `.gitleaksignore` is ignored); scope check per `sdd.scope_check`; **TDD history** for each non-exempt, non-`pre_adoption` task: a red commit (or a verifier red commit, L4-VER-012) precedes its green commit, the red tests fail at the red commit, and the red tests as committed in the red commit pass at head; a frozen test that a human answer unfroze for green (`task.unfrozen`, L4-IMP-002) is not a freeze violation: it is listed in `verification.md` and in the step's note (`(+n unfrozen by human answers)`); **Python encoding** (L4-SEC-042): a `.py` or `.pyi` file that base..head adds or changes, whoever committed it, and that declares an encoding other than `utf-8`, `utf-8-sig` or `ascii` (or whose first two lines cannot be read within a 64 KiB prefix) is a blocker, and so is a Python-named link, touched by base..head, whose target does or that ends at no regular file (one blocker lists every file) |
 | 2 | build | `gates.setup`, `build`, `lint`, `typecheck` succeed, then each reproduced `repository-ci:<job>` step of the active window (L4-ARC-002; a failure is the finding `repository CI failed: <job>`) |
-| 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; a gate whose run failed only on one to five pre-existing tests (not a red test of the unit, in a file at head that `base..head` does not change) is run again as a whole, at most `flaky_repeats` runs in all: a test that passes in one of them is the minor finding `a pre-existing test is flaky in the <gate> gate`, one that never passes keeps the blocker (L4-VER-076); a failure of a new test, or of a test in a file the unit changed, causes no repeat; the repeat starts from the tree run 1 started from, ends on the same failure as run 1 or when the deadline is short |
+| 3 | tests | full `gates.test` (+ `e2e` when configured, with `gates.e2e.serve`) re-run by the verifier; non-vacuous (L4-GAT-002); every test added in the unit executed; an old test that the report holds as skipped in a changed test file is a deterministic major finding, unless its skip predates the unit (no skip construct that can affect it was added or changed between the base and the head), when it is a hold of kind `skipped` that only a person answers (L4-VER-092..094); a gate whose run failed only on one to five pre-existing tests (not a red test of the unit, in a file at head that `base..head` does not change) is run again as a whole, at most `flaky_repeats` runs in all: a test that passes in one of them is the minor finding `a pre-existing test is flaky in the <gate> gate`, one that never passes keeps the blocker (L4-VER-076); a failure of a new test, or of a test in a file the unit changed, causes no repeat; the repeat starts from the tree run 1 started from, ends on the same failure as run 1 or when the deadline is short |
 | 4 | traceability | build `criterion → [tests] → status` from reports; apply L4-VER-009 (discriminating evidence) and `max_criteria_per_test`; criteria without discriminating passing evidence are *uncovered*; a proved, passing test over the cap is kept as a candidate that the judge can name for a criterion (L4-VER-054) |
 | 4a | audit sampling | for `audit_sample_ratio` of the covered **new** criteria (at least 1, chosen by a seeded hash of unit id + round so the choice is reproducible), the verifier agent writes an independent test from the criterion text alone, in an **exported tree without `.git`** from which every test file and test-support file the unit added or changed has been removed (so it cannot read them, not even through git history); the audit test must be discriminating against the baseline of L4-VER-009 and pass on head — a failure on head goes to L4-VER-012. An accepted audit test is then linted in this step, on its own file: every `gates.lint` and `gates.typecheck` command runs on it (the lint gate of step 2 stays where it is, since it runs before the test exists and moving it behind 4a would fail the ladder on a test the verifier wrote); a failure goes back to the writer once with the lint output, and a test that still fails is rejected (`lint: <first line>`), not committed and not shown to the judge, and reported as a minor finding like any rejected audit test (the criterion is not held: the unit's own tests trace it), so a lint failure never reaches a hand-off head. The judge's per-test list holds the round's accepted audit tests, labelled `audit`, and `verification.md` lists the rejected ones with the reason. The zero-value run of an audit test is judged by L4-IMP-060 against the audit's head run: a run that could not run the test (no test executed, its module did not import) is recorded `inconclusive` (L4-VER-050), not rejected: no finding, the file is not committed, and `verification.md` lists it under `## Inconclusive audit runs`. Audit tests, and their zero-value run, run with every test and support file the unit added, changed or deleted at its base version (added data under `fixtures/`, `mocks/`, `__mocks__/`, `testdata/` excepted), collecting only the audit file when the gate is pytest (L4-VER-033); they never run with the unit's files in place; an audit test whose import fails in a production module, or that gives no readable result, holds its criterion, and one whose own import fails twice is rejected (L4-VER-034); each record says `support` (L4-VER-036) |
 | 5 | test generation | for each uncovered criterion (when `generate_missing_tests`) the verifier agent writes a test tagged with the criterion ID — Playwright when the criterion is UI-facing (L4-VER-014), else the project's unit/integration framework. It must be **discriminating against the baseline of L4-VER-009** and **pass on head** (the head run with the e2e runner's own support files the unit changed at their base versions, never added app data; when it cannot run so or its server does not start, uncollectable and held, never run in place, L4-VER-035). Pass at the baseline → rejected as non-discriminating (one retry). Fail on head → L4-VER-012. "Generation impossible" = the agent returns `not_testable` with a reason, or two non-discriminating attempts, or the test cannot be collected. A UI criterion whose accept is in force is **waived**: the writer is not called, no hold is raised and `verify.generated` says `waived` (L4-VER-067). A UI criterion that step 4 covers with a discriminating test and for which the agent returns `not_testable` is a **note** in the generated UI tests table, not a hold (`covered_by`, L4-VER-067). The UI test writer is shown the e2e suite's `e2e/conftest.py` and helper modules as they are at the merge base, bounded (L4-VER-077). A generated test that is not accepted is kept as a bounded copy redacted before its cut, with the redacted failure of its head run, for the hold's question and `verification.md`, and the writer's retry after a failure at the head gets that failure (L4-VER-083, L4-VER-084). A UI criterion unchanged on the base whose only tracing tests are passing `pass_to_pass` tests in files the unit did not change is **carried from the base**: no writer call and no hold, listed in the generated UI tests table (L4-VER-086). Generated and audit tests are kept in the round's evidence directory and committed **once, at the end of the round** (L4-VER-011) |
@@ -6635,6 +6636,73 @@ kind the role needs and gets no warning. [V, a consumer's step 4a parked a unit 
 that opencode's permission rules refused in the tool-less writer call, once on a reply stopped at a 32,000-token output
 limit; the other profiles of `roles.verifier_agent` were not tried, and a retry chose the same profile again; about an
 hour and a half of waiting]
+
+**L4-VER-092 A skip that predates the unit is a hold, not a finding.** Step 3 SHALL decide, for each old test that the gate report holds as `skipped` in a test file the unit changed, whether
+its skip predates the unit. The skip SHALL predate the unit only when all of these hold: the file is reported modified
+by `base..head` (not added, not renamed, not deleted); the file's base and head blobs are read and parse as Python; the
+test maps to a qualified name of the file that is a test at the base; no skip construct was added or changed between the
+base and the head in a scope that can skip that test (the test, its class, `<module>`, or a non-test function or method
+of the file), by `scan.skip_constructs` as a multiset difference of the head's constructs over the base's, so that a
+removed skip never counts and a changed condition, a new alias use or a new `importorskip` does; and, when the file
+holds no skip construct in those scopes, the unit changed no file that matches `tdd.test_support_globs` or
+`tdd.runner_config_files`. A test whose skip predates the unit SHALL NOT be named in the finding `existing tests are
+skipped in a changed test file`; the tests of one file SHALL be one hold of kind `skipped` with the text `skipped:
+existing tests in `<path>` are skipped, and this unit did not add or change a skip that can affect them (<n> tests)`.
+Any other old skipped test of a changed file, and every case in which a blob cannot be read or parsed, SHALL stay in the
+deterministic major finding as before. The hold SHALL join the round at step 3, whether diff coverage is on or off, and
+SHALL be listed in `evidence.holds` of `verdict.json` with kind `skipped` and in `tests_ran.summary.skipped_predating`.
+The Evidence section of `verification.md` SHALL print the line `Skipped in a changed file before this unit (hold): <ids>`
+when `skipped_predating` is not empty, and a `verdict.json` that has no `skipped_predating` SHALL read as an empty list.
+The check SHALL NOT run a test and SHALL NOT read a base report. [V, the code: step 3 compared nothing with the base, and
+a fix chore puts every test path back, so no fix unit could make a skipped test run]
+
+**L4-VER-093 The skipped-test hold is asked as a verdict question, bound to the file, and its reject makes no fix unit.** The hold of L4-VER-092 SHALL be asked like any hold (`Kind: verdict`, target `H-` and eight hex digits of its text). Its
+kind SHALL be read from the text prefix `skipped: existing tests in ` (`hold_kind` returns `skipped`); `hold_subjects`
+SHALL return none for it, so no judge finding is settled by its answer. The question SHALL name the file and the count,
+list the skipped test ids, say that the unit's diff adds or changes no skip that can affect them and that no base run was
+made, say that an `accept` means the person ran them where they can run or knows they pass there and holds for this
+content of the file only, and say that `reject: <reason>` ends the round because a fix unit cannot change test files. A
+person's `accept` SHALL be bound (`result.hold_views`) to the head blob of the file and the full sorted list of its
+skipped ids, so that an edit of the file or a change of the skipped set voids it and the hold is asked again. An `accept`
+SHALL waive the hold. A `reject`, with or without a reason, with or without a `WHEN ... THEN ...`, SHALL become a finding
+of source `human`, severity major, titled `Rejected hold: a skipped test is not accepted`, which the fix planner SHALL
+list as not converted; no fix unit SHALL be written for it; the round SHALL end escalated with the reason
+`skipped_tests_rejected`, and `l4 status` SHALL say the way out: a commit of the person's own on the unit branch that
+removes the skip or makes the tests able to run in the gate, then `l4 retry --unit <unit> --reason TEXT`, or an accept
+that replaces the answer once the tests ran. A reject of this kind beside another finding of a person that cannot be
+converted into a fix task (or a reject of a hold on the judge's view) SHALL keep the code `skipped_tests_rejected` and its
+way out, and the reason text of the escalation SHALL say that another finding of a person also cannot be converted into a
+fix task; the other way out shows once this one is resolved.
+
+**L4-VER-094 Only a person answers a skipped-test hold.** The delegate SHALL NOT answer a skipped-test hold: `_without_a_call` SHALL return a reason for kind `skipped`, so the
+question is escalated to a person with no model call, and `check_reply` SHALL refuse both an accept and a reject of it
+with status `escalated`. The delegate prompt SHALL say so. A verdict of such a hold whose `by` is not `human` (`agent`,
+`delegate`, `clarifier`, as `clarifier.answer_by_agents: true` allows an agent to write one) SHALL NOT be in force: step
+10 SHALL drop it, SHALL record `human.void{question, target, reason}` once for its question, and the hold SHALL be asked
+again by the next round.
+
+**L4-VER-095 A unit in `fixing` whose fix unit waits on a person can be retried.** `l4 retry` SHALL be accepted for a unit in phase `fixing` when the open fix unit has at least one pending task and every
+pending leaf of it is held by an open question (the planner's `fix unit questions open` state); in any other `fixing`
+state it SHALL be refused with exit 2 as before, with the text `the fix unit <name> is running: the harness continues it
+at the next run` when a task can run. The retry SHALL record `unit.retried` with `close_fix_unit: <name>` and start a run
+as every retry does. In that run, before it selects a task, the harness SHALL, for each pending task of the fix unit,
+tick it `already-done` in a harness commit (`L4-TDD: already-done`, `task.done{tdd: "already-done", closed_by: "retry",
+reason}`, parents ticked), SHALL set the Status of each open question that held it to `superseded by retry` and record
+`question.superseded`, and SHALL then end the fix unit with `fix.done`. A question set so SHALL hold no task, SHALL be
+out of `questions.open`, and the label `l4:needs-answers` SHALL go; its text and the fix unit's other files SHALL be kept.
+The unit SHALL go to `verifying` and the round SHALL be judged afresh. The fix round the closed unit used SHALL stay
+counted. A person's own commit that ticks a task of a fix unit SHALL remain a step 1 blocker (`a protected path was
+changed`); it is not a way to close one.
+The run SHALL close a fix unit only when the same condition still holds when it reads the fix unit (an answer may have
+come between the retry and the run): when a task of the fix unit can run, the run SHALL close nothing, SHALL record
+`fix.close_skipped{fix_unit, reason}` and SHALL run the fix unit as it always does. The records of a close are
+`unit.retried{close_fix_unit}`, `task.done{tdd: "already-done", closed_by: "retry"}` (also `fix_unit`, `reason`, `parents`),
+`question.superseded{fix_unit, ids, closed_by: "retry"}` and `fix.done{closed_by: "retry"}`; the fold keeps the pending
+close as `UnitState.close_fix_unit` until `fix.done` or `fix.close_skipped`. While a close is pending the planner fact
+`UnitFacts.fix_closing` SHALL be true and `l4 plan` SHALL say `implement` with the reason `fix unit <name>: closed by the
+retry at the next run` instead of `fixing: fix unit questions open`. For a unit in `fixing` whose open fix unit waits on
+a person, `l4 status` SHALL name `l4 retry --unit <unit> --reason TEXT` as the way to close the fix unit, after
+upgrading the pin to a release that has this requirement, and SHALL NOT tell anyone to tick a task by hand.
 
 **L4-VER-015 Failure precedence.** One rule decides what a failing verifier dependency means:
 | Situation | Outcome |
@@ -7269,6 +7337,8 @@ round ends in `verify_fail_exhausted` (exit 13); nothing is asked or spawned on 
 consumed by the fix unit (`fix.spawned{consumed}`); a hold that is still true in a later round after its fix unit is
 judged afresh and asked again, as a rejected finding is. A reject that no task could be derived from is consumed by a feedback-only fix unit that comes after it (L4-VER-016).
 
+A fourth kind, the **skipped** hold (its text starts `skipped: existing tests in …`, L4-VER-092), is answered by a person only (L4-VER-094): its accept is bound to the head blob of the file and the list of skipped ids, and its `reject`, with or without a `WHEN … THEN …`, is a human major finding that no fix task is derived from (a fix chore puts every test path back), so the round escalates with `skipped_tests_rejected` (L4-VER-093).
+
 **One question per subject.** A blocking judge-only finding whose title, detail or suggested fix names a subject of a
 hold is *about the hold*: it is not asked on its own. A scope hold's subject is its file; a coverage hold's subjects are
 its functions, each named by its name (a whole word of at least four characters), and the file of its module-level code
@@ -7726,6 +7796,8 @@ An answer's renewal adds `task.attempts_renewed` (`{task, phase, questions, fail
 
 A targeted red check adds these records (L4-IMP-120, L4-IMP-121): the gate `test-targeted` (its own `gate.finished`), `check` (`targeted` or `full`) and, for `targeted`, `files` (sorted, at most 50) on `task.red_ok` of a step of a configuration with `gates.test.red_check: targeted`, `task.red_check_full` (`{task, attempt, why, detail}`: a step of such a configuration ran the whole suite; `why` is `unit_switched`, `named_tests`, `stale_tests`, `base_collection_errors`, `stubs`, `restored`, `existing_file_changed`, `not_a_test_module`, `no_test_file`, `too_many_files`, `odd_path`, `no_report`, `collection_errors`, `existing_tests_ran`, `file_without_tests`, `id_without_file` or `new_test_not_failing`; `detail` at most 300 characters) and `task.red_check_disabled` (`{task, attempt, why, tests, red_sha}`: green's whole run found a regressed test, or, after a targeted red of the task, a missing red test, a collection error that names a file of that red or no readable report; or `resume_red` could not measure a targeted red's base without its files; `why` is `regressed`, `ids_missing`, `green_collection`, `green_no_report`, `resume_files` or `resume_put_back`, `tests` at most 20 ids (or files), `attempt` 0 for `resume_red`, once per unit, written from the unit's ledger whatever the configuration says). A red step of a `full` configuration writes none of them. An older harness ignores the keys and the two events.
 
+A retry of a unit in `fixing` and a hold of old skipped tests add these records (L4-VER-092, L4-VER-094, L4-VER-095): `close_fix_unit` (the fix unit's name) on `unit.retried`, written when `l4 retry` finds the open fix unit waiting on a person; `fix.close_skipped` (`{fix_unit, reason}`), written by the run that finds a task of that fix unit able to run, which closes nothing; `closed_by: "retry"` on `task.done` (with `tdd: "already-done"`, `fix_unit`, `parents`, `reason: "closed by l4 retry: <reason>"`), on `question.superseded` (`{fix_unit, ids, closed_by}`; the Status of each question that held the task becomes `superseded by retry`) and on `fix.done`; and `human.void{question, target, reason}` for the verdict of a skipped-test hold whose `by` is not `human`, once per question. The fold keeps a pending close as `UnitState.close_fix_unit` until `fix.done` or `fix.close_skipped` of that fix unit, and the planner fact `UnitFacts.fix_closing` is true meanwhile (`l4 plan`: `implement`, `fix unit <name>: closed by the retry at the next run`). `verdict.json` lists a hold of kind `skipped` in `evidence.holds` and its ids in `tests_ran.summary.skipped_predating`.
+
 A near pass adds these records (L4-IMP-100): `near_pass: true` on `task.attempt_failed` of a green attempt that passed every test and failed only its static gates (absent otherwise), `task.near_pass_applied` (`{task, attempt, from_attempt, from_profile, patch_sha256, files}`: the near pass is applied to the work tree before the agent runs; `files` at most 50) and `task.near_pass_dropped` (`{task, attempt, from_attempt, reason}`: `reason` is `replay` or the first line of the `git apply` error, at most 300 characters), and `near_pass` (`{attempt, profile}`) on `breaker.tripped`; paths and the patch's digest only, never the patch. A
 lint-only failure with a link out of the work tree also records `guard.violation{action: refused}`: the outside-link check
 runs to decide the near pass.
@@ -8105,7 +8177,7 @@ sticky note section `Escalated` SHALL say: a retry alone repeats the same verdic
 finding asks for as feedback (`l4 feedback add --unit U --kind behaviour --when ... --then ... --text ...`, then the
 git lines that `add` prints), then `l4 retry --unit U --reason TEXT`. Every other cause keeps its text
 (`l4 retry --unit U --reason TEXT`). The label `l4:retry` is the retry and helps after the feedback is pushed. An
-escalation with `judge_view_rejected` names its own way out (L4-VER-044).
+escalation with `judge_view_rejected` names its own way out (L4-VER-044), and so does one with `skipped_tests_rejected` (L4-VER-093).
 
 **L4-OPS-023** A CI failure that no fix touched is not handed off again. A project file is a path outside the units' and
 fix units' folders, `openspec/changes/**`, `.kiro/specs/**`, `**/.l4/**`, `**/.l4-out/**` and
@@ -8619,7 +8691,7 @@ answers not consumed), the wait detail that `l4 yolo status` prints (text and `-
 the live reason (the answer is recorded and the next run reads it), not the detail recorded when the plan began to wait.
 
 **L4-YOLO-055 A plan stopped on a unit with its own way out names that way first.** For a plan stopped with `unit_escalated` on a unit whose escalation has its own way out (`l4.state.next_step.way_out`:
-`judge_view_rejected`, `no_convertible_finding`, `ci_not_fixed`), the `Next:` line of `l4 yolo status` and the refusal of
+`judge_view_rejected`, `skipped_tests_rejected`, `no_convertible_finding`, `ci_not_fixed`), the `Next:` line of `l4 yolo status` and the refusal of
 `l4 yolo resume` SHALL name that way out, not `l4 retry --unit U` first. Any other cause keeps its text.
 
 **L4-YOLO-056 The next line of a waiting plan follows the unit's answer step.** For a waiting plan whose current unit is `awaiting_human` with an answer that is invalid, dismissed or only a draft, the
@@ -10407,6 +10479,7 @@ Built in this order; each change is a unit the harness itself could later run (d
 | 142 | `audit-writer-chain` | step 4a audits a unit's Python code only, its test goes where the test command collects it, and a verifier-agent call that a profile cannot answer is asked of the next profile of the chain. `ladder._audit_scope_note` (replaces `_no_python`): no changed `.py` file is `not_run` as before; a changed `.py` file outside `tdd.test_globs` and `tdd.test_support_globs` audits; a unit whose changed `.py` files are all tests or test support audits when step 3's unit-gate report holds a test of a Python file of the tree (`evidence.testsran.file_of_test`), or when there is no report, and is otherwise `not_run` with a note that names them. `audit.red_test_directory(..., report)` counts a test file only when the report shows it, else `confirm_collected` runs. `l4.verifier.writer_chain.WriterChain(select, open_backend, on_limit, skip, failures, emit, step, role, redact)` (new, an `LLMBackend`; `select`, `open_backend`, `on_limit` and `redact` are callables, `step` is `4a` or `5`, `role` is `audit` or `ui_tests`), built by `writer_for` with one skip set and one failure list per round: an `error` reply (`length_stop`, `permission_blocked`, any other) records `availability.judge_error{role: "verifier_agent", profile, kind, detail, step}` and the discarded call's `budget.cost`, skips the profile for the round and asks the next `select_judge(role="verifier_agent", skip=...)`; a limit records `availability.limit` and uses `Factory.on_limit` (the `on_limit` callable, with `probe_vetoes`); none left returns the last result with `no profile of roles.verifier_agent could answer: ...`: when it ended on a usage limit step 4a raises `RoleLimit` with that profile's limit (the unit waits for that reset, exit 12) and step 5 raises it too, otherwise step 4a waits (exit 12) with the summary and step 5 records `writer_failed` with it. A TypeScript consumer whose browser tests are Python parked two units for capacity, about an hour and a half, on audit writers that refused a tool call or stopped at the output limit, for audit tests its Node unit gate could never collect (L4-VER-089..091, L4-VER-002, L4-VER-015, SCN-VER-356..371; `openspec/changes/audit-writer-chain/`). Limits: a failed profile is remembered for the round only; a timeout and an invalid reply do not move; audit tests are Python only | the unit tests (`test_audit_nonpython`, `test_audit`, `test_writer_chain`, `test_ladder`, `test_generate`) |
 | 143 | `implementer-stall-limit` | an implementer step that stalls on a profile, by an idle stop after a tool call or at the agent's 1800 s limit, is a limit of that profile when a later profile can take the step, once per task window, and no failed attempt. `l4.implementer.tdd.agent_step` names a stall of kind `silent` (L4-IMP-087, unchanged), `idle` (an idle mark with a tool call seen, or from an adapter with no stream reader) or `time` (status `timeout` with no idle mark), and raises `RoleLimit(run, carried)` with a `LimitSignal` of that kind (`LimitSignal.kind` gains `idle` and `time`; source `run.idle` or `run.timeout`; excerpt `no output for <t> after <n> tool calls` or `the agent step reached its time limit (<t>)`) when `roles.implementer` lists more than one profile, `_stalled_before` (replaces `_silent_before`: an `agent.idle` or `agent.time_limit` with `as_limit` true, or a 0.4.60 `agent.idle{silent: true}`, of the task and fix unit in `deadline.window`; `task.attempts_renewed` does not end the window) finds none, and, for `idle` and `time`, `StallPlan.replaceable` holds (a profile after the stalled one). `Workbench.stall_plan(task, phase)` (new optional field, set by `Orchestrator._workbench` and `fixloop._child_workbench`; the fix loop's says not replaceable for an `idle` or `time` stall of a task already in `retried`) gives a `StallPlan(replaceable, veto, forward)`: `replaceable` is `Factory.can_replace(selected, constraints)` (new: a profile AFTER `selected` in the chain with another `(tool, model)` cool-down key, not cooling, with no failed probe in the cache (`FallbackSelector.cached_failure`), accepted by the request's constraints and by the veto; no probe sent), `forward` is `Factory.later_than(selected)`, the constraint that refuses the stalled profile and every earlier one (a stall moves forward only: the chain runs from cheap to strong), which `StallPlan.refusing(kind)` joins to the veto for `idle` and `time` and not for `silent` and `veto` a `Constraint` that refuses the profiles whose failed attempts of the phase in the window (`seed_attempts`) reached `max_task_attempts`, which `agent_step` puts on the signal (`LimitSignal.veto`, outside equality and repr) and `switch_profile` adds to the task's veto, for all three kinds and for an adapter's own limit that a stall kept, because a limit fallback selects again from the chain's start and could hand the step to a spent profile, which `run_task` ends at once with `max_task_attempts`. The cool-down is `availability.default_cooldown` through the existing `cooldown_until`, the hello is cleared, `availability.limit`, `availability.cooldown` and `availability.fallback` carry the kind, and the existing `_fall_back` discards the step's work (`Workbench.discard_changes`, the red commit stays) and hands on the near pass the step began from (`RoleLimit.carry`), never the stalled edits. `agent.idle` gains optional `kind`, `as_limit`, `discarded_files` and `discarded_paths`; a new `agent.time_limit` is written before `agent.finished`; a stall that is not a limit carries `as_limit: false` and the reason `<kind>: already once for this task` or `<kind>: no other profile can take the step`. `ProgressTrace._agent_idle` gains the suffixes and `_agent_time_limit` is new; `_previous_attempt_block`, `orchestrator.switch_profile` and `fixloop._fall_back` carry the detail of all three kinds. A consumer plan with a free-profile-first chain lost 32 of 171 implementer calls, 586 agent minutes, to idle and time-limit stops that each cost an attempt; the same free profile went silent again in 9 of 12 next attempts (L4-IMP-112..116, L4-AVL-014..015, L4-IMP-017, L4-IMP-024, L4-IMP-087, L4-IMP-094, L4-IMP-100, L4-AVL-003, L4-AVL-006; `openspec/changes/implementer-stall-limit/`). Limits: a chain of one profile, the silent stop's own rule (it still parks when nothing else is usable), every other role and every other status are unchanged; a profile that `can_replace` accepts can still fail a probe it was never asked (none cached, or a transient failure) and park the unit; the stalled step's edits are not kept | the unit tests (`test_liveness_step`, `test_stall_limit`, `test_escalation`, `test_near_pass_carry`, `test_fallback` of availability, `test_fixloop_fallback`, `test_progress`) |
 | 144 | `red-check-targeted` | a red step that adds only test modules runs only those files, and every other red step runs the whole suite as before. `gates.test.red_check` (`full`, the default, or `targeted`; with `targeted` a `gates.test.targeted` that has no `{files}` word of its own, has it twice, or holds `{grep}` does not load, L4-CFG-007). `l4.implementer.red_check` (new): `choose` (per step, in order: no `task.red_check_disabled` in the unit's ledger, no named or stale test, no collection error at the base, no stub, nothing put back by red scope, every changed path new and a test module by `tdd.test_globs`, no support or runner-configuration glob and `is_support_file` on the work-tree file, 1 to 50 paths and 8,000 bytes, none starting with `-`; the first failing rule is the `why`), `targeted_command` (the `{files}` word replaced after `shlex.split`, paths sorted, one argument each), `unusable` (a report was read, no collection error, no id of the base report, every file owns an id and every id a file by `file_of_id`, every id failing; else the whole suite in the same step and `task.red_check_full{why, detail}`), `with_targeted` (the base report plus the new failing tests, local to `run_red`; `RedOutcome.base_report` stays the baseline). The gate is `test-targeted`, `task.red_ok` gains `check` and `files`, and a targeted run that times out fails the attempt with no fallback. `resume_red` (it runs at the start of every execution of a task) measures a targeted red's base with the red's files removed from the work tree for its one whole run and put back byte for byte, so green sees an old test that those files break; a record or files that do not match fall back to a whole run at the red commit and record `task.red_check_disabled` (`resume_files`, `resume_put_back`). In a unit that has a targeted red, a regressed base-passing test of green's whole run after its re-run records `task.red_check_disabled` once, and so, for a task whose own red was targeted, does a missing red test, a collection error that names a file of that red (`green_collection`) or a whole run with no readable report or a timeout (`green_no_report`): the unit's later reds run whole (`unit_switched`), `l4 restart` starts a new ledger, and the reason of such a task ends with the text of L4-IMP-122 (not for a missing report). The record is read from the unit's ledger, not from the key. A path that starts with `@` is never a targeted argument. Green, the near-pass carry, the next baseline and verification are unchanged (L4-IMP-117..122, L4-GAT-007..009, L4-CFG-007, SCN-IMP-626..652, SCN-GAT-12..20, SCN-CFG-08..12; `openspec/changes/red-check-targeted/`). [V, in one TypeScript consumer plan 66 red steps ran the whole suite, about 4.9 minutes each, and 8 failed on end-to-end tests that were probably flakes.] Limits: off by default; a new file that breaks an old test by interaction shows at green (also after a resume), which cannot change the frozen files, so a person fixes the files or restarts the unit; a Python step that adds a stub runs the whole suite; no targeted green or verification; no `{grep}` | the unit tests (`test_gates_red_check`, `test_red_check`, `test_tdd_red_targeted`, `test_tdd_green_red_check`, `test_red_check_targeted_docs`, `test_tdd_red`, `test_step_recheck`) |
+| 145 | `skipped-test-hold` | an old test that step 3 finds skipped in a changed test file is a deterministic major finding only when the unit added or changed a skip that can affect it; when the skip predates the unit it is a hold of kind `skipped`, one per file, that only a person answers, and a fix unit is never made for its reject. `scan.skip_constructs` (the skip markers, aliases, `pytestmark` and runtime skip calls of a file, by scope), `l4.evidence.skippred` (`skip_predates`: the file is `M`, both blobs parse, the test exists at the base, no new construct in a scope that can skip it, and no support or runner-configuration file changed when the file holds no construct) and `collect.skip_predating` (never raises: every failure leaves the test in the finding); `check_tests_ran(predating=)` and `TestsSummary.skipped_predating`; `Hold(kind="skipped")`, `Evidence.ran_holds` and `hold_views` (the accept is bound to the head blob of the file and its skipped ids); `verdicts.hold_kind`, `_hold_question`, `_hold_finding` (`SKIPPED_REJECTED_TITLE`), `fixloop._no_task_cause` and the escalation `skipped_tests_rejected` with `next_step.skipped_way_out`; `_without_a_call` of the delegate run, `_check_reply` of its reply check and the prompt `delegate@8`; `ladder._person_only_holds` (a verdict of such a hold with `by` other than `human` is dropped with one `human.void`); and `l4 retry` of a `fixing` unit whose open fix unit waits on a person (`retry.fix_unit_waiting`, `UnitState.close_fix_unit`, `fixloop._close_for_retry`, `QuestionsFile.supersede_by_retry`, the planner fact `fix_closing`, the hint of `next_step.fix_closing_step`). A consumer's unit changed one assertion in each of several tests that a docker-compose stack gates; the gate sandbox has no stack, the unit added and changed no skip, step 3 raised the major, and the fix unit, which cannot change a test file, asked a question and could not move. Limits: the rule compares skip constructs, not behaviour (a test that did not skip at the base can skip through an unchanged construct whose condition depends on code the unit changed), Python ids only, no base-side test run; a person's `accept` is bound to the file content and is void after an edit (L4-VER-092..095, SCN-VER-372..393; `openspec/changes/skipped-test-hold/`) | the unit tests (`test_scan`, `test_skip_predating`, `test_skip_hold_evidence`, `test_testsran`, `test_report`, `test_hold_verdicts`, `test_hold_binding`, `test_ladder_evidence`, `test_verdict_actor`, `test_pass`, `test_reply`, `test_prompt`, `test_retry_fixing`, `test_next_step_skipped`, `test_next_step`) |
 
 The self-hosting proposal's L4-SELF-014 (a boolean to require a plan) is `yolo.hold: ["*"]` (L4-ADO-011): every spec is then opt-in by plan, and no new key is added.
 
@@ -17744,6 +17817,122 @@ scenario is a spec defect (§26).
 - **When** the verifier reaches step 4a
 - **Then** the step is `not_run` with the note that names `e2e/test_layout.py`, and no writer is asked
 
+#### SCN-VER-372 (+) A stack-gated test whose assertion the unit edited is a hold · L4-VER-092
+- **Given** `tests/test_live.py` at the base has `@pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` on `test_a` and `test_b`, the unit changed one assertion line in each, and the gate report holds both as `skipped`
+- **When** step 3 collects evidence
+- **Then** the round has no finding `existing tests are skipped in a changed test file`
+- **And** it has one hold `skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that can affect them (2 tests)`, the verdict is NEEDS_HUMAN, and `tests_ran.summary.skipped_predating` lists both ids
+
+#### SCN-VER-373 (−) A skip the unit added stays a deterministic finding · L4-VER-092
+- **Given** the unit added `@pytest.mark.skip` above `test_a`, which exists at the base, and `test_a` is skipped
+- **When** step 3 collects evidence
+- **Then** the major finding names `test_a`, there is no hold for it, and no person can waive the finding
+
+#### SCN-VER-374 (−) A changed condition on a continuation line is a changed skip · L4-VER-092
+- **Given** `test_a` carries a two-line `@pytest.mark.skipif(` whose second line the unit changed from `os.getenv("A") != "true"` to `os.getenv("B") != "true"`
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and in no hold
+
+#### SCN-VER-375 (+) A skip the unit added to one test does not touch another test of the file · L4-VER-092
+- **Given** the unit added `@pytest.mark.skip` to `test_a`, `test_b` was skipped by an unchanged `skipif` and is skipped now
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and `test_b` is in the hold of the file
+
+#### SCN-VER-376 (−) A skip construct in a shared scope touches every test of the file · L4-VER-092
+- **Given** one of: the unit added `pytestmark = pytest.mark.skipif(...)`; added `docker = pytest.importorskip("docker")` at module level; gave a fixture of the file a `pytest.skip(...)` call
+- **When** step 3 collects evidence
+- **Then** every old skipped test of the file is in the finding and none is in a hold
+- **And** when the unit instead applied an alias that the base already defines (`@requires_stack`) to the old test `test_a` only, `test_a` is in the finding and `test_b`, skipped by an unchanged `skipif`, stays in the hold of the file, because an alias use is scoped to the function it decorates (D3)
+
+#### SCN-VER-377 (−) A file or test that cannot be compared stays a finding · L4-VER-092
+- **Given** each of: the test file is new in the unit; the file was renamed; the skipped test did not exist at the base (renamed or moved to another class); the head blob does not parse; the base blob is over `MAX_SOURCE_BYTES`; `git show` fails
+- **When** step 3 collects evidence
+- **Then** the old skipped tests of that file are in the finding and in no hold, and no exception escapes the evidence step
+
+#### SCN-VER-378 (+/−) A skip with no construct in the file depends on support files · L4-VER-092
+- **Given** `test_a` is skipped, its file holds no skip construct in any scope that can skip it, and the unit changed only that file
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the hold
+- **And** when the unit also changed `tests/conftest.py` (or a file of `tdd.runner_config_files`), `test_a` is in the finding instead
+
+#### SCN-VER-379 (+) The hold is raised when diff coverage is off · L4-VER-092
+- **Given** `verifier.evidence.diff_coverage.mode: off` and the case of SCN-VER-372
+- **When** the ladder runs
+- **Then** the hold is in `result.holds` and is asked, and it is in `later_holds` of no step
+
+#### SCN-VER-380 (+) Nothing changes when no skip predates the unit · L4-VER-092
+- **Given** `check_tests_ran` is called without `predating`, or with an empty set
+- **When** an old skipped test lies in a changed file
+- **Then** the finding and `TestsSummary` are as before, and a `verdict.json` that has no `skipped_predating` reads as an empty tuple
+
+#### SCN-VER-381 (+) The question names what a person needs to decide · L4-VER-093
+- **Given** the hold of SCN-VER-372
+- **When** the verdict question is raised
+- **Then** its context lists `tests.test_live::test_a` and `tests.test_live::test_b`, says no base run was made, offers `accept` and `reject: <reason>`, and does not ask for a `WHEN ... THEN ...`
+
+#### SCN-VER-382 (+) An accept waives the hold and the round can pass · L4-VER-093
+- **Given** the hold of SCN-VER-372 and `accept ran against the stack on 2026-11-25`
+- **When** the next round ends with no other finding
+- **Then** the hold is resolved, the verdict is PASS, and the question is not asked again
+
+#### SCN-VER-383 (−) An edit of the file voids the accept · L4-VER-093
+- **Given** the accept of SCN-VER-382 and a later commit that changes `tests/test_live.py`
+- **When** the next round runs
+- **Then** the hold has a new binding, the accept is not in force, and the hold is asked again
+
+#### SCN-VER-384 (−) A reject is the person's finding and makes no fix unit · L4-VER-093
+- **Given** the hold of SCN-VER-372 and `reject: run them in the gate. WHEN the gate runs THEN they pass`
+- **When** the round settles its holds
+- **Then** there is one finding titled `Rejected hold: a skipped test is not accepted`, source `human`, with the person's text
+- **And** the fix planner lists it as not converted (the scenario does not make a task), no fix unit is written, and the unit is escalated with `skipped_tests_rejected` and the way out of this requirement
+
+#### SCN-VER-385 (+) An accept does not settle a judge finding about the file · L4-VER-093
+- **Given** the hold of SCN-VER-372 and a blocking judge-only finding whose text names `tests/test_live.py`
+- **When** the hold is accepted
+- **Then** the finding is not settled by it and is asked on its own
+
+#### SCN-VER-386 (−) The delegate neither answers nor is called · L4-VER-094
+- **Given** the delegate is on and a skipped-test hold is open
+- **When** the delegate pass runs
+- **Then** no model call is made for the question, it is escalated with the reason `a skipped-test hold is a person's decision`, and the unit stays in `awaiting_human`
+
+#### SCN-VER-387 (−) A reply that reaches `check_reply` is refused · L4-VER-094
+- **Given** a delegate reply of `accept` or of `reject` with a `WHEN ... THEN ...` for a verdict question whose target is a skipped-test hold
+- **When** `check_reply` runs
+- **Then** it returns a discard with status `escalated`
+
+#### SCN-VER-388 (−) A model-authored answer is not in force · L4-VER-094
+- **Given** `clarifier.answer_by_agents: true` and an `accept` of the hold recorded with `by: agent`
+- **When** step 10 applies the verdicts
+- **Then** the hold is unresolved, `human.void` is recorded for the question, the verdict is NEEDS_HUMAN and the next round asks the hold again
+- **And** an `accept` with `by: human` is applied
+
+#### SCN-VER-389 (+) A retry closes a fix unit that waits on its question and the parent verifies again · L4-VER-095
+- **Given** the pin is the release, `openspec:<name>` is `fixing` with `<name>-fix-2` whose only task 1.1 is held by an open technical question Q-001, and two of three fix rounds are used
+- **When** a person runs `l4 retry --unit openspec:<name> --reason "skipped tests are env-gated, see the hold"` and the run starts
+- **Then** task 1.1 is ticked in a harness commit with `L4-TDD: already-done`, Q-001's Status is `superseded by retry`, `fix.done` is recorded, and the unit goes to `verifying`
+- **And** the new round, judged afresh, has the hold of L4-VER-092 and no finding for the skipped tests, the verdict is NEEDS_HUMAN, and no `-fix-3` is written
+
+#### SCN-VER-390 (+) The question no longer blocks anything · L4-VER-095
+- **Given** SCN-VER-389 after the close
+- **When** `l4 plan` and `l4 questions list` run
+- **Then** neither reports a fix unit question as open, and `l4:needs-answers` is not set for Q-001
+
+#### SCN-VER-391 (−) A fix unit that can run is not closed · L4-VER-095
+- **Given** `openspec:<name>` is `fixing` and a task of its open fix unit is not held by any question
+- **When** a person runs `l4 retry --unit openspec:<name> --reason TEXT`
+- **Then** it exits 2 with `the fix unit <name>-fix-2 is running: the harness continues it at the next run`, and no event is recorded
+
+#### SCN-VER-392 (−) A person's tick of the fix unit's task is a blocker, not a way out · L4-VER-095
+- **Given** a person's commit that changes `<name>-fix-2/tasks.md` from `- [ ] 1.1` to `- [x] 1.1`
+- **When** the parent is verified
+- **Then** step 1 has the blocker `a protected path was changed` naming `<name>-fix-2` and the non-harness commit, as for any person's commit on a fix unit's folder other than `questions.md`
+
+#### SCN-VER-393 (−) The same retry on the old harness spends the last fix round · L4-VER-095
+- **Given** the unit's pin is the release before this change
+- **When** the verification runs again after any way of closing the fix unit
+- **Then** the old finding is raised again as a deterministic major and the round spends the last fix round: this is why the runbook says to upgrade the pin first, and the `l4` of the person is the pin or newer (an older `l4` refuses state-changing commands, L4-OPS-026)
+
 ## MODIFIED Requirements
 
 ### 23.9.1 Human feedback (FBK)
@@ -22928,7 +23117,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 - **Then** the reply is kept and written as `reject <reason>`, and the fix is checked against criterion 2.1 as written
 
 #### SCN-DLG-80 (−) The prompt asks for the behaviour the fix must give · L4-DLG-023
-- **Given** the delegate's system text `delegate@7`
+- **Given** the delegate's system text `delegate@8`
 - **When** it is rendered
 - **Then** it holds `WHEN <situation> THEN <the behaviour the fix must give>`, says that the judge's suggested fix describes the code as it is now and is never that sentence, and does not hold `behaviour the code shows`
 
@@ -23191,7 +23380,7 @@ touches the network; the Kiro major gate's scenarios are SCN-OCG-11 to SCN-OCG-1
 #### SCN-DLG-130 (−) Other askers, other kinds and `batch_size: 1` are asked alone · L4-DLG-028, L4-DLG-002
 - **Given** two verdict questions with different askers; or a technical question due between verdict questions; or `delegate.batch_size: 1`
 - **When** the pass runs
-- **Then** the questions with different askers are in different calls; the technical question has its own call with `delegate@7`; with `batch_size: 1` every question has its own call
+- **Then** the questions with different askers are in different calls; the technical question has its own call with `delegate@8`; with `batch_size: 1` every question has its own call
 
 #### SCN-DLG-131 (−) A batch that timed out is asked question by question · L4-DLG-028, L4-DLG-013
 - **Given** a batch call of four that ends with a timeout

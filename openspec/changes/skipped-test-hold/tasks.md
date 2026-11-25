@@ -75,7 +75,7 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 6. Documents
 
-- [ ] 6.1 `docs/SPEC.md`: L4-VER-092..095 and SCN-VER-372..393 next to L4-VER-091 and SCN-VER-371; the amended step 3 row
+- [x] 6.1 `docs/SPEC.md`: L4-VER-092..095 and SCN-VER-372..393 next to L4-VER-091 and SCN-VER-371; the amended step 3 row
   (`:6159`), the paragraph "Holds are decisions too" of L4-VER-013 (`:7249`), L4-DLG-024 (`:5957`), the evidence JSON and
   the Evidence section; the change table row. `docs/runbook.md`: section 7.1 (the hold and its two answers, with D1's
   residuals), 7.3.4 `skipped_tests_rejected`, the retry of a `fixing` unit with the **order**: upgrade the pin to the
@@ -84,5 +84,5 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
   `CHANGELOG.md` under Unreleased: Changed (the finding becomes a hold), Added (hold kind, `skipped_predating`,
   `skipped_tests_rejected`, `l4 retry` in `fixing`), and an **Upgrade** line for a unit already in `fixing` for this
   finding. Run `tests/unit/docs/` files that read the runbook, one at a time.
-- [ ] 6.2 `openspec validate skipped-test-hold --strict`; `uv run --frozen ruff check` and `mypy` on the changed files;
+- [x] 6.2 `openspec validate skipped-test-hold --strict`; `uv run --frozen ruff check` and `mypy` on the changed files;
   a last pass: grep the new text for a consumer's name (none).

@@ -22,7 +22,10 @@ existing tests in `<path>` are skipped, and this unit did not add or change a sk
 Any other old skipped test of a changed file, and every case in which a blob cannot be read or parsed, SHALL stay in the
 deterministic major finding as before. The hold SHALL join the round at step 3, whether diff coverage is on or off, and
 SHALL be listed in `evidence.holds` of `verdict.json` with kind `skipped` and in `tests_ran.summary.skipped_predating`.
-The check SHALL NOT run a test and SHALL NOT read a base report.
+The Evidence section of `verification.md` SHALL print the line `Skipped in a changed file before this unit (hold): <ids>`
+when `skipped_predating` is not empty, and a `verdict.json` that has no `skipped_predating` SHALL read as an empty list.
+The check SHALL NOT run a test and SHALL NOT read a base report. [V, the code: step 3 compared nothing with the base, and
+a fix chore puts every test path back, so no fix unit could make a skipped test run]
 
 #### Scenario: SCN-VER-372 (+) A stack-gated test whose assertion the unit edited is a hold
 - **Given** `tests/test_live.py` at the base has `@pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` on `test_a` and `test_b`, the unit changed one assertion line in each, and the gate report holds both as `skipped`
@@ -46,9 +49,10 @@ The check SHALL NOT run a test and SHALL NOT read a base report.
 - **Then** `test_a` is in the finding and `test_b` is in the hold of the file
 
 #### Scenario: SCN-VER-376 (−) A skip construct in a shared scope touches every test of the file
-- **Given** one of: the unit applied an existing alias `@requires_stack` to `test_a`; added `pytestmark = pytest.mark.skipif(...)`; added `docker = pytest.importorskip("docker")` at module level; gave a fixture of the file a `pytest.skip(...)` call
+- **Given** one of: the unit added `pytestmark = pytest.mark.skipif(...)`; added `docker = pytest.importorskip("docker")` at module level; gave a fixture of the file a `pytest.skip(...)` call
 - **When** step 3 collects evidence
 - **Then** every old skipped test of the file is in the finding and none is in a hold
+- **And** when the unit instead applied an alias that the base already defines (`@requires_stack`) to the old test `test_a` only, `test_a` is in the finding and `test_b`, skipped by an unchanged `skipif`, stays in the hold of the file, because an alias use is scoped to the function it decorates (D3)
 
 #### Scenario: SCN-VER-377 (−) A file or test that cannot be compared stays a finding
 - **Given** each of: the test file is new in the unit; the file was renamed; the skipped test did not exist at the base (renamed or moved to another class); the head blob does not parse; the base blob is over `MAX_SOURCE_BYTES`; `git show` fails
@@ -85,7 +89,10 @@ of source `human`, severity major, titled `Rejected hold: a skipped test is not 
 list as not converted; no fix unit SHALL be written for it; the round SHALL end escalated with the reason
 `skipped_tests_rejected`, and `l4 status` SHALL say the way out: a commit of the person's own on the unit branch that
 removes the skip or makes the tests able to run in the gate, then `l4 retry --unit <unit> --reason TEXT`, or an accept
-that replaces the answer once the tests ran.
+that replaces the answer once the tests ran. A reject of this kind beside another finding of a person that cannot be
+converted into a fix task (or a reject of a hold on the judge's view) SHALL keep the code `skipped_tests_rejected` and its
+way out, and the reason text of the escalation SHALL say that another finding of a person also cannot be converted into a
+fix task; the other way out shows once this one is resolved.
 
 #### Scenario: SCN-VER-381 (+) The question names what a person needs to decide
 - **Given** the hold of SCN-VER-372
@@ -150,6 +157,16 @@ out of `questions.open`, and the label `l4:needs-answers` SHALL go; its text and
 The unit SHALL go to `verifying` and the round SHALL be judged afresh. The fix round the closed unit used SHALL stay
 counted. A person's own commit that ticks a task of a fix unit SHALL remain a step 1 blocker (`a protected path was
 changed`); it is not a way to close one.
+The run SHALL close a fix unit only when the same condition still holds when it reads the fix unit (an answer may have
+come between the retry and the run): when a task of the fix unit can run, the run SHALL close nothing, SHALL record
+`fix.close_skipped{fix_unit, reason}` and SHALL run the fix unit as it always does. The records of a close are
+`unit.retried{close_fix_unit}`, `task.done{tdd: "already-done", closed_by: "retry"}` (also `fix_unit`, `reason`, `parents`),
+`question.superseded{fix_unit, ids, closed_by: "retry"}` and `fix.done{closed_by: "retry"}`; the fold keeps the pending
+close as `UnitState.close_fix_unit` until `fix.done` or `fix.close_skipped`. While a close is pending the planner fact
+`UnitFacts.fix_closing` SHALL be true and `l4 plan` SHALL say `implement` with the reason `fix unit <name>: closed by the
+retry at the next run` instead of `fixing: fix unit questions open`. For a unit in `fixing` whose open fix unit waits on
+a person, `l4 status` SHALL name `l4 retry --unit <unit> --reason TEXT` as the way to close the fix unit, after
+upgrading the pin to a release that has this requirement, and SHALL NOT tell anyone to tick a task by hand.
 
 #### Scenario: SCN-VER-389 (+) A retry closes a fix unit that waits on its question and the parent verifies again
 - **Given** the pin is the release, `openspec:<name>` is `fixing` with `<name>-fix-2` whose only task 1.1 is held by an open technical question Q-001, and two of three fix rounds are used
