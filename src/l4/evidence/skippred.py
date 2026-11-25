@@ -15,7 +15,8 @@ finding):
     sets up the interpreter or the dependencies (`sitecustomize.py`, `noxfile.py`, `requirements*.txt`, a lock file);
 (d) nothing that decides an unchanged skip changed inside the file (`skipdeps`, the dependency closure);
 (e) every changed line of the file is in a place the unit may change (`skipscope`: a comment or blank line, the body of
-    a collected test beyond what skips it, a whole new import of a name the base does not use). (b) and (d) list what
+    a collected test beyond what skips it, a plain `pytest.mark.<name>` of a test, a whole new standard library import
+    of a name the base does not use). (b) and (d) list what
     decides a skip; (e) bounds where a change can be, so that a way to change why a test skips that they do not list
     is still out.
 
@@ -159,7 +160,8 @@ class SkipRule:
 
     def changes_confined(self, qualname: str) -> bool:
         """Rule (e), alone: every changed line of the file is a comment or blank line, a line of a collected test beyond
-        what can skip `qualname`, or a whole new import of a name the base does not use (`skipscope`)."""
+        what can skip `qualname`, a plain `pytest.mark.<name>` of a test, or a whole new standard library import of a
+        name the base does not use (`skipscope`)."""
         return self.confined.holds(qualname)
 
 

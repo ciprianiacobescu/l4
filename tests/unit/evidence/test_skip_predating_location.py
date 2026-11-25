@@ -542,7 +542,12 @@ STAY = {
     "a trailing comment on a line": edited("    assert os.sep\n", "    assert os.sep  # the separator\n"),
     "a changed body of a test that is not skipped": edited("    assert True\n", "    assert 1 + 1 == 2\n"),
     "a changed body of another skipped test": edited("    assert reply.json()\n", "    assert reply.json() == {}\n"),
-    "a changed decorator of another test": edited("@INTEGRATION\ndef test_b", "@pytest.mark.slow\ndef test_b"),
+    "a plain mark added to another test": edited(
+        "@INTEGRATION\ndef test_b", "@pytest.mark.slow\n@INTEGRATION\ndef test_b"
+    ),
+    "a plain mark with arguments added to another test": edited(
+        "@INTEGRATION\ndef test_b", '@pytest.mark.slow(reason="x")\n@INTEGRATION\ndef test_b'
+    ),
     "another test removed whole": edited("\n\ndef test_plain():\n    assert True\n", ""),
     "a test of the base renamed": edited("def test_plain", "def test_renamed"),
     "a statement after the body's last skip": edited("    assert result == 2\n", "    assert result == 3\n    x = 1\n"),
@@ -550,7 +555,6 @@ STAY = {
     "a new plain import": edited("import os\n", "import os\nimport json\n"),
     "a new import with an alias": edited("import os\n", "import os\nimport json as jsn\n"),
     "a new dotted import": edited("import os\n", "import os\nimport xml.dom\n"),
-    "a new relative import": edited("import os\n", "import os\nfrom . import helpers\n"),
 }
 
 
@@ -624,6 +628,12 @@ NEGATIVE = {
     "a module docstring changed": ('"""The stack tests."""\n' + REAL, '"""The stack tests, more."""\n' + REAL),
     "a module docstring added": (REAL, '"""The stack tests."""\n' + REAL),
     "a helper class changed": (REAL, edited('return {"ok": 1}', 'return {"ok": 2}')),
+    "a new relative import": (REAL, edited("import os\n", "import os\nfrom . import helpers\n")),
+    "a decorator of another test replaced (rework 10: only a plain mark may change)": (
+        REAL,
+        edited("@INTEGRATION\ndef test_b", "@pytest.mark.slow\ndef test_b"),
+    ),
+    "a decorator of another test removed": (REAL, edited("@INTEGRATION\ndef test_b", "def test_b")),
     "a decorator of the candidate changed": (
         REAL,
         edited("@INTEGRATION\ndef test_a", "@pytest.mark.slow\n@INTEGRATION\ndef test_a"),
@@ -899,16 +909,20 @@ def test_a_fixture_the_body_runs_by_name_is_part_of_what_skips_the_test():
     """`request.getfixturevalue('res')` is a skip the prefix of `skipdeps` does not read (the fixture is named by a
     string): the statement is not free, so naming another fixture keeps the finding. An assertion after it is free."""
     assert not holds(_fixtures("res"), _fixtures("other"))
-    assert holds(_fixtures("res"), _fixtures("res").replace("assert 1", "assert 2"))
+    # rework 10: a test that mentions getfixturevalue has no free line, the assertion after it included
+    assert not holds(_fixtures("res"), _fixtures("res").replace("assert 1", "assert 2"))
+    assert holds(_fixtures("res"), _fixtures("res").replace("    assert 1", "    # a note\n    assert 1"))
 
 
 def test_import_time_code_of_another_tests_decorator_or_default_is_the_residual():
-    """Not told apart, by design (RESIDUALS: run-time state that another test sets): the decorators and the defaults of
-    a test that is not asked about are free, and they run when the module is imported. A hold, and a person who accepts
+    """Not told apart, by design (RESIDUALS: run-time or import-time state that another test sets): the arguments of a plain mark and the
+    defaults of a test that is not asked about are free, and they run when the module is imported. A hold, and a person who accepts
     it has been told so in the question."""
     base = (
         "import pytest\n\nITEMS = []\n\n\n@pytest.mark.skipif(not ITEMS, reason='r')\ndef test_x():\n    assert 1\n\n\n"
         "def test_y(a=None):\n    assert a is None\n"
     )
     assert holds(base, base.replace("def test_y(a=None)", "def test_y(a=ITEMS.append(1))"))
-    assert holds(base, base.replace("def test_y", "@pytest.mark.parametrize('b', [ITEMS.append(1)])\ndef test_y"))
+    assert holds(base, base.replace("def test_y", "@pytest.mark.slow(ITEMS.append(1))\ndef test_y"))
+    # a parametrization is no plain mark (rework 10): it is not free
+    assert not holds(base, base.replace("def test_y", "@pytest.mark.parametrize('b', [ITEMS.append(1)])\ndef test_y"))

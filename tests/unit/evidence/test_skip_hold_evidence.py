@@ -107,8 +107,12 @@ def test_the_hold_view_binds_the_head_blob_and_the_skipped_ids(tmp_path: Path): 
     assert other.hold_views == ev.hold_views  # the same content binds the same way
 
 
-def test_a_skip_the_unit_added_stays_a_finding_and_makes_no_hold(tmp_path: Path):  # SCN-VER-373
-    ev, _, _ = _evidence(tmp_path / "r", "", "@pytest.mark.skip")
+def test_a_skip_the_unit_added_stays_a_finding_and_makes_no_hold(tmp_path: Path):  # SCN-VER-373, 375
+    # a skip call in the body of test_a (a decorator that is no plain mark is no free change either, rework 10)
+    head = SOURCE.format(mark="", skipif=SKIPIF, n=2).replace(
+        "def test_a():\n    assert 2", "def test_a():\n    pytest.skip('x')\n    assert 2"
+    )
+    ev, _, _ = _evidence(tmp_path / "r", "", "", extra={"tests/test_live.py": head})
     assert ev.ran is not None
     assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR]
     assert "tests.test_live::test_a" in ev.ran.findings[0].detail and "test_b" not in ev.ran.findings[0].detail
@@ -146,9 +150,12 @@ def test_f1_a_marker_imported_from_another_module_stays_a_finding_when_the_test_
         extra={"tests/test_live.py": head, "lib/markers.py": "import pytest\n\nrequires_stack = pytest.mark.skip\n"},
     )  # fmt: skip
     assert ev.ran is not None
-    assert ev.ran.summary.skipped_predating == (IDS[1],)  # test_b was skipped at the base and is untouched
-    assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR] and IDS[0] in ev.ran.findings[0].detail
-    assert asked == [1]
+    # rework 10: a decorator that is no `pytest.mark.<name>` is a change in no free place, so test_b is in the finding
+    # with test_a (it predated the unit, but the file was changed where the rule cannot tell)
+    assert ev.ran.summary.skipped_predating == ()
+    assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR]
+    assert IDS[0] in ev.ran.findings[0].detail and IDS[1] in ev.ran.findings[0].detail
+    assert "skipped" not in [h.kind for h in ev.hold_records]
 
 
 def test_a_marker_module_of_the_tests_tree_that_the_unit_added_keeps_every_skip_a_finding(tmp_path: Path):

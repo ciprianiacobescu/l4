@@ -935,7 +935,7 @@ def test_scn_ver_381_the_question_names_the_file_the_ids_and_what_each_answer_do
     assert "comment and blank lines, the body of a test beyond what skips it, a whole new import" in text
     # the residual list: the same words as the Evidence line, the runbook and the SPEC
     assert f"What is not told apart: {RESIDUALS}" in text
-    assert "production code the unit changed" in text and "run-time state that another test sets" in text
+    assert "production code the unit changed" in text and "state that another test sets" in text
     assert "did not add or change a skip" not in text  # nothing is claimed that was not compared
     assert "`accept` means you ran them where they can run, or know they pass there" in text
     assert "for this content of the file only" in text

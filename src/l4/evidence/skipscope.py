@@ -14,9 +14,15 @@ that the head no longer has and a line of the head that the base does not have, 
    never `setUp`, `setup_method` or a helper), existing at both sides or a whole new one at the head, its decorators and
    signature included, except that for T itself the decorators, the signature (its parameters are fixtures) and the
    statements of the body up to and including the last one that can skip (`SkipFacts.skip_relevant`, the prefix of
-   the closure) are never a place for a change: a test that is not T cannot skip T by its decorators;
-3. a whole `import M`, `import M as N` or `from M import a, b` statement of the module that binds only names the base
-   module neither binds nor loads (not `*`, not `__future__`, not a name a string condition or a builtin gives).
+   the closure, up to the last `raise` or skip exception name, and the whole body of a test that mentions
+   `getfixturevalue`) are never a place for a change. The decorators of ANY collected test, a new one too, may differ
+   between the sides only by a `pytest.mark.<name>` (not `skip`, `skipif`, `xfail`, `usefixtures`, `parametrize`) that
+   is added or removed. A collected test that something outside the free places reaches by its name is kept whole, and
+   so is each one that those read in turn (a fixed point);
+3. a whole `import M`, `import M as N` or `from M import a, b` statement of the module, of the standard library (never
+   a relative one), that binds only names the base module neither binds nor loads (not `*`, not `__future__`, not a
+   name a string condition or a builtin gives, not one a runner reads off a module by convention, not a name the base
+   has as a parameter, a fixture or an identifier-like string).
 
 Nothing else of the module or of a class may be added, removed or changed: no statement, no docstring, no decorator of a
 class, no other method.
@@ -44,6 +50,7 @@ import builtins
 import copy
 import io
 import re
+import sys
 import tokenize
 from collections import Counter
 from collections.abc import Iterable
@@ -52,8 +59,10 @@ from l4.verifier import scan
 from l4.verifier.skipdeps import SkipFacts
 
 RESIDUALS = (
-    "production code the unit changed, a module outside the tests tree that the test imports, run-time state that "
-    "another test sets, and dynamic forms (`exec`, `getattr`, `importlib`, `globals()`)"
+    "production code the unit changed, a module the file imports that the unit did not change (an added import is "
+    "allowed only from the standard library), run-time or import-time state that another test sets (its body, "
+    "decorator or default values), a changed sibling test module the file imports, and dynamic forms and plugins that "
+    "read test names (`exec`, `getattr`, `importlib`, `globals()`, a plugin such as test dependencies)"
 )  # what the rule does not tell apart: the hold's question, the Evidence line, the runbook and the SPEC say it so
 _FUNCTIONS = ast.FunctionDef | ast.AsyncFunctionDef
 _NEWLINES = re.compile(r"\r\n|\r")
@@ -62,6 +71,20 @@ _WORD = re.compile(r"[A-Za-z_]\w*")
 _CONDITIONAL = frozenset({"skipif", "xfail", "skipIf", "skipUnless"})  # markers whose first argument may be a string
 _GIVEN = frozenset({"os", "sys", "platform", "config"}) | frozenset(dir(builtins))  # names a condition has unbound
 _FIXTURE_CALLS = frozenset({"getfixturevalue", "getfuncargvalue"})  # `request.getfixturevalue("res")` runs a fixture
+_SKIP_FORMS = frozenset({"Skipped", "SkipTest"})  # the exceptions a runner reads as a skip, however they are raised
+_BY_CONVENTION = frozenset(
+    {
+        "pytestmark",
+        "setup_module",
+        "teardown_module",
+        "setup_function",
+        "teardown_function",
+        "setUpModule",
+        "tearDownModule",
+        "load_tests",
+    }
+)  # the names a runner reads off a module by convention (and `pytest_*`, `test*`, `Test*`, see `_read_by_runner`)
+_PLAIN_MARKS_EXCLUDED = frozenset({"skip", "skipif", "xfail", "usefixtures", "parametrize"})
 _NOT_CODE = frozenset(
     {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
 )
@@ -126,6 +149,72 @@ def _bound(statement: ast.stmt) -> set[str] | None:
     return {a.asname or a.name for a in statement.names}
 
 
+def _read_by_runner(name: str) -> bool:
+    """A module-level name that pytest or unittest reads off a module: a hook, a setup or teardown, `pytestmark`, any
+    `pytest_*` name, and anything a runner collects (`test*`, `Test*`)."""
+    return name in _BY_CONVENTION or name.startswith(("pytest_", "test", "Test"))
+
+
+def _standard_library(statement: ast.stmt) -> bool:
+    """An import of a module of the standard library: never a relative one."""
+    if isinstance(statement, ast.ImportFrom):
+        return (
+            statement.level == 0
+            and bool(statement.module)
+            and statement.module.split(".")[0] in sys.stdlib_module_names
+        )
+    assert isinstance(statement, ast.Import)
+    return all(a.name.split(".")[0] in sys.stdlib_module_names for a in statement.names)
+
+
+def _plain_mark(decorator: ast.expr) -> bool:
+    """`@pytest.mark.<name>` or `@pytest.mark.<name>(...)` of a mark that is not a skip form, a fixture request or a
+    parametrization: the only decorator that a collected test may gain or lose."""
+    node = decorator.func if isinstance(decorator, ast.Call) else decorator
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr not in _PLAIN_MARKS_EXCLUDED
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
+
+
+def _mentions_fixture_call(node: ast.AST) -> bool:
+    """`getfixturevalue` named anywhere under `node`: an attribute, a name or a string (`getattr(request, "...")`)."""
+    for n in ast.walk(node):
+        if (
+            isinstance(n, ast.Attribute)
+            and n.attr in _FIXTURE_CALLS
+            or isinstance(n, ast.Name)
+            and n.id in _FIXTURE_CALLS
+        ):
+            return True
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and any(w in n.value for w in _FIXTURE_CALLS):
+            return True
+    return False
+
+
+def _skip_form(node: ast.AST) -> bool:
+    """A `raise` (whatever it raises), or a name that is a skip exception: `Skipped`, `SkipTest`, `skip.Exception`."""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Raise):
+            return True
+        if isinstance(n, ast.Name) and n.id in _SKIP_FORMS or isinstance(n, ast.Attribute) and n.attr in _SKIP_FORMS:
+            return True
+        if isinstance(n, ast.Attribute) and n.attr == "Exception":
+            owner = n.value
+            if (
+                isinstance(owner, ast.Attribute)
+                and owner.attr == "skip"
+                or isinstance(owner, ast.Name)
+                and owner.id == "skip"
+            ):
+                return True
+    return False
+
+
 class _Side:
     """One source: its lines, the lines that hold code, the lines of its collected tests, and the structure that the
     other side is compared with."""
@@ -134,6 +223,7 @@ class _Side:
         self.facts, self.ok = facts, False
         self.items: list[object] = []
         self.positions: dict[str, tuple[int, int]] = {}
+        self._by_leaf: dict[str, list[_FUNCTIONS]] | None = None  # the collected defs by the last part of their name
         if not facts.ok:
             return
         try:
@@ -167,7 +257,7 @@ class _Side:
         left out (T is compared on its own, by `fingerprint`, and its `positions` among the others) and so are the
         imports whose ids are `leave_out` (the head's whole added imports). A collected test that the statements which
         are not free read by its name (called in a decorator or a helper, named in a string condition, `self.test_x()`)
-        stays in, whole: another place of the file can reach it."""
+        stays in, whole: another place of the file can reach it, directly or through another collected test."""
         collected = self.facts.collected
         kept: list[ast.AST] = []
         for node in self.tree.body:
@@ -180,7 +270,7 @@ class _Side:
                 ]
             elif not (isinstance(node, _FUNCTIONS) and node.name in collected):
                 kept.append(node)
-        reached = _references(kept)
+        reached = self.grow(_references(kept))
         items: list[object] = []
         for node in self.tree.body:
             if id(node) in leave_out:
@@ -206,25 +296,39 @@ class _Side:
                 items.append(self._item(node))
         self.items = items
 
+    def grow(self, reached: set[str]) -> set[str]:
+        """`reached` and every name that a collected test it holds reads, again and again until no new name comes: a
+        test is reached when its name (the last part of the dotted name) is, and all of it, decorators and body, is
+        then read (`self.test_mid()` that calls `self.test_inner()`)."""
+        if self._by_leaf is None:
+            self._by_leaf = {}
+            for q, function in self.facts.tests:
+                self._by_leaf.setdefault(q.rsplit(".", 1)[-1], []).append(function)
+        grown, work = set(reached), list(reached)
+        done: set[int] = set()
+        while work:
+            for function in self._by_leaf.get(work.pop(), ()):
+                if id(function) not in done:
+                    done.add(id(function))
+                    fresh = _references([function]) - grown
+                    grown |= fresh
+                    work.extend(fresh)
+        return grown
+
     def prefix(self, qualname: str) -> tuple[_FUNCTIONS, list[ast.stmt]] | None:
-        """T's def and the statements of its body that no change may touch: up to its last skip (`skip_relevant`), and
-        up to its last `request.getfixturevalue(...)`, which runs a fixture that can skip by a name in a string."""
+        """T's def and the statements of its body that no change may touch: up to its last skip (`skip_relevant`), up to
+        its last `raise` or skip exception name (`Skipped`, `SkipTest`, `skip.Exception`: a form of a skip that
+        `skip_relevant` does not read), and the whole body when it mentions `getfixturevalue` anywhere (a fixture that
+        can skip is run by a name in a string, by an alias, by `getattr`)."""
         found = self.facts.skip_relevant(qualname) if qualname in self.facts.collected else None
         if found is None:
             return None
         function, prefix = found
-        last = max(
-            (
-                i
-                for i, statement in enumerate(function.body)
-                if any(
-                    isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _FIXTURE_CALLS
-                    for n in ast.walk(statement)
-                )
-            ),
-            default=-1,
-        )
-        return function, function.body[: max(len(prefix), last + 1)]
+        body = function.body
+        if any(_mentions_fixture_call(statement) for statement in body):
+            return function, body
+        last = max((i + 1 for i, statement in enumerate(body) if _skip_form(statement)), default=0)
+        return function, body[: max(len(prefix), last)]
 
     def whole(self, qualname: str) -> tuple[str, tuple[str, ...]] | None:
         """A collected test as a tree and as written, for a test that code outside T's free places can reach."""
@@ -279,7 +383,11 @@ class _Names:
         self.attributes: set[str] = set()
         self.members: set[str] = set()  # the defs of the module and of its classes
         self.words: set[str] = set()  # the words of the string conditions of the skip markers
+        self.parameters: set[str] = set()  # every parameter name: a possible fixture
+        self.fixtures: set[str] = set()  # the names of the fixtures: the def's name and its `name=`
+        self.strings: set[str] = set()  # every string that is an identifier: `usefixtures("db")`, `depends=["a"]`
         self.star = False
+        fixture_names = scan.fixture_names(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.Name):
                 self.module.add(node.id)
@@ -296,6 +404,19 @@ class _Names:
                 self.module.add(node.rest)
             elif isinstance(node, ast.Call):
                 self.words |= _condition_words(node)
+            elif isinstance(node, ast.arg):
+                self.parameters.add(node.arg)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.isidentifier():
+                self.strings.add(node.value)
+            if isinstance(node, _FUNCTIONS) and scan.is_fixture(node, fixture_names):
+                self.fixtures.add(node.name)
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Call):
+                        self.fixtures.update(
+                            k.value.value
+                            for k in decorator.keywords
+                            if k.arg == "name" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str)
+                        )
         for statement in scan.flat(tree.body):
             if isinstance(statement, _FUNCTIONS | ast.ClassDef):
                 self.module.add(statement.name)
@@ -309,6 +430,18 @@ class _Names:
         """The module may bind `name` newly: nothing binds or loads it, no string condition names it, pytest and the
         builtins do not give it."""
         return name not in self.module and name not in self.words and name not in _GIVEN
+
+    def importable(self, name: str) -> bool:
+        """`name` is free, and no runner reads it off a module by convention (`pytestmark`, `setup_module`, `pytest_*`,
+        `test*`), and the base spells it nowhere as a parameter (a possible fixture), a fixture or an identifier-like
+        string (`usefixtures("db")`, `getfixturevalue("db")`, `depends=["a"]`)."""
+        return (
+            self.free(name)
+            and not _read_by_runner(name)
+            and name not in self.parameters
+            and name not in self.fixtures
+            and name not in self.strings
+        )
 
 
 class Confined:
@@ -331,6 +464,8 @@ class Confined:
         if self.base.protected(qualname) != self.head.protected(qualname):
             return False
         reached = self.base.reaches(qualname) | self.head.reaches(qualname)  # a test that T's own parts can call
+        while (more := self.base.grow(reached) | self.head.grow(reached)) != reached:
+            reached = more  # and a test that those call, on either side
         return all(
             self.base.whole(other) is not None and self.base.whole(other) == self.head.whole(other)
             for other in self.base.facts.collected | self.head.facts.collected
@@ -349,7 +484,18 @@ class Confined:
             return False
         base.build(frozenset())
         head.build(frozenset(id(n) for n in imports))
-        return base.items == head.items
+        return base.items == head.items and self._decorators(base) == self._decorators(head)
+
+    @staticmethod
+    def _decorators(side: _Side) -> Counter[tuple[str, tuple[str, ...]]]:
+        """Per collected test, the decorators that are not a plain mark (`_plain_mark`), as trees, in order; a test
+        without any is left out, so one that a side does not have counts as having none."""
+        found: Counter[tuple[str, tuple[str, ...]]] = Counter()
+        for q, function in side.facts.tests:
+            other = tuple(ast.dump(d) for d in function.decorator_list if not _plain_mark(d))
+            if other:
+                found[(q, other)] += 1
+        return found
 
     def _base_names(self) -> _Names:
         if self._names is None:
@@ -376,7 +522,9 @@ class Confined:
         taken: set[str] = set()
         for statement in new:
             bound = _bound(statement)
-            if bound is None or not all(names.free(n) for n in bound) or bound & taken:
+            if bound is None or not _standard_library(statement) or bound & taken:
+                return None
+            if not all(names.importable(n) for n in bound):
                 return None
             taken |= bound
             if any(

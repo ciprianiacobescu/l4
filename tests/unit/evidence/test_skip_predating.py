@@ -101,20 +101,25 @@ def test_a_skip_the_unit_added_does_not_predate_it(run):  # SCN-VER-373
 
 
 def test_a_removed_skip_never_counts(run):
-    assert run({LIVE: live()}, {LIVE: live(a_mark="")}, ids=(B,)) == {B}
+    """(b) does not count a removed skip. Rework 10 of (e): a decorator of another test may differ only by a plain
+    `pytest.mark.<name>`, so the removal of a `skipif` of test_a is itself a change that is no hold for any test."""
+    assert run({LIVE: live()}, {LIVE: live(a_mark="")}, ids=(B,)) == set()
 
 
 def test_a_changed_condition_on_a_continuation_line_is_a_changed_skip(run):  # SCN-VER-374
     two_lines = "@pytest.mark.skipif(\n    os.getenv('{}') != 'true',\n    reason='r',\n)"
     base = {LIVE: live(a_mark=two_lines.format("A"))}
     head = {LIVE: live(a_mark=two_lines.format("B"))}
-    assert run(base, head) == {B}  # test_a's skip changed; test_b's did not
+    # (b): test_a's skip changed and test_b's did not; (e), rework 10: a changed decorator of another test is no hold
+    assert run(base, head) == set()
 
 
-def test_a_skip_added_to_one_test_does_not_touch_another(run):  # SCN-VER-375
+def test_a_skip_decorator_added_to_one_test_keeps_the_whole_file_a_finding(run):  # SCN-VER-375
     base = {LIVE: live(a_mark="")}
     head = {LIVE: live(a_mark="@pytest.mark.skip")}
-    assert run(base, head) == {B}
+    # (b) alone: test_b is untouched; (e), rework 10: a `skip` is no plain mark, so the file is no hold
+    assert run(base, head) == set()
+    assert run(base, {LIVE: live(a_mark="@pytest.mark.slow")}) == {B}  # a plain mark added to test_a is free
 
 
 @pytest.mark.parametrize(
@@ -138,7 +143,8 @@ def test_an_alias_newly_applied_to_an_old_test_touches_that_test_only(run):  # S
         f"    assert 1\n\n\n{SKIPIF}\ndef test_b():\n    assert 1\n"
     )
     base = head.replace("@requires_stack\n", "")
-    assert run({LIVE: base}, {LIVE: head}) == {B}
+    # (b): test_b is untouched; (e), rework 10: a decorator that is no `pytest.mark.<name>` is no free change
+    assert run({LIVE: base}, {LIVE: head}) == set()
 
 
 def test_an_alias_already_applied_at_the_base_is_not_new(run):
