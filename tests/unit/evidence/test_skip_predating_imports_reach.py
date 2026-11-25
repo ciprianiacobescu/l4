@@ -122,6 +122,25 @@ def test_a_standard_library_import_of_a_name_a_string_condition_spells_is_not_a_
     assert not holds(base, base.replace("import sys\n", "import sys\nimport json\n"))
 
 
+@pytest.mark.parametrize(
+    "condition, line",
+    [
+        ('"json" not in sys.modules', "import json as j"),
+        ('"json" not in sys.modules', "from json import loads"),
+        ('not hasattr(xml, "dom")', "import xml.dom as d"),
+        ('"json.decoder" in sys.modules', "from json.decoder import JSONDecoder"),
+    ],
+)
+def test_a_standard_library_import_whose_module_a_string_of_the_base_spells_is_not_a_hold(condition, line):
+    """The module's own path counts, not only the name the import binds: loading it changes `sys.modules` or sets a
+    package attribute that the skip reads by its spelling."""
+    base = (
+        f'import sys\nimport xml\nimport pytest\n\n\n@pytest.mark.skipif({condition}, reason="r")\n'
+        "def test_t():\n    assert 1\n"
+    )
+    assert not holds(base, base.replace("import pytest\n", f"{line}\nimport pytest\n"))
+
+
 # --- G2: the tests that a skip reaches are reached transitively ----------------------------------------------------
 
 TWO_HOPS = """\

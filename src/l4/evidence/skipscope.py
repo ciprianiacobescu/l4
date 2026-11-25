@@ -167,6 +167,14 @@ def _standard_library(statement: ast.stmt) -> bool:
     return all(a.name.split(".")[0] in sys.stdlib_module_names for a in statement.names)
 
 
+def _module_parts(statement: ast.stmt) -> set[str]:
+    """The dotted components of the module an import statement loads (`import xml.dom as d`: `xml`, `dom`)."""
+    if isinstance(statement, ast.ImportFrom):
+        return set((statement.module or "").split(".")) - {""}
+    assert isinstance(statement, ast.Import)
+    return {part for alias in statement.names for part in alias.name.split(".")}
+
+
 def _plain_mark(decorator: ast.expr) -> bool:
     """`@pytest.mark.<name>` or `@pytest.mark.<name>(...)` of a mark that is not a skip form, a fixture request or a
     parametrization: the only decorator that a collected test may gain or lose."""
@@ -406,8 +414,11 @@ class _Names:
                 self.words |= _condition_words(node)
             elif isinstance(node, ast.arg):
                 self.parameters.add(node.arg)
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.isidentifier():
-                self.strings.add(node.value)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                # an identifier, or each part of a dotted one (`"json.decoder" in sys.modules`)
+                parts = node.value.split(".")
+                if all(part.isidentifier() for part in parts):
+                    self.strings.update(parts)
             if isinstance(node, _FUNCTIONS) and scan.is_fixture(node, fixture_names):
                 self.fixtures.add(node.name)
                 for decorator in node.decorator_list:
@@ -525,6 +536,10 @@ class Confined:
             if bound is None or not _standard_library(statement) or bound & taken:
                 return None
             if not all(names.importable(n) for n in bound):
+                return None
+            # the module's own path counts too: importing it can change `sys.modules` or set a package attribute that
+            # a skip reads by its spelling (`"json" not in sys.modules`, `hasattr(xml, "dom")`)
+            if any(part in names.strings or part in names.words for part in _module_parts(statement)):
                 return None
             taken |= bound
             if any(
