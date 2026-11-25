@@ -1,7 +1,7 @@
 ## Purpose
 
-An old test that step 3 finds skipped, in a test file the unit changed, is a finding only when the unit added or changed
-a skip that can affect it. When the skip predates the unit it is a hold that a person answers, and no fix unit is
+An old test that step 3 finds skipped, in a test file the unit changed, is a finding unless a base report with
+statuses holds it as skipped too and the unit added or changed no skip that can affect it. When the skip predates the unit it is a hold that a person answers, and no fix unit is
 made for it, because a fix unit cannot change test files. A unit that already has a fix unit for the old finding can be
 moved on with `l4 retry`.
 
@@ -9,29 +9,53 @@ moved on with `l4 retry`.
 
 ### Requirement: L4-VER-092 A skip that predates the unit is a hold, not a finding
 Step 3 SHALL decide, for each old test that the gate report holds as `skipped` in a test file the unit changed, whether
-its skip predates the unit. The skip SHALL predate the unit only when all of these hold: the file is reported modified
-by `base..head` (not added, not renamed, not deleted); the file's base and head blobs are read and parse as Python; the
-test maps to a qualified name of the file that is a test at the base; no skip construct was added or changed between the
-base and the head in a scope that can skip that test (the test, its class, `<module>`, or a non-test function or method
-of the file), by `scan.skip_constructs` as a multiset difference of the head's constructs over the base's, so that a
-removed skip never counts and a changed condition, a new alias use or a new `importorskip` does; and, when the file
-holds no skip construct in those scopes, the unit changed no file that matches `tdd.test_support_globs` or
-`tdd.runner_config_files`. A test whose skip predates the unit SHALL NOT be named in the finding `existing tests are
+its skip predates the unit. The skip SHALL predate the unit only when ALL of these hold: (a) a base report with statuses (the base's tests
+on the base's code) holds the test as `skipped`; (b) the file is reported modified by `base..head` (not added, not
+renamed, not deleted), its base and head blobs are read and parse as Python, the test maps to a qualified name of
+the file that a runner collects as a test at the base (a function that `pytest.fixture` decorates is never a test,
+whatever its name), and no skip construct was added or changed between the base and the head in a scope that can
+skip that test (the test, its class, `<module>`, or a function or method of the file that is not a collected test:
+a fixture, a helper, `setUp`, a collection hook), by `scan.skip_constructs` as a multiset difference of the head's
+constructs over the base's, so that a removed skip never counts and a changed condition, a new alias use, a new
+`importorskip`, a marker added at run time (`add_marker`, `applymarker`, `pytestmark.append(...)`), a mark in a
+module-level or class-level `if`, `try`, `with` or `for` block, and a skip reached through an import alias
+(`import pytest as pt`, `from pytest import mark as m`, `skip = pytest.skip`) do; and (c) the unit changed no file
+that matches `tdd.test_support_globs` or `tdd.runner_config_files`, whether or not the file holds a skip construct.
+The base report of (a) SHALL be, in this order: step 1's reference of the round when it is a full report of the
+base's own run (a cached baseline or a base worktree run; never the head's run with the base's test files); the
+`skipped` list of the newest earlier round's `integrity.base_tests` of the same base sha and test command that has
+that key; else one run of the test gate in a worktree of the base (network off), kept so that no round runs it
+twice. It SHALL be looked up only when a skipped test of a changed file passes (b) and (c). When none of these gives
+a report, every such test SHALL stay in the finding, and the step note and `tests_ran.summary.skipped_note` SHALL
+say `no base report with statuses: <why>`. Any doubt SHALL keep the test in the finding. A test whose skip predates the unit SHALL NOT be named in the finding `existing tests are
 skipped in a changed test file`; the tests of one file SHALL be one hold of kind `skipped` with the text `skipped:
-existing tests in `<path>` are skipped, and this unit did not add or change a skip that can affect them (<n> tests)`.
+existing tests in `<path>` were also skipped in a base report, and the file adds or changes no skip the harness reads
+(<n> tests)`.
 Any other old skipped test of a changed file, and every case in which a blob cannot be read or parsed, SHALL stay in the
 deterministic major finding as before. The hold SHALL join the round at step 3, whether diff coverage is on or off, and
 SHALL be listed in `evidence.holds` of `verdict.json` with kind `skipped` and in `tests_ran.summary.skipped_predating`.
-The Evidence section of `verification.md` SHALL print the line `Skipped in a changed file before this unit (hold): <ids>`
-when `skipped_predating` is not empty, and a `verdict.json` that has no `skipped_predating` SHALL read as an empty list.
-The check SHALL NOT run a test and SHALL NOT read a base report. [V, the code: step 3 compared nothing with the base, and
+The Evidence section of `verification.md` SHALL print the line `Skipped in a changed file before this unit (hold): also
+skipped in a base report (<source>); the file adds or changes no skip construct the harness reads; a skip from code the
+unit changed or from an imported module is not told apart: <ids>` when `skipped_predating` is not empty, and the line
+`Skipped tests were not matched with a base report: <note>` when `skipped_note` is not empty, and a `verdict.json` that has no `skipped_predating`, `skipped_source` or `skipped_note` SHALL read them as empty.
+The check SHALL run no test of the unit; the only run it can make is the third source of (a), at most one a round.
+`integrity.base_tests` of `verdict.json` SHALL carry a `skipped` list (the sorted ids the base's report holds as
+skipped) only when step 1's reference was a full report of the base (source `baseline` or `base worktree`); a
+record rebuilt from an earlier round's passed ids, or the head's run with the base's test files (`not needed`),
+SHALL NOT have the key, and an absent key SHALL mean "not observed", never "nothing skipped". The base report that
+held the tests as skipped SHALL be named (`step 1 base run`, `an earlier round's record` or `a base worktree run`) in
+`tests_ran.summary.skipped_source`, in the hold's view and in its question, and in neither the hold's text nor its
+binding, so that the same file and ids read in another report are the same hold. Not told apart, and said so in the
+question and the runbook: a skip that comes from production code the unit changed, or from a module the test imports
+(a marker, a fixture, a base class), where the tests were skipped at the base too for another reason, and a skip
+reached by a dynamic form (`getattr`, `importlib`). [V, the code: step 3 compared nothing with the base, and
 a fix chore puts every test path back, so no fix unit could make a skipped test run]
 
 #### Scenario: SCN-VER-372 (+) A stack-gated test whose assertion the unit edited is a hold
-- **Given** `tests/test_live.py` at the base has `@pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` on `test_a` and `test_b`, the unit changed one assertion line in each, and the gate report holds both as `skipped`
+- **Given** `tests/test_live.py` at the base has `@pytest.mark.skipif(os.getenv("X_INTEGRATION_TEST") != "true", reason=...)` on `test_a` and `test_b`, the unit changed one assertion line in each, and both the gate report and the base's report hold both as `skipped`
 - **When** step 3 collects evidence
 - **Then** the round has no finding `existing tests are skipped in a changed test file`
-- **And** it has one hold `skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that can affect them (2 tests)`, the verdict is NEEDS_HUMAN, and `tests_ran.summary.skipped_predating` lists both ids
+- **And** it has one hold `skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or changes no skip the harness reads (2 tests)`, the verdict is NEEDS_HUMAN, and `tests_ran.summary.skipped_predating` lists both ids
 
 #### Scenario: SCN-VER-373 (−) A skip the unit added stays a deterministic finding
 - **Given** the unit added `@pytest.mark.skip` above `test_a`, which exists at the base, and `test_a` is skipped
@@ -59,11 +83,11 @@ a fix chore puts every test path back, so no fix unit could make a skipped test 
 - **When** step 3 collects evidence
 - **Then** the old skipped tests of that file are in the finding and in no hold, and no exception escapes the evidence step
 
-#### Scenario: SCN-VER-378 (+/−) A skip with no construct in the file depends on support files
-- **Given** `test_a` is skipped, its file holds no skip construct in any scope that can skip it, and the unit changed only that file
+#### Scenario: SCN-VER-378 (+/−) A changed support or runner-configuration file keeps the finding
+- **Given** `test_a` is skipped at the base and at the head by an unchanged `skipif`, and the unit changed only its test file
 - **When** step 3 collects evidence
 - **Then** `test_a` is in the hold
-- **And** when the unit also changed `tests/conftest.py` (or a file of `tdd.runner_config_files`), `test_a` is in the finding instead
+- **And** when the unit also changed `tests/conftest.py` (or a file of `tdd.runner_config_files`), `test_a` is in the finding instead, with or without a skip construct in the file: the skip may come from the changed file
 
 #### Scenario: SCN-VER-379 (+) The hold is raised when diff coverage is off
 - **Given** `verifier.evidence.diff_coverage.mode: off` and the case of SCN-VER-372
@@ -79,8 +103,9 @@ a fix chore puts every test path back, so no fix unit could make a skipped test 
 The hold of L4-VER-092 SHALL be asked like any hold (`Kind: verdict`, target `H-` and eight hex digits of its text). Its
 kind SHALL be read from the text prefix `skipped: existing tests in ` (`hold_kind` returns `skipped`); `hold_subjects`
 SHALL return none for it, so no judge finding is settled by its answer. The question SHALL name the file and the count,
-list the skipped test ids, say that the unit's diff adds or changes no skip that can affect them and that no base run was
-made, say that an `accept` means the person ran them where they can run or knows they pass there and holds for this
+list the skipped test ids, name the base report that held them as skipped, say what was compared (the file adds or
+changes no skip construct the harness reads, and no support or runner-configuration file changed) and what is not told
+apart (a skip that comes from production code the unit changed, or from a module the test imports), say that an `accept` means the person ran them where they can run or knows they pass there and holds for this
 content of the file only, and say that `reject: <reason>` ends the round because a fix unit cannot change test files. A
 person's `accept` SHALL be bound (`result.hold_views`) to the head blob of the file and the full sorted list of its
 skipped ids, so that an edit of the file or a change of the skipped set voids it and the hold is asked again. An `accept`
@@ -94,10 +119,42 @@ converted into a fix task (or a reject of a hold on the judge's view) SHALL keep
 way out, and the reason text of the escalation SHALL say that another finding of a person also cannot be converted into a
 fix task; the other way out shows once this one is resolved.
 
+#### Scenario: SCN-VER-394 (−) A test that ran at the base is not a predating skip
+- **Given** `test_a` ran (status `passed`) in the base's report and is `skipped` at the head, and one of: it gained a marker imported from another module (`from tests.markers import requires_stack`, `@requires_stack`); the variable of an unchanged `skipif(not HAS)` changed from `HAS = True` to `HAS = False`; its class newly inherits a base class that is skipped
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and in no hold, whatever the constructs of the file say
+
+#### Scenario: SCN-VER-395 (−) A fixture, a block, a run-time marker or an alias counts as a skip the unit added
+- **Given** `test_a` was skipped at the base and at the head, and the unit added one of: a `pytest.skip(...)` call to a fixture whose name starts with `test` (`test_env`) or is any other (`@pytest.fixture`, with or without arguments, `@pt.fixture`); `pytestmark = pytest.mark.skip` in a module-level or class-level `if`, `try`, `with` or `for` block; `request.node.add_marker(...)`, `item.add_marker(...)` in a collection hook of the file, or `pytestmark.append(pytest.mark.skip)`; a skip through `import pytest as pt`, `from pytest import mark as m` (`@m.skip`), `import unittest as ut` (`@ut.skip`) or `skip = pytest.skip`
+- **When** step 3 collects evidence
+- **Then** `test_a` is in the finding and in no hold
+
+#### Scenario: SCN-VER-396 (+) The base report is read from step 1, an earlier round or a base worktree run, in that order
+- **Given** a skipped test of a changed file passes the rest of L4-VER-092
+- **When** step 3 collects evidence
+- **Then** the report is step 1's reference of the round when it is a full report of the base, else the `skipped` list of the newest earlier round's `integrity.base_tests` of the same base sha and command that has the key (a record without it is passed over), else one run of the test gate in a base worktree
+- **And** the base's gate runs at most once in a round and the run is kept for the next; no skipped test of a changed file that passes the rest means no lookup and no run
+
+#### Scenario: SCN-VER-397 (−) No base report with statuses keeps the finding and says why
+- **Given** the case of SCN-VER-372 and no report: step 1 had none, no earlier record has a `skipped` key, and the base worktree run gave no report or failed
+- **When** step 3 collects evidence
+- **Then** both tests are in the finding and in no hold, no exception escapes the evidence step, and the step note and `tests_ran.summary.skipped_note` say `no base report with statuses: <why>`
+
+#### Scenario: SCN-VER-398 (+) The record carries `skipped` only when the base report was seen whole
+- **Given** step 1's reference R0 is a cached baseline or a base worktree run, or is rebuilt from an earlier round's passed ids, or is the head's own run with the base's test files (`not needed`)
+- **When** step 3 collects evidence
+- **Then** `integrity.base_tests` has `skipped` (sorted ids) in the first case and no `skipped` key in the other two: an absent key is "not observed", never "nothing skipped", and the implementer's baseline is not changed
+
+#### Scenario: SCN-VER-399 (+) A fixing unit retried after an older harness gets its base report from a base worktree run
+- **Given** the earlier rounds' records carry `base_tests` without a `skipped` key (an older harness) and the fresh round after `l4 retry` is verified under the release
+- **When** step 3 collects evidence
+- **Then** that round runs the base's test gate once in a base worktree, holds the old skipped test as skipped, and has the hold and no major
+- **And** when that run gives no report the round keeps the major and says why
+
 #### Scenario: SCN-VER-381 (+) The question names what a person needs to decide
 - **Given** the hold of SCN-VER-372
 - **When** the verdict question is raised
-- **Then** its context lists `tests.test_live::test_a` and `tests.test_live::test_b`, says no base run was made, offers `accept` and `reject: <reason>`, and does not ask for a `WHEN ... THEN ...`
+- **Then** its context lists `tests.test_live::test_a` and `tests.test_live::test_b`, names the base report that held them as skipped, says what was compared (the file adds or changes no skip construct the harness reads, no support or runner-configuration file changed) and what is not told apart (a skip from production code the unit changed or from a module the test imports), offers `accept` and `reject: <reason>`, and does not ask for a `WHEN ... THEN ...`
 
 #### Scenario: SCN-VER-382 (+) An accept waives the hold and the round can pass
 - **Given** the hold of SCN-VER-372 and `accept ran against the stack on 2026-11-25`

@@ -903,7 +903,7 @@ run. `l4 status` shows `fixing` with `fix unit questions: Q-NNN`. Do these steps
    answer came between the retry and the run, the run closes nothing and records `fix.close_skipped`. The fix round
    that the closed fix unit used stays counted. Until that run, `l4 plan` says `implement` with `fix unit <name>:
    closed by the retry at the next run`, in place of `fixing: fix unit questions open`. The ledger shows the steps:
-   `unit.retried` with `close_fix_unit`, then `task.done`, `question.superseded` and `fix.done`, each with
+   `unit.retried` with `close_fix_unit`, then `question.superseded`, `task.done` and `fix.done`, each with
    `closed_by: retry` (read them as in [4.5](#45-read-the-ledger)).
 3. **Answer the hold.** The fresh round, under the new harness, raises the hold above and no finding for the skipped
    tests. Answer it as the bullet in this section says.
@@ -1204,15 +1204,23 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   text names five), and your accept is bound to the content of those files: when one changes, the hold is asked again. A `reject` stops the unit
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
-- A hold `skipped: existing tests in `<path>` are skipped, and this unit did not add or change a skip that can affect
-  them (<n> tests)` (the release after 0.4.60; L4-VER-092 to L4-VER-095) says that the unit changed a test file, the
-  gate's report holds old tests of that file as skipped, and the unit's diff adds or changes no skip that can affect
+- A hold `skipped: existing tests in `<path>` were also skipped in a base report, and the file adds or changes no skip the
+  harness reads (<n> tests)` (the release after 0.4.60; L4-VER-092 to L4-VER-095) says that the unit changed a test file,
+  the gate's report holds old tests of that file as skipped, and the harness found nothing that the unit added to skip
   them. The usual cause is an environment the gate does not have: a docker-compose stack, a service, a variable
   (`skipif(os.getenv("…") != "true")`). Before this release the same case was a major finding that nobody could waive,
-  and the fix unit that came from it could not change a test file. The question lists the test ids. **No test was run
-  for this check, and no base run was made**: the harness compares the skip markers and skip calls of the file at the
-  base and at the head (a changed condition, a new alias use, a new `pytest.importorskip`, a `pytestmark` or a skip in
-  a fixture all count as a changed skip), and it never says that the tests passed before. Two answers:
+  and the fix unit that came from it could not change a test file. The question lists the test ids and says what was
+  compared, and no more: (1) the tests were also **skipped in a base report**, the base's tests on the base's code, named
+  by its source (`step 1 base run`, `an earlier round's record`, or `a base worktree run`, the one run that this check can
+  add to a round, only when the first two have no statuses); (2) the file adds or changes no skip construct that the
+  harness reads (decorators, marks and skip calls, an alias of pytest or unittest, a marker added at run time, a mark
+  under a module-level `if`, `try`, `with` or `for`, in the test, its class, the module, or a fixture or helper of the
+  file); (3) the unit changed no `conftest.py`, support file or runner configuration file (`tdd.test_support_globs`,
+  `tdd.runner_config_files`), whether or not the file holds a skip. **Not told apart**: a skip that comes from
+  production code the unit changed (`skipif(not hasattr(mod, "x"))`), or from a module that the test imports (a marker, a
+  fixture or a base class there); the tests were skipped at the base too, but the reason may have changed. A skip
+  reached by `getattr` or `importlib` is not read. If no base report with statuses can be had, the finding stays and the
+  step note says `no base report with statuses: <why>`. Two answers:
   - `accept` says that you ran these tests where they can run, or that you know they pass there. It holds for this
     content of the file and this list of skipped ids: an edit of the file, or another set of skipped tests, asks again.
   - `reject: <reason>` stops the unit with `skipped_tests_rejected` ([7.3.4](#734-escalated-with-skipped_tests_rejected)).
@@ -1221,12 +1229,12 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   Only a person answers this hold. The delegate does not (no call is made, the question is escalated), and an answer
   that an agent wrote (`by: agent`, `delegate` or `clarifier`; `clarifier.answer_by_agents` lets an agent write one)
   is not in force: the harness records `human.void` for it and asks the hold again. A skip that the unit added or
-  changed stays a major finding, as before. Limits of the rule: it compares skip constructs and not behaviour, so a test
-  that did not skip at the base can skip now through an unchanged construct whose condition depends on code the unit
-  changed (for example `skipif(not hasattr(mod, "x"))`); a skip with no construct in the file (a `conftest.py`, an
-  option of the runner, a plugin) is a hold only when the unit changed no file of `tdd.test_support_globs` or
-  `tdd.runner_config_files`; a file that is new, renamed or unreadable, and a test that did not exist at the base,
-  stay a finding; only Python test ids are compared. Your accept is the statement that none of these applies.
+  changed stays a major finding, as before, and so does a test that ran at the base. Limits of the rule: it compares
+  skip constructs and a base report, not behaviour, so the cases under "not told apart" above are yours to judge; a
+  file that is new, renamed or unreadable, and a test that did not exist at the base, stay a finding; only Python test
+  ids are compared. Your accept is the statement that none of these applies. When an agent wrote `questions.md` by
+  hand without `l4 questions`, the answer is read as a person's (the actor detection of L4-QMD-009 decides who
+  answered); the rule that only a person answers rests on it.
 - A hold `UI criterion C-… has no end-to-end test; see the generated UI tests table` (harness 0.4.43 and later) says
   that step 5 could not give a UI criterion an end-to-end test that fails at the merge base and passes at head. The hold
   names no status, so it keeps the same id in every round; the question's context gives the status of this round
@@ -1802,11 +1810,15 @@ retry and the `l4 yolo resume`.
 #### 7.3.4 Escalated with `skipped_tests_rejected`
 
 Cause `skipped_tests_rejected` (L4-VER-093). A person rejected a hold `skipped: existing tests in …`: old tests of a
-changed test file are skipped, and the unit's diff adds or changes no skip that can affect them. A fix unit cannot change
+changed test file were skipped in a base report too, and the harness found no skip that the unit added. A fix unit cannot change
 test files, so no task is made from the reject, whatever its reason says (also with a `WHEN … THEN …`), and the unit
 escalates. `l4 status --unit <unit>`, the refusal of `l4 run --unit` and the sticky note name the way out.
 **A retry alone repeats the same hold.** If another finding of a person also cannot be converted into a fix task, the
-detail says so; this way out comes first, and the other one shows when this one is resolved.
+detail says so; this way out comes first, and the other one shows when this one is resolved. The code is the first that
+applies in this order: no fix units, a CI job that was not fixed, `same_failure`, `fix_rounds_exhausted`, then this one.
+So a reject that comes in a round that failed the same way as the one before, or when the fix rounds are used up, escalates
+with `same_failure` or `fix_rounds_exhausted`, not with `skipped_tests_rejected`; the way out is the same (your own commit
+on the unit branch, then `l4 retry`), and the `Cause:` text of `l4 status` says which code applied.
 
 1. Change the file in your own commit on `<branch>`: remove the skip, or make the tests able to run in the gate (set up
    what they need there). A person's commit on a test file is allowed and is listed by step 1. Then:
@@ -3003,11 +3015,22 @@ Risks:
 
 These limits make operation more difficult. Know them before you start.
 
-- From the release after 0.4.60, an old skipped test of a changed test file is a hold when the unit added no skip that
-  can affect it. The check compares skip constructs at the base and at the head. It runs no test and reads no base
-  report, it sees Python test files only, and it cannot see a skip that comes from outside the file when the unit changed
-  a test-support or runner-configuration file (that stays a finding). Your accept says the tests ran or pass where they
-  can run ([7.1](#71-awaiting_human-a-question-waits-for-you)). A unit that is already in `fixing` for the old finding
+- From the release after 0.4.60, an old skipped test of a changed test file is a hold when a base report also holds it as
+  skipped, the file adds or changes no skip construct that the harness reads, and the unit changed no test-support or
+  runner-configuration file. Otherwise it stays a finding. The check sees Python test files only. The base report is
+  step 1's own reference, an earlier round's record that has the statuses, or one more run of the base's test gate in a
+  worktree (at most one a round, only when needed); when none can be had the finding stays and the step note says why.
+  What it does not tell apart ([7.1](#71-awaiting_human-a-question-waits-for-you)): a skip that comes from production
+  code the unit changed, or from a module the test imports (a marker, a fixture or a base class there), and a skip
+  reached by `getattr` or `importlib`; the base run's environment is this gate's, so it is the same fact as the head's
+  only when the two runs have the same environment. Your accept says the tests ran or pass where they can run. Three
+  more limits: (1) the rule that only a person answers the hold relies on the actor detection of L4-QMD-009: an agent
+  that edits `questions.md` by hand without `l4 questions` is read as a person; (2) the close of a fix unit by
+  `l4 retry` writes `question.superseded` before the commit of the task it releases, and the `task.done` after it
+  (it names the commit's sha); a run that ends between the two leaves a commit with no `task.done` event, which step 1
+  does not count as a missing red or green, and the next run finds nothing to close (`fix.close_skipped`) and ends the
+  fix unit; (3) a reject of the hold can escalate with `same_failure` or `fix_rounds_exhausted` when those are decided
+  first ([7.3.4](#734-escalated-with-skipped_tests_rejected)). A unit that is already in `fixing` for the old finding
   needs the pin upgraded first and then `l4 retry`; a retry on the old harness spends a fix round.
 
 - With `gates.test.red_check: targeted`, a new test file that breaks an old test only when they run together shows at

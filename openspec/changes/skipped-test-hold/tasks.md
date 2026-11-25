@@ -1,4 +1,4 @@
-Read `design.md` first (D1-D7). Requirements: L4-VER-092..095 (`docs/SPEC.md`), scenarios SCN-VER-372..393. Run single test
+Read `design.md` first (D1-D7). Requirements: L4-VER-092..095 (`docs/SPEC.md`), scenarios SCN-VER-372..399. Run single test
 files only (`uv run --frozen pytest <file> -q -p no:cacheprovider`), never a directory, never two runs at once, and never a
 wait loop on `pgrep`. Every group writes its tests first, runs them and sees them fail, then changes the code.
 
@@ -86,3 +86,27 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
   finding. Run `tests/unit/docs/` files that read the runbook, one at a time.
 - [x] 6.2 `openspec validate skipped-test-hold --strict`; `uv run --frozen ruff check` and `mypy` on the changed files;
   a last pass: grep the new text for a consumer's name (none).
+
+## 7. Rework: the base report is a necessary condition (L4-VER-092, D1, review F1-F9)
+
+- [x] 7.1 Tests first (they failed before the code): `tests/unit/evidence/test_skip_predating_reference.py` (one test per case F1-F7 at the
+  level of the pure rule, fake reference), `tests/unit/evidence/test_skip_predating.py` (the lookup asked once and only
+  for a candidate, no report, a lookup that raises, rule (c) unconditional), `tests/unit/evidence/test_skip_hold_evidence.py`
+  (F1, F6, F7 through `collect_evidence`, the source in the view and not in the hold id or binding),
+  `tests/unit/verifier/test_scan.py` (blocks, fixtures, run-time markers, aliases), `tests/unit/verifier/test_base_skips.py`
+  (the `skipped` key written only for a full reference, lookup order (i)/(ii)/(iii), the cache, fail closed),
+  `test_hold_verdicts.py` (the question's wording), `test_ladder_evidence.py` (the lookup of the round), and the combined
+  test of `test_retry_fixing.py` in the real-world shape. SCN-VER-394..399.
+- [x] 7.2 Then: `scan.collected_tests`, `scan.shared_scopes`, `skip_constructs` (F2-F5), `skippred.no_skip_added` and
+  `skip_predates(..., skipped_at_base=)`, `BaseSkips`, `collect.skip_predating(..., base_skips)` returning `Predating`,
+  `base_tests.SkipLookup` and the `skipped` key of step 1's record (`Outcome.base_report`), `Workbench.base_skips`, the
+  lookup in `_collect_step`, the hold text, the view's `base_source`, `TestsSummary.skipped_source` and `skipped_note`,
+  `_hold_question`, the Evidence line.
+- [x] 7.3 F9, read in `_close_for_retry`: a crash between the close commit and its `task.done` is NOT fully repaired as it
+  was (the commit holds the question's new Status but the ledger lacks `question.superseded`, and the next run's
+  `fix.close_skipped` ends the request without writing it, so the fold keeps the question open); fixed by writing
+  `question.superseded` before the commit, so it travels inside it. The `task.done` after the commit stays (it names the
+  sha); its loss is harmless (step 1 reads the `already-done` commit with no event as nothing to check).
+- [x] 7.4 Documents: D1 rewritten, the proposal's non-goal dropped, L4-VER-092 and L4-VER-093 and SCN-VER-372, 378, 381 amended
+  and SCN-VER-394..399 added in the change's spec and in `docs/SPEC.md`, the `skipped` key, the runbook (7.1 bullet, 7.3.4 reject
+  precedence, 11 known limits: F8, F9, reject precedence), the CHANGELOG entry.

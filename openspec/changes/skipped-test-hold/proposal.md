@@ -26,10 +26,12 @@ Verified at `next-int` (50bb9526):
 ## What Changes
 
 - A skip that predates the unit is a hold, not a finding. For each old skipped test in a changed test file the harness
-  decides, from the base and head blobs of the file and no test run, whether the unit added or changed a skip construct
-  that can affect that test (L4-VER-092). When it did not, the tests of the file are one hold, asked as a verdict
-  question, whose accept is bound to the file's content. When it did, or when this cannot be shown, the finding stays
-  deterministic as today.
+  decides, from a base report with statuses (the base's tests on the base's code: step 1's own reference, an earlier
+  round's record, or at most one run of the base's test gate in a worktree) and from the base and head blobs of the
+  file, whether the test was skipped at the base too and the unit added or changed no skip construct that can affect it
+  and no support or runner-configuration file (L4-VER-092). When so, the tests of the file are one hold, asked as a
+  verdict question, whose accept is bound to the file's content. When not, or when this cannot be shown (no base
+  report), the finding stays deterministic as today.
 - A person answers the hold. `accept` says the tests were run where they can run (or are known to pass there) and waives
   the hold for this content of the file. `reject: <reason>` is the person's finding: a fix unit cannot change test files,
   so no task is derived from it, the round escalates with `skipped_tests_rejected`, and the way out is the person's own
@@ -43,10 +45,9 @@ Verified at `next-int` (50bb9526):
   its own commits, marks their questions `superseded by retry`, ends the fix unit and verifies the parent in a fresh
   round under the pin, where the finding is a hold (L4-VER-095). The person upgrades the pin first.
 
-Non-goals: a base-side test run to learn what was skipped at base (it exists only for changed test files and is not
-kept, D1); skip detection for any language other than Python (the check maps JUnit ids to `.py` files only); skips that
-come from a file outside the test file (a fixture or conftest the unit did not change are covered by D3, rule 5, no
-more); changing what a fix chore may edit; a per-hold override for a skip the unit added.
+Non-goals: skip detection for any language other than Python (the check maps JUnit ids to `.py` files only); a skip
+that comes from production code the unit changed or from a module the test imports (the rule says so in the question and
+does not tell them apart, D1); changing what a fix chore may edit; a per-hold override for a skip the unit added.
 
 ## Capabilities
 
@@ -70,7 +71,9 @@ Amended in place in `docs/SPEC.md`, each with a pointer to the new requirements;
 
 ## Impact
 
-- `src/l4/verifier/scan.py` (`skip_constructs`), `src/l4/evidence/testsran.py` (`check_tests_ran`, `TestsSummary`),
+- `src/l4/verifier/scan.py` (`skip_constructs`, `collected_tests`, `shared_scopes`), `src/l4/verifier/base_tests.py`
+  (`SkipLookup`, the `skipped` key of the step 1 record), `src/l4/implementer/workbench.py` (`base_skips`),
+  `src/l4/evidence/skippred.py`, `src/l4/evidence/testsran.py` (`check_tests_ran`, `TestsSummary`),
   `src/l4/evidence/collect.py` (`Hold.kind`, `collect_evidence`, `Evidence`), `src/l4/evidence/report.py`,
   `src/l4/verifier/ladder.py` (`_collect_step`, `_finalize`), `src/l4/verifier/verdicts.py` (`HoldKind`, `hold_kind`,
   `hold_subjects`, `_hold_question`, `_hold_finding`), `src/l4/verifier/fixunit.py`, `src/l4/verifier/fixloop.py`
@@ -78,9 +81,9 @@ Amended in place in `docs/SPEC.md`, each with a pointer to the new requirements;
   `src/l4/state/fold.py`, `src/l4/specs/questions.py`, `src/l4/delegate/run.py` (`_without_a_call`),
   `src/l4/delegate/reply.py`, `src/l4/delegate/prompt.py`.
 - `docs/SPEC.md`, `docs/runbook.md`, `CHANGELOG.md`. No change to the skill, to `src/l4/s1/` or to the configuration.
-- Ledger and files: one new value of `holds[].kind` in `verdict.json`, one new optional key in `tests_ran.summary`, one
-  new escalation code, one new optional key `close_fix_unit` on `unit.retried`, one new question Status text. An older reader ignores the key and shows the code as an unknown reason. `human.void` is an
+- Ledger and files: one new value of `holds[].kind` in `verdict.json`, three new optional keys in `tests_ran.summary` (`skipped_predating`, `skipped_source`, `skipped_note`), one optional
+  `skipped` list in `integrity.base_tests`, one new escalation code, one new optional key `close_fix_unit` on `unit.retried`, one new question Status text. An older reader ignores the key and shows the code as an unknown reason. `human.void` is an
   existing event.
-- Behaviour: a unit whose changed test file holds skipped tests it did not skip stops failing and waits for a person's
-  answer instead (NEEDS_HUMAN, exit 11). A person who does not want to answer sees the hold, as for any hold. Nothing
+- Behaviour: a unit whose changed test file holds tests that were skipped before it stops failing and waits for a person's
+  answer instead (at most one extra run of the base's test gate in a round, when no step 1 reference or earlier record has the statuses) (NEEDS_HUMAN, exit 11). A person who does not want to answer sees the hold, as for any hold. Nothing
   changes for a skip the unit added or changed, for a new file, or for a file the harness cannot compare.
