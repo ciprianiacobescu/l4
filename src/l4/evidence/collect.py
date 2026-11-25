@@ -28,7 +28,7 @@ from l4.evidence.diffcov import (
 )
 from l4.evidence.report import evidence_json, render_evidence_section
 from l4.evidence.scope import ChangedFile, Kind, ScopeContext, ScopeOutcome, check_scope, file_kind, unit_declared_scope
-from l4.evidence.skippred import BaseLookup, no_skip_added, qualified_name
+from l4.evidence.skippred import BaseLookup, SkipRule, qualified_name
 from l4.evidence.testsran import TestsRanOutcome, check_tests_ran, file_of_test
 from l4.gates.coverage import JSON_NAME, NONCE_NAME, STATUS_NAME
 from l4.gates.junit import TestReport
@@ -125,22 +125,28 @@ def unsafe_path(path: str) -> bool:
     return any(ord(c) < 32 or ord(c) == 127 for c in path)
 
 
-def changed_files(git: Git, base: str, head: str) -> list[tuple[str, str]]:
-    """(status letter A|M|D|R, head path) per file of `git diff base head`, by NUL-separated names so that no path
-    needs unquoting. Copies and type changes count as additions and modifications."""
+def name_status(git: Git, base: str, head: str) -> list[tuple[str, str, str | None]]:
+    """(status letter A|M|D|R, head path, old path of a rename or None) per file of `git diff base head`, by
+    NUL-separated names so that no path needs unquoting. Copies and type changes count as additions and
+    modifications."""
     raw = git.run_bytes("diff", "--name-status", "-z", "--find-renames", "--no-ext-diff", base, head, "--")
     fields = [f.decode("utf-8", "replace") for f in raw.split(b"\0") if f]
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str | None]] = []
     i = 0
     while i < len(fields):
         code = fields[i][0]
         if code in "RC":
-            out.append(("R" if code == "R" else "A", fields[i + 2]))
+            out.append(("R" if code == "R" else "A", fields[i + 2], fields[i + 1] if code == "R" else None))
             i += 3
         else:
-            out.append((code if code in "AMD" else "M", fields[i + 1]))
+            out.append((code if code in "AMD" else "M", fields[i + 1], None))
             i += 2
     return out
+
+
+def changed_files(git: Git, base: str, head: str) -> list[tuple[str, str]]:
+    """(status letter A|M|D|R, head path) per file of `git diff base head` (`name_status` without the old path)."""
+    return [(code, path) for code, path, _ in name_status(git, base, head)]
 
 
 @dataclass(frozen=True)
@@ -171,20 +177,21 @@ def skip_predating(
     predates the unit and the note says why. Never raises and never runs a test: every failure is a skip that does not
     predate the unit."""
     try:
-        status = {path: code for code, path in changed_files(git, base, head)}
-        changed = list(status)
+        changes = name_status(git, base, head)
+        status = {path: code for code, path, _ in changes}
+        changed = [*status, *(old for _, _, old in changes if old is not None)]  # a rename counts at its old path too
         candidates: set[str] = set()
-        blobs: dict[str, tuple[str, str] | None] = {}
+        rules: dict[str, SkipRule | None] = {}
         for test_id in sorted(ids):
             path = file_of_test(test_id, files, tree)
             if path is None or status.get(path) != "M":
                 continue
-            if path not in blobs:
+            if path not in rules:  # one read and one scan per file, not per test
                 before, after = show_blob(git, base, path), show_blob(git, head, path)
-                blobs[path] = None if before is None or after is None else (before, after)
-            pair = blobs[path]
+                rules[path] = None if before is None or after is None else SkipRule(before, after, changed, cfg)
+            rule = rules[path]
             name = qualified_name(test_id, path)
-            if pair is not None and name is not None and no_skip_added(pair[0], pair[1], name, changed, cfg):
+            if rule is not None and name is not None and rule.no_skip_added(name):
                 candidates.add(test_id)
     except Exception:  # a git or parse failure must not stop the evidence step: the skip stays a finding
         return Predating()

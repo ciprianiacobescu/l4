@@ -272,3 +272,53 @@ def test_a_lookup_that_raises_leaves_the_finding_in_place(git_for, make_repo, ra
     assert (
         skip_predating(git_for(repo), base, head, [LIVE], [A], L4Config.model_validate({}), [LIVE]).ids == frozenset()
     )
+
+
+# --- rule (c): runner files in any directory, and the old path of a rename (review G5) ------------------------------
+
+CONFTEST = "import pytest\n\n\n@pytest.fixture\ndef f():\n    return 1\n"
+
+
+@pytest.mark.parametrize(
+    "name", ["conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini", ".pytest.ini", "pytest.toml"]
+)
+def test_g5_a_nested_runner_file_that_changed_keeps_the_finding(run, name):
+    nested = f"services/api/tests/{name}"
+    base = {LIVE: live(), nested: "[x]\n"}
+    assert run(base, {LIVE: live("2"), nested: "[y]\n"}) == set()
+    assert run(base, {LIVE: live("2"), nested: "[x]\n"}) == {A, B}  # the control: it did not change
+
+
+def test_g5_a_conftest_that_was_renamed_away_is_a_changed_support_file(run):
+    base = {LIVE: live(), "tests/conftest.py": CONFTEST}
+    head = {LIVE: live("2"), "tests/conftest_bak.py": CONFTEST}
+    assert run(base, head, renamed={"tests/conftest.py": "tests/conftest_bak.py"}) == set()
+
+
+def test_g5_a_rename_of_an_unrelated_file_does_not_matter(run):
+    base = {LIVE: live(), "docs/a.txt": "text\n"}
+    head = {LIVE: live("2"), "docs/b.txt": "text\n"}
+    assert run(base, head, renamed={"docs/a.txt": "docs/b.txt"}) == {A, B}
+
+
+# --- cost: the file is read once per path, not once per test (review G3) -------------------------------------------
+
+
+def test_g3_six_hundred_skipped_tests_of_one_file_are_decided_in_seconds(run):
+    import time
+
+    def source(k: int) -> str:
+        lines = ["import os", "import pytest", "", "STACK = os.getenv('STACK') == 'true'", ""]
+        lines += [f"def helper_{i}():\n    return {i}\n" for i in range(20)]
+        for i in range(600):
+            lines.append(
+                f"@pytest.mark.skipif(not STACK, reason='stack')\ndef test_t{i}():\n    x = helper_{i % 20}()\n"
+                f"    assert x == {k + i % 20}\n    assert [y for y in range(10)]\n"
+            )
+        return "\n".join(lines)
+
+    ids = tuple(f"tests.test_live::test_t{i}" for i in range(600))
+    started = time.monotonic()
+    found = run({LIVE: source(0)}, {LIVE: source(1)}, ids=ids)
+    assert len(found) == 600
+    assert time.monotonic() - started < 10

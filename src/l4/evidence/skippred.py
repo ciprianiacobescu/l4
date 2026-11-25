@@ -19,12 +19,25 @@ up only when (b) and (c) hold for at least one test (`BaseLookup`).
 
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from l4.config.schema import L4Config
 from l4.security.protected import glob_match
-from l4.verifier import scan
+from l4.verifier.skipdeps import SkipFacts
 
 MODULE = "<module>"
+RUNNER_NAMES = frozenset(
+    {
+        "conftest.py",
+        "pytest.ini",
+        ".pytest.ini",
+        "pytest.toml",
+        ".pytest.toml",
+        "pyproject.toml",
+        "setup.cfg",
+        "tox.ini",
+    }
+)  # a file of this name changes how the tests run wherever it is
 
 STEP1_SOURCE = "step 1 base run"
 EARLIER_SOURCE = "an earlier round's record"
@@ -62,29 +75,43 @@ def qualified_name(test_id: str, path: str) -> str | None:
     return None
 
 
-def _scopes_of(qualname: str, head: str) -> set[str]:
-    """The scopes whose skip constructs can skip `qualname`: itself, its class, the module and every function or method
-    of the file that no runner collects as a test (a fixture, whatever its name, a helper, `setUp`, a collection hook):
-    the tests share those."""
-    scopes = {qualname, MODULE}
-    if "." in qualname:
-        scopes.add(qualname.split(".", 1)[0])
-    return scopes | scan.shared_scopes(head)
+def _outside(changed: Collection[str], cfg: L4Config) -> bool:
+    """Rule (c): the unit changed a file that can skip a test from outside: one that matches `tdd.test_support_globs` or
+    `tdd.runner_config_files`, or whose name is one of `RUNNER_NAMES` in any directory (a nested `conftest.py` or
+    `pyproject.toml`, which a root-anchored glob does not match). `changed` holds the head path of every change and the
+    old path of a rename."""
+    globs = (*cfg.tdd.test_support_globs, *cfg.tdd.runner_config_files)
+    return any(PurePosixPath(p).name in RUNNER_NAMES or any(glob_match(g, p) for g in globs) for p in changed)
+
+
+class SkipRule:
+    """Rules (b), (c) and (d) for the tests of one file whose text is `base` at the base and `head` at the head: the two
+    sources are parsed and scanned once, and each test is asked against the result (`no_skip_added`)."""
+
+    def __init__(self, base: str, head: str, changed: Collection[str], cfg: L4Config) -> None:
+        self.outside = _outside(changed, cfg)
+        self.before, self.after = SkipFacts(base), SkipFacts(head)
+
+    def no_skip_added(self, qualname: str) -> bool:
+        """Rules (b), (c) and (d): the unit added or changed no skip construct that can affect the test `qualname`,
+        changed no test-support or runner-configuration file (one that does, whatever the file holds, can skip the test
+        from outside), and changed nothing inside the file that decides whether an unchanged construct skips (the
+        closure of the test's skip-relevant parts, `skipdeps`). A source that does not parse, a test that was not
+        collected at the base or is not in the head, and a construct added in a scope that can skip the test are
+        False."""
+        before, after = self.before, self.after
+        if self.outside or not before.ok or not after.ok or qualname not in before.collected:
+            return False
+        scopes = {qualname, MODULE, *([qualname.split(".", 1)[0]] if "." in qualname else []), *after.shared}
+        if any(scope in scopes for scope, _ in after.constructs - before.constructs):  # a removed skip never counts
+            return False
+        closure = before.closure(qualname)
+        return closure is not None and closure == after.closure(qualname)
 
 
 def no_skip_added(base: str, head: str, qualname: str, changed: Collection[str], cfg: L4Config) -> bool:
-    """Rules (b) and (c): the unit added or changed no skip construct that can affect the test `qualname` of a file
-    whose text is `base` at the base and `head` at the head, and changed no test-support or runner-configuration file
-    (one that does, whatever the file holds, can skip the test from outside). A source that does not parse, a test that
-    was not collected at the base, and a construct added in a scope that can skip the test are False."""
-    before, after = scan.skip_constructs(base), scan.skip_constructs(head)
-    if before is None or after is None or qualname not in scan.collected_tests(base):
-        return False
-    scopes = _scopes_of(qualname, head)
-    if any(scope in scopes for scope, _ in after - before):  # a multiset difference: a removed skip never counts
-        return False
-    outside = (*cfg.tdd.test_support_globs, *cfg.tdd.runner_config_files)
-    return not any(glob_match(g, p) for p in changed for g in outside)
+    """`SkipRule(base, head, changed, cfg).no_skip_added(qualname)`, for one test."""
+    return SkipRule(base, head, changed, cfg).no_skip_added(qualname)
 
 
 def skip_predates(
