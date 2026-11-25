@@ -57,17 +57,17 @@ wait loop on `pgrep`. Every group writes its tests first, runs them and sees the
 
 ## 5. Retry of a `fixing` unit (L4-VER-095, D6)
 
-- [ ] 5.1 Read first, and write down in the test file's docstring: that `Orchestrator.resume` (`src/l4/orchestrator.py:681-`)
+- [x] 5.1 Read first, and write down in the test file's docstring: that `Orchestrator.resume` (`src/l4/orchestrator.py:681-`)
   can record `unit.retried` for a unit in `fixing` with no phase edge (`state/lifecycle.py:122-144`), and that
   `question.superseded` (`state/fold.py:272`) takes a fix unit's technical question out of `questions.open`. Where
   either is not so, the task says what 5.2 changes.
-- [ ] 5.2 Tests first, in `tests/unit/state/test_retry.py` (or the file that holds the `refuse` tests), `tests/unit/verifier/test_fixloop.py`,
+- [x] 5.2 Tests first, in `tests/unit/state/test_retry.py` (or the file that holds the `refuse` tests), `tests/unit/verifier/test_fixloop.py`,
   `tests/unit/specs/test_questions*.py`, `tests/unit/planner/` and `tests/unit/verifier/test_integrity*.py`: SCN-VER-389
   (ticks, `already-done` commit and `task.done{closed_by}`, `superseded by retry`, `fix.done`, `verifying`, a fresh round
   with the hold, no `-fix-3`), SCN-VER-390 (`questions.open`, `l4 plan`, the label), SCN-VER-391 (the refusal text and
   no event), SCN-VER-392 (step 1 blocker for a person's tick: the existing behaviour, pinned), `holds()` ignoring a
   `superseded by retry` question, step 1 `check_tdd_history` skipping the closed task.
-- [ ] 5.3 Then: `refuse` and `retry_unit` (`src/l4/state/retry.py:61-141`: `fixing` accepted only when
+- [x] 5.3 Then: `refuse` and `retry_unit` (`src/l4/state/retry.py:61-141`: `fixing` accepted only when
   `questions_hold` is true for the open fix unit; `close_fix_unit` on the event), the fold (`src/l4/state/fold.py`,
   the new key of `unit.retried`), `fix_hook` (`src/l4/verifier/fixloop.py:410-447`: the close before the first task
   selection, harness commits, trailers as `_already_done` writes them, `tdd.py:3104-3122`), `QuestionsFile.supersede_by_retry`

@@ -403,6 +403,42 @@ def test_a_human_answer_in_a_fix_units_questions_file_is_not_foreign(tmp_path, g
     assert out.findings == []
 
 
+def test_a_fix_task_that_a_retry_closed_needs_no_red_or_green(tmp_path, git_environ):  # L4-VER-095
+    """`task.done{tdd: already-done, closed_by: retry}` of a fix unit's task, with its tick-only harness commit, is a
+    clean history: step 1 skips the closed task, as it skips a retaken feedback item."""
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({f"{FIX1}/tasks.md": "- [x] 1.1 a task of the fix unit\n"})
+    sha = repo.commit("fix(add-thing-fix-1): a task already done [skip ci]", task="1.1", tdd="already-done",
+                      unit="openspec:add-thing-fix-1")  # fmt: skip
+    repo.events = [
+        event("task.done", 1, task="1.1", sha=sha, tdd="already-done", closed_by="retry", fix_unit="add-thing-fix-1",
+              reason="closed by l4 retry: skipped tests are env-gated"),
+    ]  # fmt: skip
+    assert not check_tdd_history(repo.context(base, sha)).findings
+    repo.events = [event("task.done", 1, task="1.1", sha=sha, fix_unit="add-thing-fix-1")]  # no `already-done` in it
+    assert check_tdd_history(repo.context(base, sha)).findings  # the skip is the event's kind, not the fix unit
+
+
+def test_a_persons_tick_of_a_fix_units_task_is_a_blocker_not_a_way_out(tmp_path, git_environ):  # SCN-VER-392
+    """Existing behaviour, pinned: a person's commit that changes `<fix unit>/tasks.md` from `[ ]` to `[x]` is a
+    non-harness commit on the fix unit's folder, so step 1 raises `a protected path was changed` for it. This is why
+    `l4 retry` closes the fix unit in a harness commit and why the runbook does not offer the hand tick."""
+    repo, base = new_repo(tmp_path, git_environ)
+    repo.write({f"{FIX1}/tasks.md": "- [ ] 1.1 x\n"})
+    committer = {"GIT_COMMITTER_NAME": "l4-bot", "GIT_COMMITTER_EMAIL": "l4-bot@users.noreply.invalid"}
+    repo.environ = {**git_environ, **BOT_ENV, **committer}
+    repo.commit("docs(add-thing): fix unit 1 [skip ci]")
+    repo.environ = git_environ
+    repo.write({f"{FIX1}/tasks.md": "- [x] 1.1 x\n"})
+    ticked = repo.commit_as_human("tick 1.1 by hand")
+    head = repo.git("rev-parse", "HEAD").strip()
+    ctx = repo.context(base, head)
+    out = check_protected(IntegrityContext(ctx.git, ctx.cfg, base, head, [], [], [UNIT_DIR, FIX1], UNIT))
+    [finding] = out.findings
+    assert finding.title == "a protected path was changed" and finding.severity is Severity.BLOCKER
+    assert FIX1 in finding.detail and f"touched by non-harness commit {ticked[:10]}" in finding.detail
+
+
 # --- the base merge of step 0 (M1.7) ---------------------------------------------------------------------------------
 
 LONG_TESTS = "".join(f"def test_{n}():\n    assert {n}\n\n\n" for n in range(1, 9)).rstrip("\n") + "\n"
