@@ -285,3 +285,30 @@ def test_g4_the_message_of_an_exit_from_the_base_checkout_is_kept_in_the_note(tm
     lookup()
     s.lookup(1)()  # another lookup object of the round
     assert s.runs == ["checkout"]  # one attempt in the round
+
+
+def test_a_failure_that_is_not_an_exit_is_kept_for_the_round_with_its_redacted_message(
+    tmp_path, git_environ, monkeypatch
+):
+    """Review H, note A: only an `L4Exit` was kept, so a second asker of the round ran the base gate again after any
+    other failure (a full disk, a git error). Any failure is the answer "no report": kept in the lookup and on the
+    workbench, with the first line of its message, redacted and cut, and the type that names it."""
+    s = Setup(tmp_path, git_environ, monkeypatch, [])
+
+    @contextmanager
+    def failing(wb, sha):
+        s.runs.append("checkout")
+        raise OSError("No space left on device: /work/secret-token-123\nsecond line")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("l4.verifier.base_tests.base_checkout", failing)
+    monkeypatch.setattr(s.wb.redactor, "redact_text", lambda text: text.replace("secret-token-123", "[REDACTED]"))
+    lookup = s.lookup(1)
+    found = lookup()
+    assert found.skipped is None and found.source == ""
+    assert found.why == "no base report with statuses: OSError: No space left on device: /work/[REDACTED]"
+    assert lookup() is found  # the same answer, no second run
+    again = s.lookup(1)()  # another lookup object of the round: the workbench has the failure
+    assert again.skipped is None and again.why == found.why
+    assert s.runs == ["checkout"]  # one attempt in the round
+    assert s.wb.base_runs[(s.base, "pytest")] == BaseRun(None, found.why.removeprefix("no base report with statuses: "))

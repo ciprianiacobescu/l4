@@ -139,16 +139,32 @@ def test_the_base_report_that_read_the_skip_is_named_and_does_not_change_the_hol
 
 
 def test_f1_a_marker_imported_from_another_module_stays_a_finding_when_the_test_ran_at_the_base(tmp_path: Path):
+    head = "from lib.markers import requires_stack\n" + SOURCE.format(mark="@requires_stack", skipif=SKIPIF, n=2)
+    asked: list[int] = []
+    ev, _, _ = _evidence(
+        tmp_path / "r", "", "@requires_stack", base_skips=BaseSkips(frozenset({IDS[1]}), STEP1_SOURCE), asked=asked,
+        extra={"tests/test_live.py": head, "lib/markers.py": "import pytest\n\nrequires_stack = pytest.mark.skip\n"},
+    )  # fmt: skip
+    assert ev.ran is not None
+    assert ev.ran.summary.skipped_predating == (IDS[1],)  # test_b was skipped at the base and is untouched
+    assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR] and IDS[0] in ev.ran.findings[0].detail
+    assert asked == [1]
+
+
+def test_a_marker_module_of_the_tests_tree_that_the_unit_added_keeps_every_skip_a_finding(tmp_path: Path):
+    """The same unit with the marker module under `tests/` (rule (c), rework 9): a module of the tests tree that defines
+    no test and that the unit changed can skip a test from outside, so nothing predates the unit and the report of
+    rule (a) is not even asked for."""
     head = "from tests.markers import requires_stack\n" + SOURCE.format(mark="@requires_stack", skipif=SKIPIF, n=2)
     asked: list[int] = []
     ev, _, _ = _evidence(
         tmp_path / "r", "", "@requires_stack", base_skips=BaseSkips(frozenset({IDS[1]}), STEP1_SOURCE), asked=asked,
         extra={"tests/test_live.py": head, "tests/markers.py": "import pytest\n\nrequires_stack = pytest.mark.skip\n"},
     )  # fmt: skip
-    assert ev.ran is not None
-    assert ev.ran.summary.skipped_predating == (IDS[1],)  # test_b was skipped at the base and is untouched
-    assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR] and IDS[0] in ev.ran.findings[0].detail
-    assert asked == [1]
+    assert ev.ran is not None and ev.ran.summary.skipped_predating == () and ev.hold_records == []
+    assert [f.severity for f in ev.ran.findings] == [Severity.MAJOR]
+    assert IDS[0] in ev.ran.findings[0].detail and IDS[1] in ev.ran.findings[0].detail
+    assert asked == []
 
 
 HAS = "import pytest\n\nHAS = {}\n\n\n@pytest.mark.skipif(not HAS, reason='stack')\ndef test_{}():\n    assert {}\n"

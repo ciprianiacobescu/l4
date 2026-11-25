@@ -3,6 +3,7 @@ import json
 from l4.evidence.diffcov import DiffCoverage, FunctionCoverage
 from l4.evidence.report import evidence_json, render_evidence_json, render_evidence_section
 from l4.evidence.scope import FileScope, ScopeOutcome
+from l4.evidence.skipscope import RESIDUALS
 from l4.evidence.testsran import TestsRanOutcome, TestsSummary
 
 SCOPE = ScopeOutcome(
@@ -99,7 +100,8 @@ HELD = TestsRanOutcome([], True, TestsSummary(total=5, passed=3, skipped=2, skip
 def test_the_section_lists_the_skips_that_predate_the_unit():
     text = "\n".join(render_evidence_section(SCOPE, DC, HELD))
     assert "Skipped in a changed file before this unit (hold): also skipped in a base report; the file adds" in text
-    assert "is not told apart: `tests.test_live::test_a`, `tests.test_live::test_b`" in text
+    assert "changed it only in places that cannot change why a test skips" in text
+    assert f"not told apart: {RESIDUALS}. Tests: `tests.test_live::test_a`, `tests.test_live::test_b`" in text
     assert "before this unit" not in "\n".join(render_evidence_section(SCOPE, DC, RAN))
     named = TestsRanOutcome([], True, TestsSummary(skipped_predating=PREDATING, skipped_source="a base worktree run"))
     assert "also skipped in a base report (a base worktree run);" in "\n".join(

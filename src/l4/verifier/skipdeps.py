@@ -140,6 +140,8 @@ class SkipFacts:
         self.constructs: Counter[tuple[str, str]] = Counter()
         self.collected: set[str] = set()
         self.shared: set[str] = set()
+        self.tests: list[tuple[str, _FUNCTIONS]] = []
+        self.ambiguous: set[str] = set()
         self._defs: dict[str, tuple[_FUNCTIONS, ast.ClassDef | None]] = {}
         if tree is None:
             return
@@ -150,6 +152,10 @@ class SkipFacts:
         names = scan.fixture_names(tree)
         qualified = list(scan.qualified(tree))
         self.shared = {q for q, _ in qualified} - self.collected
+        self.tests = [(q, f) for q, f in qualified if q in self.collected]  # every def of a collected test, in order
+        twice = Counter(q for q, _ in qualified)
+        top = Counter(n.name for n in tree.body if isinstance(n, _FUNCTIONS | ast.ClassDef))
+        self.ambiguous = {name for name, n in (*twice.items(), *top.items()) if n > 1}  # which def runs is not told
         classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
         for q, function in qualified:
             self._defs[q] = (function, classes.get(q.split(".")[0]) if "." in q else None)
@@ -160,6 +166,7 @@ class SkipFacts:
         self._dumps: dict[int, str] = {}
         self._loads: dict[int, frozenset[str]] = {}
         self._skippy_names: frozenset[str] | None = None
+        self._prefixes: dict[int, list[ast.stmt]] = {}
         self._fixtures: dict[str | None, dict[str, list[_FUNCTIONS]]] = {}
         self._fixtures[None] = self._fixtures_of(tree.body)
         for c in classes.values():
@@ -238,7 +245,12 @@ class SkipFacts:
         return self._methods_cache[cls.name]
 
     def _prefix(self, function: _FUNCTIONS, cls: ast.ClassDef | None) -> list[ast.stmt]:
-        """The statements of the body up to and including the last that can skip."""
+        """The statements of the body up to and including the last that can skip (once per function)."""
+        if id(function) not in self._prefixes:
+            self._prefixes[id(function)] = self._prefix_of(function, cls)
+        return self._prefixes[id(function)]
+
+    def _prefix_of(self, function: _FUNCTIONS, cls: ast.ClassDef | None) -> list[ast.stmt]:
         names = self._skippy_binding_names()
         methods = self._skippy_methods(cls)
         last = -1
@@ -277,6 +289,14 @@ class SkipFacts:
         if cls.name not in self._class_cache:
             self._class_cache[cls.name] = _bindings(cls.body)
         return self._class_cache[cls.name]
+
+    def skip_relevant(self, qualname: str) -> tuple[_FUNCTIONS, list[ast.stmt]] | None:
+        """The def of the test `qualname` and the statements of its body that can decide whether it skips (the prefix
+        of the closure); None when the source does not hold it, or holds it more than once."""
+        found = self._defs.get(qualname) if self.ok else None
+        if found is None or qualname in self.ambiguous or qualname.split(".", 1)[0] in self.ambiguous:
+            return None
+        return found[0], self._prefix(*found)
 
     # --- the closure -------------------------------------------------------------------------------------------------
 

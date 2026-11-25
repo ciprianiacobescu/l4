@@ -12,6 +12,7 @@ from l4.config.schema import L4Config
 from l4.evidence import collect
 from l4.evidence.collect import Predating, skip_predating
 from l4.evidence.skippred import STEP1_SOURCE, BaseSkips
+from l4.verifier.skipdeps import SkipFacts
 
 SKIPIF = "@pytest.mark.skipif(os.getenv('X_INTEGRATION_TEST') != 'true', reason='needs the stack')"
 HEADER = "import os\n\nimport pytest\n\n"
@@ -155,9 +156,13 @@ def test_a_skip_in_a_class_scope_touches_only_that_class(run):
     )
     head = base.replace("class TestOther:\n", "@pytest.mark.skip\nclass TestOther:\n")
     ids = ("tests.test_live.TestK::test_a", "tests.test_live.TestOther::test_b")
-    assert run({LIVE: base}, {LIVE: head}, ids=ids) == {ids[0]}
+    # (b) alone would say that the class scope touches only TestOther. (e) refuses a changed decorator or a new class
+    # statement wherever it is, so no test of the file predates the unit (rework 9).
+    assert run({LIVE: base}, {LIVE: head}, ids=ids) == set()
     marked = base.replace("class TestOther:\n", "class TestOther:\n    pytestmark = pytest.mark.skip\n\n")
-    assert run({LIVE: base}, {LIVE: marked}, ids=ids) == {ids[0]}
+    assert run({LIVE: base}, {LIVE: marked}, ids=ids) == set()
+    before, after = SkipFacts(base), SkipFacts(head)
+    assert [s for s, _ in (after.constructs - before.constructs)] == ["TestOther"]  # what (b) sees: that class only
 
 
 def test_a_parametrized_id_maps_to_its_function(run):

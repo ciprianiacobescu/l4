@@ -9,6 +9,7 @@ from typing import Any
 
 from l4.evidence.diffcov import DiffCoverage, FunctionCoverage
 from l4.evidence.scope import FileScope, ScopeOutcome
+from l4.evidence.skipscope import RESIDUALS
 from l4.evidence.testsran import TestsRanOutcome, TestsSummary
 from l4.verifier.types import Finding, Severity
 
@@ -93,8 +94,9 @@ def render_evidence_section(
             seen = f" ({_cell(s.skipped_source)})" if s.skipped_source else ""
             out.append(
                 f"Skipped in a changed file before this unit (hold): also skipped in a base report{seen}; the file "
-                "adds or changes no skip construct the harness reads; a skip from code the unit changed or from an "
-                "imported module is not told apart: " + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
+                "adds or changes no skip construct the harness reads and the unit changed it only in places that "
+                f"cannot change why a test skips; not told apart: {RESIDUALS}. Tests: "
+                + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
             )
         if s.skipped_note:
             out.append(f"Skipped tests were not matched with a base report: {_cell(s.skipped_note)}")

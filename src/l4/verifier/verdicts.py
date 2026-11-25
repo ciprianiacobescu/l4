@@ -29,6 +29,7 @@ from typing import Any, Literal, Protocol
 
 from l4.clarifier.actor import Actor
 from l4.config.schema import L4Config
+from l4.evidence.skipscope import RESIDUALS
 from l4.implementer.excerpt import MAX_CHARS, redacted_cut
 from l4.redact import Redactor
 from l4.specs.base import Criterion
@@ -804,11 +805,11 @@ def _hold_question(
             f"What was compared: these tests were also skipped in a base report{seen}, the file adds or "
             "changes no skip construct the harness reads (decorators, marks and skip calls in the file) and "
             "nothing inside the file that decides whether an unchanged skip skips (a flag, a condition, a "
-            "helper, a fixture or an import it reads), and no support or runner-configuration file changed. "
-            "What is not told apart: a skip that comes from production code the unit changed, from a module "
-            "the test imports (a marker, a fixture or a base class there), or from a dynamic form "
-            "(`getattr`, `importlib`, `globals()`): the tests were skipped at the base too, but the reason "
-            "may have changed. "
+            "helper, a fixture or an import it reads), the unit changed the file only in places that cannot "
+            "change why a test skips (comment and blank lines, the body of a test beyond what skips it, a "
+            "whole new import of a name the file did not use), and no support, runner, setup or dependency "
+            f"file changed. What is not told apart: {RESIDUALS}: the tests were skipped at the base too, but "
+            "the reason may have changed. "
             "Often the cause is an environment the gate does not have (a stack, a service). `accept` means "
             "you ran them where they can run, or know they pass there; it holds for this content of the "
             "file only. `reject: <reason>` ends the round, because a fix unit cannot change test files: no "

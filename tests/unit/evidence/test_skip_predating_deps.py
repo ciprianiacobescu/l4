@@ -7,6 +7,7 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.evidence.skippred import skip_predates
+from l4.verifier.skipdeps import SkipFacts
 
 CFG = L4Config.model_validate({})
 CHANGED = ("tests/test_a.py",)
@@ -15,6 +16,14 @@ H = "import os\nimport pytest\n\n\n"
 
 def predates(base: str, head: str, q: str = "test_x") -> bool:
     return skip_predates(base, head, q, list(CHANGED), CFG, skipped_at_base=True)
+
+
+def closure_holds(base: str, head: str, q: str = "test_x") -> bool:
+    """(d) alone: the closure of the test is the same at both sides. `predates` is (b) to (e) together, and (e) is
+    stricter than (d) on purpose: it refuses a changed line of the module or of a class that is not in a test, whether
+    or not the closure reads it (rework 9). The cases below that say what (d) does NOT trip on ask (d) directly."""
+    closure = SkipFacts(base).closure(q)
+    return closure is not None and closure == SkipFacts(head).closure(q)
 
 
 # --- the cases of the review: (b) saw no change, the cause of the skip changed ----------------------------------------
@@ -125,7 +134,8 @@ def test_g1_a_fixture_the_test_does_not_take_is_not_a_part_of_it():
             "@pytest.mark.skipif(True, reason='r')\ndef test_x():\n    assert 1\n"
         )
 
-    assert predates(source("1"), source("2"))
+    assert closure_holds(source("1"), source("2"))
+    assert not predates(source("1"), source("2"))  # (e): a fixture of the file is not a place the unit may change
 
 
 def test_g1_the_class_and_the_module_parts_count():
@@ -171,22 +181,27 @@ def test_g1_a_setup_hook_of_the_class_counts_whole():
 def test_g1_an_unrelated_import_and_an_unrelated_test_do_not_trip_it():
     base = f"{H}FLAG = True\n\n\n@pytest.mark.skipif(FLAG, reason='r')\ndef test_x():\n    assert 1\n"
     head = base.replace("import os\n", "import os\nimport json\n") + "\n\ndef test_new():\n    assert json\n"
-    assert predates(base, head)
+    assert closure_holds(base, head)
+    assert predates(base, head)  # and (e): a whole new import of a new name, and a whole new test
 
 
 def test_g1_an_unrelated_name_added_to_an_import_line_the_test_reads_does_not_trip_it():
     test = "\n\n@pytest.mark.skipif({}, reason='r')\ndef test_x():\n    assert 1\n"
     base = "import os\nimport pytest\n" + test.format("os.name == 'x'")
-    assert predates(base, base.replace("import os\n", "import os, json\n"))
+    assert closure_holds(base, base.replace("import os\n", "import os, json\n"))
     from_import = "from os import path\nimport pytest\n" + test.format("path is None")
-    assert predates(from_import, from_import.replace("import path", "import path, sep"))
+    assert closure_holds(from_import, from_import.replace("import path", "import path, sep"))
+    # (e) wants a whole new import statement: a name added to a line the base has is a changed line outside a test
+    assert not predates(base, base.replace("import os\n", "import os, json\n"))
+    assert predates(base, base.replace("import os\n", "import os\nimport json\n"))
 
 
 def test_g1_an_unrelated_flag_and_an_unrelated_helper_do_not_trip_it():
     test = "@pytest.mark.skipif(True, reason='r')\ndef test_x():\n    assert helper() == OTHER\n"
     base = f"{H}OTHER = 1\n\n\ndef helper():\n    return 1\n\n\n{test}"
     head = base.replace("OTHER = 1", "OTHER = 2").replace("return 1", "return 2")
-    assert predates(base, head)  # the body after the skip's parts reads them, the skip does not
+    assert closure_holds(base, head)  # the body after the skip's parts reads them, the skip does not
+    assert not predates(base, head)  # (e): a flag and a helper of the module are not a place the unit may change
 
 
 INTEGRATION = (
@@ -228,6 +243,25 @@ def test_g1_a_test_that_is_not_in_the_head_is_never_predating():
     assert not predates(base, f"{H}@pytest.mark.skip(reason='a')\ndef test_y():\n    assert 1\n")
 
 
+DYNAMIC = [
+    "globals()['FLAG'] = True",
+    "global FLAG\n    FLAG = True",
+    "setattr(sys.modules[__name__], 'FLAG', True)",
+]
+
+
+@pytest.mark.parametrize("body", DYNAMIC)
+def test_g1_dynamic_forms_in_another_tests_body_are_a_documented_residual(body):
+    """Not read, by design (the runbook's known limits): `getattr`, `importlib`, `globals()`, a name bound in a function
+    and used through `global`, in a place the unit may change: the body of another test, run-time state that the order
+    of the run decides. The base report of rule (a) is what stands in front of them."""
+    base = (
+        f"{H}import sys\n\nFLAG = False\n\n\n@pytest.mark.skipif(FLAG, reason='r')\ndef test_x():\n    assert 1\n\n\n"
+        "def test_other():\n    assert 2\n"
+    )
+    assert predates(base, base.replace("    assert 2\n", f"    {body}\n"))
+
+
 @pytest.mark.parametrize(
     "head",
     [
@@ -235,11 +269,10 @@ def test_g1_a_test_that_is_not_in_the_head_is_never_predating():
         "def _set():\n    global FLAG\n    FLAG = True\n\n\n_set()\n",
     ],
 )
-def test_g1_dynamic_forms_are_a_documented_residual(head):
-    """Not read, by design (the runbook's known limits): `getattr`, `importlib`, `globals()`, a name bound in a function
-    and used through `global`. The base report of rule (a) is what stands in front of them."""
+def test_g1_dynamic_forms_at_module_level_are_a_change_outside_a_test(head):
+    """The same forms at module level are a changed line outside a collected test: (e) refuses them."""
     base = f"{H}FLAG = False\n\n\n@pytest.mark.skipif(FLAG, reason='r')\ndef test_x():\n    assert 1\n"
-    assert predates(base, base.replace("\n\n\n@", f"\n{head}\n\n@", 1))
+    assert not predates(base, base.replace("\n\n\n@", f"\n{head}\n\n@", 1))
 
 
 def test_g1_a_pytestmark_assignment_counts_whatever_its_value():

@@ -28,7 +28,7 @@ from l4.evidence.diffcov import (
 )
 from l4.evidence.report import evidence_json, render_evidence_section
 from l4.evidence.scope import ChangedFile, Kind, ScopeContext, ScopeOutcome, check_scope, file_kind, unit_declared_scope
-from l4.evidence.skippred import BaseLookup, SkipRule, qualified_name
+from l4.evidence.skippred import BaseLookup, SkipRule, qualified_name, support_module
 from l4.evidence.testsran import TestsRanOutcome, check_tests_ran, file_of_test
 from l4.gates.coverage import JSON_NAME, NONCE_NAME, STATUS_NAME
 from l4.gates.junit import TestReport
@@ -171,15 +171,17 @@ def skip_predating(
 ) -> Predating:
     """The ids of `ids` (old skipped tests) whose skip predates the unit (L4-VER-092, `skippred.skip_predates`): the
     file is one of `files` (the changed test files), reported modified (not added, renamed or deleted) by `base..head`,
-    both blobs are read and parse, the unit added no skip construct that can affect the test and changed no support or
-    runner-configuration file, and the base report holds the test as skipped. `base_skips` gives that report; it is
-    called once, and only when a test passed the rest. With none, or when it gives no report or raises, nothing
-    predates the unit and the note says why. Never raises and never runs a test: every failure is a skip that does not
-    predate the unit."""
+    both blobs are read and parse, the unit added no skip construct that can affect the test, changed no support,
+    runner, setup or dependency file and no support module of the tests tree, changed the file only in places that
+    cannot change why a test skips (`skipscope`), and the base report holds the test as skipped. `base_skips` gives that
+    report; it is called once, and only when a test passed the rest. With none, or when it gives no report or raises,
+    nothing predates the unit and the note says why. Never raises and never runs a test: every failure is a skip that
+    does not predate the unit."""
     try:
         changes = name_status(git, base, head)
         status = {path: code for code, path, _ in changes}
         changed = [*status, *(old for _, _, old in changes if old is not None)]  # a rename counts at its old path too
+        supports: list[str] | None = None  # read from git when the first test of a modified file asks
         candidates: set[str] = set()
         rules: dict[str, SkipRule | None] = {}
         for test_id in sorted(ids):
@@ -187,8 +189,12 @@ def skip_predating(
             if path is None or status.get(path) != "M":
                 continue
             if path not in rules:  # one read and one scan per file, not per test
+                if supports is None:
+                    supports = _support_modules(git, base, head, changes, cfg)
                 before, after = show_blob(git, base, path), show_blob(git, head, path)
-                rules[path] = None if before is None or after is None else SkipRule(before, after, changed, cfg)
+                rules[path] = (
+                    None if before is None or after is None else SkipRule(before, after, changed, cfg, supports)
+                )
             rule = rules[path]
             name = qualified_name(test_id, path)
             if rule is not None and name is not None and rule.no_skip_added(name):
@@ -198,6 +204,27 @@ def skip_predating(
     if not candidates:
         return Predating()
     return _with_base_report(candidates, base_skips)
+
+
+def _support_modules(
+    git: Git, base: str, head: str, changes: Sequence[tuple[str, str, str | None]], cfg: L4Config
+) -> list[str]:
+    """The changed Python files of the tests tree that define no test (`skippred.support_module`; rule (c)): read at
+    the head, and at the base for a file the unit changed, deleted or renamed (a module that held tests at the base and
+    none now is one too), by the path each revision has it at."""
+    found: list[str] = []
+    for code, path, old in changes:
+        looked = [(head, path)] if code != "D" else []
+        looked += [(base, old or path)] if code in "MDR" else []
+        for rev, where in looked:
+            if (
+                where.endswith(".py")
+                and not unsafe_path(where)
+                and support_module(cfg, where, show_blob(git, rev, where))
+            ):
+                found.append(where)
+                break
+    return found
 
 
 def _with_base_report(candidates: set[str], base_skips: BaseLookup | None) -> Predating:

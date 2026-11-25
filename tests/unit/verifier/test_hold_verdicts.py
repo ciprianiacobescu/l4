@@ -6,6 +6,7 @@ part of the hold's question, and the one answer settles both."""
 
 import pytest
 
+from l4.evidence.skipscope import RESIDUALS
 from l4.redact import Redactor
 from l4.specs.base import Criterion, Framework
 from l4.specs.questions import QuestionsFile, QuestionStatus
@@ -927,13 +928,14 @@ def test_scn_ver_381_the_question_names_the_file_the_ids_and_what_each_answer_do
     assert "- tests.test_live::test_a" in text and "- tests.test_live::test_b" in text
     assert "also skipped in a base report" in text and "no base run was made" not in text
     assert "adds or changes no skip construct the harness reads (decorators, marks and skip calls in the file)" in text
-    assert "no support or runner-configuration file changed" in text
-    assert (
-        "not told apart" in text and "production code the unit changed" in text and "a module the test imports" in text
-    )
+    assert "no support, runner, setup or dependency file changed" in text
     assert "nothing inside the file that decides whether an unchanged skip skips" in text  # rule (d)
     assert "a flag, a condition, a helper, a fixture or an import" in text
-    assert "or from a dynamic form (`getattr`, `importlib`, `globals()`)" in text  # the residual list, as the runbook's
+    assert "only in places that cannot change why a test skips" in text  # rule (e)
+    assert "comment and blank lines, the body of a test beyond what skips it, a whole new import" in text
+    # the residual list: the same words as the Evidence line, the runbook and the SPEC
+    assert f"What is not told apart: {RESIDUALS}" in text
+    assert "production code the unit changed" in text and "run-time state that another test sets" in text
     assert "did not add or change a skip" not in text  # nothing is claimed that was not compared
     assert "`accept` means you ran them where they can run, or know they pass there" in text
     assert "for this content of the file only" in text

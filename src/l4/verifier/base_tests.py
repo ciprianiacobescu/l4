@@ -401,16 +401,18 @@ def _base_reference(
     return (report, "base worktree", "") if report is not None else (None, "", why)
 
 
-def _exit_reason(wb: Workbench, exc: L4Exit) -> str:
-    """The first line of an exit's message, redacted and cut: it goes into a note that is committed."""
+def _exit_reason(wb: Workbench, exc: Exception) -> str:
+    """The first line of a failure's message, redacted and cut: it goes into a note that is committed. An exit says what
+    it says; any other exception is named by its type first (`OSError: no space left`)."""
     lines = str(exc).splitlines()
-    return wb.redactor.redact_text(lines[0] if lines else type(exc).__name__)[:300]
+    first = lines[0] if lines else type(exc).__name__
+    return wb.redactor.redact_text(first if isinstance(exc, L4Exit) else f"{type(exc).__name__}: {first}")[:300]
 
 
 def _run_base_gate(wb: Workbench, base_sha: str, command: str) -> tuple[TestReport | None, str]:
     """The test gate in a worktree of the base, network off: (its report, why not). The run is kept on `wb.base_runs`,
     whoever asked (step 1's reference, or step 3's lookup), and so is its failure (no report, or an exit of the
-    checkout, which is raised again to the caller that made the run): no round runs the gate twice."""
+    checkout or any other exception, raised again to the caller that made the run): no round runs the gate twice."""
     key = (base_sha, command)
     if (kept := wb.base_runs.get(key)) is not None:
         return kept.report, kept.why
@@ -418,7 +420,7 @@ def _run_base_gate(wb: Workbench, base_sha: str, command: str) -> tuple[TestRepo
     try:
         with base_checkout(wb, base_sha) as tree:
             result = run_gate_at(wb, tree, spec, network=False)
-    except L4Exit as exc:
+    except Exception as exc:  # the checkout's exit, or a failure of the run: kept, so that no asker runs the gate again
         wb.base_runs[key] = BaseRun(None, _exit_reason(wb, exc))
         raise
     if result.report is None:
@@ -484,7 +486,8 @@ class SkipLookup:
             return BaseSkips(frozenset(recorded), EARLIER_SOURCE)
         try:
             report, why = _run_base_gate(wb, self.base_sha, command)  # kept: step 1 may have made it
-        except L4Exit as exc:  # `gates.setup` failed at the merge base: say so, and leave the finding in place
+        except Exception as exc:  # noqa: BLE001 - `gates.setup` failed at the merge base, or the run fell over: the
+            # answer is "no report", kept in `_found`, so that a second asker of the round does not run the gate again
             return BaseSkips(None, "", f"no base report with statuses: {_exit_reason(wb, exc)}")
         if report is None:
             return BaseSkips(None, "", f"no base report with statuses: {why}")
