@@ -22,7 +22,7 @@ Task 5.1, read in the code before anything was changed (file:line are of the bra
     pending close (`UnitState.close_fix_unit`) and says `implement`.
 
 SCN-VER-389 here asserts the close, the supersede, `fix.done`, `verifying`, a fresh round and no `-fix-3`; the hold that
-the new round raises (L4-VER-092) is another change group, tested where both are merged.
+the new round raises (L4-VER-092) is asserted by the last test of this file, which runs both streams together.
 """
 
 import json
@@ -34,8 +34,8 @@ from l4.cli import main
 from l4.specs.questions import QuestionsFile, QuestionStatus
 
 from ..conftest import UNIT
-from ..implementer.conftest import red_step
-from ..orchestrator.conftest import BRANCH
+from ..implementer.conftest import KNOWN, UNKNOWN, green_step, red_step
+from ..orchestrator.conftest import BRANCH, UNIT_DIR, new_origin_main
 from .test_ladder_fix import FIX_DIR, FIX_UNIT, chore_fix, judge, noqa_green, plan_entry
 
 REASON = "the skipped tests are env-gated, see the hold"
@@ -104,8 +104,8 @@ def test_the_run_after_the_retry_closes_the_fix_unit_in_harness_commits_and_veri
     waiting, run_l4, tdd_repo, raw, capsys
 ):
     """SCN-VER-389 and SCN-VER-390. The unit's round 1 failed on a suppression the fix task never removed, so the fresh
-    round fails again here (the hold of L4-VER-092 is not in this worktree): it spawns fix unit 2, and the retry never
-    reaches fix unit 3 on its own."""
+    round fails again here (a suppression is a finding, not a hold): it spawns fix unit 2, and the retry never reaches
+    fix unit 3 on its own."""
     assert retry(tdd_repo) == 0
     second = run_l4([chore_fix(), judge()])
     assert second.code == 0, second.adapter.requests[-1].prompt[-800:]
@@ -212,3 +212,63 @@ def test_the_pending_close_is_in_the_folded_state_that_status_prints(waiting, td
     assert retry(tdd_repo) == 0
     dumped = json.loads(fold_of(waiting).model_dump_json())
     assert dumped["close_fix_unit"] == FIX_UNIT
+
+
+# --- the two streams together: the old finding, the retry, the hold (SCN-VER-389, last part) ------------------------
+
+OLD_TITLE = "existing tests are skipped in a changed test file"
+STACK_TESTS = (
+    "import os\n\nimport pytest\n\nfrom pytdd import total\n\n\n"
+    '@pytest.mark.skipif(os.getenv("PYTDD_STACK") != "true", reason="needs the stack")\n'
+    "def test_total_adds_prices():\n    assert total([1.25, 2.5]) == 3.75\n\n\n"
+    "def test_total_of_nothing_is_zero():\n    assert total([]) == 0\n"
+)
+NEW_TESTS = (
+    f'\n\n@pytest.mark.l4("{KNOWN}")\ndef test_known_code():\n    from pytdd.pricing import apply_discount\n\n'
+    '    assert apply_discount(50.0, "SAVE10") == 45.0\n\n\n'
+    f'@pytest.mark.l4("{UNKNOWN}")\ndef test_unknown_code():\n    from pytdd.pricing import apply_discount\n\n'
+    '    with pytest.raises(ValueError):\n        apply_discount(50.0, "NOPE")\n'
+)
+
+
+def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_the_hold_not_the_major(
+    run_l4, valid_spec, tdd_repo, raw, monkeypatch, capsys
+):
+    """The consumer's case. A stack-gated test of a file the unit edits is skipped before the unit and after it. Round 1
+    runs as the old harness did (no skip is judged to predate the unit), so it raises the deterministic major; the fix
+    unit's one task asks a question; the person upgrades (here: the rule is back on) and retries; the fresh round has
+    one `skipped` hold, no major, and no second fix unit."""
+    from l4.evidence import collect
+
+    new_origin_main(tdd_repo, raw, {"tests/test_pricing.py": STACK_TESTS})
+    real = collect.skip_predating
+    monkeypatch.setattr(collect, "skip_predating", lambda *a, **k: set())  # the harness before this change
+    red = red_step()  # the unit adds its tests to the file that holds the stack-gated one and leaves that one alone
+    red.writes = {"tests/test_pricing.py": STACK_TESTS + NEW_TESTS, "src/pytdd/pricing.py": red.writes["src/pytdd/pricing.py"]}
+    red.structured = {**red.structured, "tests_added": ["tests/test_pricing.py::test_known_code"]}
+    first = run_l4([red, green_step(), judge(), blocked()])
+    assert first.code == 11 and first.outcome["units"][0]["phase_after"] == "fixing", first.outcome
+    [verdict] = first.events("verify.verdict")
+    assert verdict["verdict"] == "FAIL"
+    tasks = first.pushed(f"{FIX_DIR}/tasks.md")
+    assert OLD_TITLE in tasks and "- [ ] 1.1" in tasks  # the fix unit's only task is the old finding
+
+    monkeypatch.setattr(collect, "skip_predating", real)  # the release
+    assert retry(tdd_repo) == 0
+    second = run_l4([judge()])
+    assert second.code == 11, second.adapter.requests[-1].prompt[-800:]
+    [done] = [e for e in second.events("task.done") if e.get("closed_by")]
+    assert (done["fix_unit"], done["task"], done["closed_by"]) == (FIX_UNIT, "1.1", "retry")
+    verdicts = [(e["round"], e["verdict"]) for e in second.events("verify.verdict")]
+    assert verdicts == [(1, "FAIL"), (2, "NEEDS_HUMAN")]  # a fresh round, and the hold is not a failure
+    [spawned] = second.events("fix.spawned")  # the one fix unit of round 1: no `-fix-2`, no `-fix-3`
+    assert spawned["fix_unit"] == FIX_UNIT
+    evidence = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))["evidence"]
+    assert [h["kind"] for h in evidence["holds"]] == ["skipped"]
+    assert "tests/test_pricing.py" in evidence["holds"][0]["text"]
+    assert evidence["tests_ran"]["summary"]["skipped_predating"] == ["tests.test_pricing::test_total_adds_prices"]
+    assert OLD_TITLE not in json.dumps(evidence["tests_ran"]["findings"])  # the major is gone
+    report = second.pushed(f"{UNIT_DIR}/verification.md")
+    assert OLD_TITLE not in report and "skipped" in report
+    asked = [e for e in second.events("question.raised") if e.get("kind") == "verdict"]
+    assert len(asked) == 1 and fold_of(second).phase == "awaiting_human"
