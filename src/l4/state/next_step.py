@@ -61,9 +61,9 @@ def fix_closing_step(unit: str, ids: tuple[str, ...]) -> str:
     no answer makes its task able to run, close the fix unit with `l4 retry` once the pin is a release that has it. The
     harness ticks the tasks itself; a person's own tick of a fix task is a step 1 blocker."""
     return (
-        f"answer the fix unit's questions ({', '.join(ids)}); or, when no answer lets its task run, upgrade the pin to a "
-        f"release that has L4-VER-095 and run l4 retry --unit {unit} --reason TEXT: the harness ends the fix unit in "
-        "its own commits and verifies again"
+        f"answer the fix unit's questions ({', '.join(ids)}); or, when no answer lets its task run, upgrade the pin "
+        f"to a release that has L4-VER-095 and run l4 retry --unit {unit} --reason TEXT: the harness ends the fix "
+        "unit in its own commits and verifies again"
     )
 
 

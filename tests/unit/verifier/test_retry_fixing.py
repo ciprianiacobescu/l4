@@ -244,7 +244,10 @@ def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_th
     real = collect.skip_predating
     monkeypatch.setattr(collect, "skip_predating", lambda *a, **k: set())  # the harness before this change
     red = red_step()  # the unit adds its tests to the file that holds the stack-gated one and leaves that one alone
-    red.writes = {"tests/test_pricing.py": STACK_TESTS + NEW_TESTS, "src/pytdd/pricing.py": red.writes["src/pytdd/pricing.py"]}
+    red.writes = {
+        "tests/test_pricing.py": STACK_TESTS + NEW_TESTS,
+        "src/pytdd/pricing.py": red.writes["src/pytdd/pricing.py"],
+    }
     red.structured = {**red.structured, "tests_added": ["tests/test_pricing.py::test_known_code"]}
     first = run_l4([red, green_step(), judge(), blocked()])
     assert first.code == 11 and first.outcome["units"][0]["phase_after"] == "fixing", first.outcome
