@@ -1,5 +1,7 @@
 """The rule that decides whether the skip of an old test predates the unit (skipped-test-hold D1, L4-VER-092):
-SCN-VER-372..378, on a temporary git repository with a base commit and a head commit."""
+SCN-VER-372..378, on a temporary git repository with a base commit and a head commit. The base report that must hold
+the test as skipped (rule (a)) is a fake: `at_base="skipped"` says it does, `"passed"` that it ran, `None` that there is
+none."""
 
 import itertools
 from collections.abc import Callable
@@ -8,7 +10,8 @@ import pytest
 
 from l4.config.schema import L4Config
 from l4.evidence import collect
-from l4.evidence.collect import skip_predating
+from l4.evidence.collect import Predating, skip_predating
+from l4.evidence.skippred import STEP1_SOURCE, BaseSkips
 
 SKIPIF = "@pytest.mark.skipif(os.getenv('X_INTEGRATION_TEST') != 'true', reason='needs the stack')"
 HEADER = "import os\n\nimport pytest\n\n"
@@ -25,7 +28,8 @@ def live(a_assert: str = "1", b_assert: str = "1", *, extra: str = "", top: str 
 
 @pytest.fixture
 def run(make_repo, raw, git_for) -> Callable[..., set[str]]:
-    """`run(base_files, head_files, ids=..., deleted=..., cfg=...)`: commit both states, ask the rule."""
+    """`run(base_files, head_files, ids=..., deleted=..., cfg=...)`: commit both states, ask the rule. `.decided` of the
+    function is the last `Predating` (source and note)."""
 
     counter = itertools.count()
 
@@ -39,6 +43,7 @@ def run(make_repo, raw, git_for) -> Callable[..., set[str]]:
         test_files: tuple[str, ...] = (LIVE,),
         cfg: L4Config | None = None,
         base_sha: str | None = None,
+        at_base: str | None = "skipped",
     ) -> set[str]:
         repo = make_repo(f"repo{next(counter)}")
         for rel, text in base.items():
@@ -59,7 +64,15 @@ def run(make_repo, raw, git_for) -> Callable[..., set[str]]:
         raw(repo, "commit", "-q", "-m", "head")
         head_commit = raw(repo, "rev-parse", "HEAD").strip()
         tree = raw(repo, "ls-tree", "-r", "--name-only", head_commit).split()
-        return skip_predating(
+        asked.clear()
+
+        def lookup() -> BaseSkips:
+            asked.append(1)
+            if at_base is None:
+                return BaseSkips(None, "", "no base report with statuses: FAKE")
+            return BaseSkips(frozenset(ids if at_base == "skipped" else ()), STEP1_SOURCE)
+
+        found = skip_predating(
             git_for(repo),
             base_sha or base_commit,
             head_commit,
@@ -67,8 +80,13 @@ def run(make_repo, raw, git_for) -> Callable[..., set[str]]:
             ids,
             cfg or L4Config.model_validate({}),
             tree,
+            lookup,
         )
+        go.decided = found  # type: ignore[attr-defined]
+        return set(found.ids)
 
+    asked: list[int] = []
+    go.asked = asked  # type: ignore[attr-defined]
     return go
 
 
@@ -172,7 +190,7 @@ def test_a_blob_over_the_size_bound_is_not_compared(run, monkeypatch):  # SCN-VE
 
 def test_the_rule_never_raises(git_for, make_repo):
     repo = make_repo()
-    assert skip_predating(git_for(repo), "no", "no", [LIVE], [A], L4Config.model_validate({}), [LIVE]) == set()
+    assert skip_predating(git_for(repo), "no", "no", [LIVE], [A], L4Config.model_validate({}), [LIVE]) == Predating()
 
 
 @pytest.mark.parametrize(
@@ -194,9 +212,10 @@ def test_a_skip_with_no_construct_in_the_file_depends_on_support_files(run, extr
     assert run(base, head, ids=(A,)) == expected
 
 
-def test_a_construct_in_the_file_makes_support_files_irrelevant(run):
+def test_a_construct_in_the_file_does_not_make_support_files_irrelevant(run):  # F7: rule (c) is unconditional
     base = {LIVE: live(), "tests/conftest.py": "x = 1\n"}
-    assert run(base, {LIVE: live("2"), "tests/conftest.py": "x = 2\n"}) == {A, B}
+    assert run(base, {LIVE: live("2"), "tests/conftest.py": "x = 2\n"}) == set()
+    assert run(base, {LIVE: live("2"), "tests/conftest.py": "x = 1\n"}) == {A, B}  # the control: it did not change
 
 
 def test_only_changed_test_files_given_are_examined(run):
@@ -204,3 +223,52 @@ def test_only_changed_test_files_given_are_examined(run):
     base = {LIVE: live(), other: "def test_z():\n    assert 1\n"}
     head = {LIVE: live("2"), other: "def test_z():\n    assert 2\n"}
     assert run(base, head, ids=(A, "tests.test_other::test_z")) == {A}
+
+
+# --- rule (a): the base report -------------------------------------------------------------------------------------
+
+
+def test_the_base_report_decides_which_candidates_predate_the_unit(run):
+    assert run({LIVE: live()}, {LIVE: live("2", "2")}, at_base="passed") == set()
+    assert run.decided.ids == frozenset() and run.decided.note == ""  # a report was had: nothing to explain
+
+
+def test_the_source_of_the_report_is_named(run):
+    assert run({LIVE: live()}, {LIVE: live("2", "2")}) == {A, B}
+    assert run.decided == Predating(frozenset({A, B}), STEP1_SOURCE, "")
+
+
+def test_no_report_keeps_every_skip_a_finding_and_says_why(run):
+    assert run({LIVE: live()}, {LIVE: live("2", "2")}, at_base=None) == set()
+    assert run.decided.note == "no base report with statuses: FAKE"
+
+
+def test_the_report_is_asked_once_and_only_when_a_candidate_exists(run):
+    run({LIVE: live()}, {LIVE: live("2", "2")})
+    assert len(run.asked) == 1
+    run({LIVE: live(a_mark="")}, {LIVE: live("2")}, ids=(A,))  # the unit added a skip: nothing to ask
+    assert run.asked == []
+    run({LIVE: live()}, {LIVE: live("2")}, ids=())
+    assert run.asked == []
+
+
+def test_a_lookup_that_raises_leaves_the_finding_in_place(git_for, make_repo, raw):
+    repo = make_repo("boom")
+    (repo / LIVE).parent.mkdir(parents=True, exist_ok=True)
+    (repo / LIVE).write_text(live())
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "base")
+    base = raw(repo, "rev-parse", "HEAD").strip()
+    (repo / LIVE).write_text(live("2"))
+    raw(repo, "add", "-A")
+    raw(repo, "commit", "-q", "-m", "head")
+    head = raw(repo, "rev-parse", "HEAD").strip()
+
+    def boom() -> BaseSkips:
+        raise RuntimeError("the gate fell over")
+
+    found = skip_predating(git_for(repo), base, head, [LIVE], [A], L4Config.model_validate({}), [LIVE], boom)
+    assert found.ids == frozenset() and "lookup failed (RuntimeError)" in found.note
+    assert (
+        skip_predating(git_for(repo), base, head, [LIVE], [A], L4Config.model_validate({}), [LIVE]).ids == frozenset()
+    )

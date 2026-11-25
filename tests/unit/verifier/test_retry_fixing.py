@@ -124,8 +124,15 @@ def test_the_run_after_the_retry_closes_the_fix_unit_in_harness_commits_and_veri
     kinds = [e["type"] for e in second.ledger() if e["type"] in {"unit.retried", "task.done", "question.superseded",
                                                                    "fix.done", "verify.verdict"}]  # fmt: skip
     assert kinds[kinds.index("unit.retried") :][:6] == [
-        "unit.retried", "task.done", "question.superseded", "fix.done", "verify.verdict", "task.done"
+        "unit.retried", "question.superseded", "task.done", "fix.done", "verify.verdict", "task.done"
     ]  # fmt: skip
+    # F9: `question.superseded` is written before the commit of the task it releases, so it travels inside that commit;
+    # `task.done` names the commit's sha and follows it. A run that ends between them leaves the ledger and the
+    # question's Status agreeing (the question is out of `questions.open`), and the commit with no event is no blocker
+    log = raw(tdd_repo.origin, "log", "--format=%H %s", f"main..{BRANCH}").splitlines()
+    [closing] = [line.split()[0] for line in log if line.endswith("already done [skip ci]")]
+    shown = raw(tdd_repo.origin, "show", "--format=", closing)
+    assert "question.superseded" in shown and "task.done" not in shown and "superseded by retry" in shown
     closing = [e["fix_unit"] for e in second.events("fix.done")]
     assert closing == [FIX_UNIT, f"{FIX_UNIT[:-1]}2"]  # fix unit 1 by the close, fix unit 2 by its own task
     assert second.triggers()[-4:] == ["fix_unit_done", "verify_fail_fix", "fix_unit_done", "verify_pass"]
@@ -231,18 +238,28 @@ NEW_TESTS = (
 )
 
 
-def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_the_hold_not_the_major(
-    run_l4, valid_spec, tdd_repo, raw, monkeypatch, capsys
-):
-    """The consumer's case. A stack-gated test of a file the unit edits is skipped before the unit and after it. Round 1
-    runs as the old harness did (no skip is judged to predate the unit), so it raises the deterministic major; the fix
-    unit's one task asks a question; the person upgrades (here: the rule is back on) and retries; the fresh round has
-    one `skipped` hold, no major, and no second fix unit."""
+STACK_ID = "tests.test_pricing::test_total_adds_prices"
+
+
+def _round_one_on_the_old_harness(run_l4, tdd_repo, raw, monkeypatch):
+    """Round 1 as the harness before this change ran it: no skip predates the unit (the rule is off), and step 1's
+    record carries no `skipped` key, so that nothing the earlier rounds wrote can say what the base skipped."""
     from l4.evidence import collect
+    from l4.verifier import base_tests
 
     new_origin_main(tdd_repo, raw, {"tests/test_pricing.py": STACK_TESTS})
-    real = collect.skip_predating
-    monkeypatch.setattr(collect, "skip_predating", lambda *a, **k: set())  # the harness before this change
+    real_rule = collect.skip_predating
+    monkeypatch.setattr(collect, "skip_predating", lambda *a, **k: collect.Predating())
+    real = base_tests.check_base_tests
+
+    def older(*args, **kwargs):
+        out = real(*args, **kwargs)
+        if out.base_tests is not None:
+            out.base_tests.pop("skipped", None)  # an older harness wrote `passed` only
+        out.base_report = None
+        return out
+
+    monkeypatch.setattr(base_tests, "check_base_tests", older)
     red = red_step()  # the unit adds its tests to the file that holds the stack-gated one and leaves that one alone
     red.writes = {
         "tests/test_pricing.py": STACK_TESTS + NEW_TESTS,
@@ -255,11 +272,56 @@ def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_th
     assert verdict["verdict"] == "FAIL"
     tasks = first.pushed(f"{FIX_DIR}/tasks.md")
     assert OLD_TITLE in tasks and "- [ ] 1.1" in tasks  # the fix unit's only task is the old finding
+    record = json.loads(first.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))["integrity"]["base_tests"]
+    assert "skipped" not in record and record["passed"]  # an older harness's record
+    monkeypatch.setattr(base_tests, "check_base_tests", real)  # the release
+    monkeypatch.setattr(collect, "skip_predating", real_rule)
+    return first
 
-    monkeypatch.setattr(collect, "skip_predating", real)  # the release
+
+def _base_gate_counting(monkeypatch, report):
+    """Counts the runs of the test gate in a base worktree (`run_gate_at`) and answers each with `report` (None: the
+    gate gave no report)."""
+    from types import SimpleNamespace
+
+    from l4.verifier import base_tests
+
+    runs: list[str] = []
+
+    def fake(wb, tree, spec, network):
+        runs.append(spec.name)
+        return SimpleNamespace(report=report, reason="FAKE: the base's gate gave no report")
+
+    monkeypatch.setattr(base_tests, "run_gate_at", fake)
+    return runs
+
+
+def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_the_hold_not_the_major(
+    run_l4, valid_spec, tdd_repo, raw, monkeypatch, capsys
+):
+    """The consumer's case, in the shape it really has. A stack-gated test of a file the unit edits is skipped before
+    the unit and after it. Round 1 runs as the old harness did: no skip is judged to predate the unit and the record of
+    step 1 has no `skipped` key. The fix unit's one task asks a question; the person upgrades (here: the rule is back
+    on) and retries. The fresh round has no earlier record of the base's statuses, so it gets them from one run of the
+    test gate in a base worktree, holds the test as skipped there, and raises one `skipped` hold: no major, no second
+    fix unit."""
+    from l4.gates.junit import TestCase, TestReport
+
+    first = _round_one_on_the_old_harness(run_l4, tdd_repo, raw, monkeypatch)
+    assert first.events("fix.spawned")
+    base_run = TestReport(
+        {
+            STACK_ID: TestCase(STACK_ID, "skipped"),
+            "tests.test_pricing::test_total_of_nothing_is_zero": TestCase(
+                "tests.test_pricing::test_total_of_nothing_is_zero", "passed"
+            ),
+        }
+    )
+    runs = _base_gate_counting(monkeypatch, base_run)
     assert retry(tdd_repo) == 0
     second = run_l4([judge()])
     assert second.code == 11, second.adapter.requests[-1].prompt[-800:]
+    assert runs == ["base-tests-base"]  # one run of the base's gate in the whole round, for step 3's lookup
     [done] = [e for e in second.events("task.done") if e.get("closed_by")]
     assert (done["fix_unit"], done["task"], done["closed_by"]) == (FIX_UNIT, "1.1", "retry")
     verdicts = [(e["round"], e["verdict"]) for e in second.events("verify.verdict")]
@@ -269,9 +331,32 @@ def test_a_fixing_unit_for_the_old_finding_is_retried_and_the_fresh_round_has_th
     evidence = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))["evidence"]
     assert [h["kind"] for h in evidence["holds"]] == ["skipped"]
     assert "tests/test_pricing.py" in evidence["holds"][0]["text"]
-    assert evidence["tests_ran"]["summary"]["skipped_predating"] == ["tests.test_pricing::test_total_adds_prices"]
+    assert evidence["tests_ran"]["summary"]["skipped_predating"] == [STACK_ID]
+    assert evidence["tests_ran"]["summary"]["skipped_source"] == "a base worktree run"
     assert OLD_TITLE not in json.dumps(evidence["tests_ran"]["findings"])  # the major is gone
     report = second.pushed(f"{UNIT_DIR}/verification.md")
-    assert OLD_TITLE not in report and "skipped" in report
+    assert OLD_TITLE not in report and "skipped" in report and "a base worktree run" in report
     asked = [e for e in second.events("question.raised") if e.get("kind") == "verdict"]
     assert len(asked) == 1 and fold_of(second).phase == "awaiting_human"
+    question = QuestionsFile.parse(second.pushed(f"{UNIT_DIR}/questions.md"))
+    assert "(a base worktree run)" in " ".join(question.questions[-1].context_text.split())
+
+
+def test_the_fresh_round_keeps_the_major_when_the_base_worktree_run_gives_no_report(
+    run_l4, valid_spec, tdd_repo, raw, monkeypatch, capsys
+):
+    """The same unit when the base's gate cannot give a report: fail closed. The round has the major, no hold, and says
+    why; the one run of the base's gate is not repeated."""
+    first = _round_one_on_the_old_harness(run_l4, tdd_repo, raw, monkeypatch)
+    assert first.events("fix.spawned")
+    runs = _base_gate_counting(monkeypatch, None)
+    assert retry(tdd_repo) == 0
+    second = run_l4([judge(), blocked()])
+    assert runs == ["base-tests-base"]
+    verdicts = [(e["round"], e["verdict"]) for e in second.events("verify.verdict")]
+    assert verdicts[:2] == [(1, "FAIL"), (2, "FAIL")]
+    evidence = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))["evidence"]
+    assert evidence["holds"] == [] and evidence["tests_ran"]["summary"]["skipped_predating"] == []
+    assert OLD_TITLE in json.dumps(evidence["tests_ran"]["findings"])  # the major stays
+    note = evidence["tests_ran"]["summary"]["skipped_note"]
+    assert note.startswith("no base report with statuses: the base's test gate gave no report")

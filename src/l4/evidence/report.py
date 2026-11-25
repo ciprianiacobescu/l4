@@ -90,10 +90,14 @@ def render_evidence_section(
                 "Skipped in files the unit did not touch: " + ", ".join(f"`{_cell(i)}`" for i in s.skipped_unchanged)
             )
         if s.skipped_predating:
+            seen = f" ({_cell(s.skipped_source)})" if s.skipped_source else ""
             out.append(
-                "Skipped in a changed file before this unit (hold): "
-                + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
+                f"Skipped in a changed file before this unit (hold): also skipped in a base report{seen}; the file "
+                "adds or changes no skip construct the harness reads; a skip from code the unit changed or from an "
+                "imported module is not told apart: " + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
             )
+        if s.skipped_note:
+            out.append(f"Skipped tests were not matched with a base report: {_cell(s.skipped_note)}")
     return out
 
 

@@ -104,8 +104,8 @@ def test_the_question_lists_every_unseen_path_and_points_at_verification_md_when
 # ---- the hold on skipped tests that predate the unit: bound to the head blob of the file and the skipped ids ------
 
 SKIPPED = (
-    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
-    "can affect them (2 tests)"
+    "skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or "
+    "changes no skip the harness reads (2 tests)"
 )
 IDS = ["tests.test_live::test_a", "tests.test_live::test_b"]
 

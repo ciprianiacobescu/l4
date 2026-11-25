@@ -769,6 +769,7 @@ def _hold_question(
     paths: Sequence[str] = (),
     generated: Sequence[GeneratedOutcome] = (),
     redact: Callable[[str], str] | None = None,
+    base_source: str = "",
 ) -> NewQuestion:
     judged = [
         line
@@ -798,13 +799,18 @@ def _hold_question(
             "into smaller units."
         )
     elif kind == "skipped":
+        seen = f" ({base_source})" if base_source else ""
         answer = (
-            "The unit's diff adds or changes no skip that can affect these tests (the skip markers and calls of the "
-            "file are compared at the base and at the head), and no base run was made, so this does not say they "
-            "passed before. Often the cause is an environment the gate does not have (a stack, a service). `accept` "
-            "means you ran them where they can run, or know they pass there; it holds for this content of the file "
-            "only. `reject: <reason>` ends the round, because a fix unit cannot change test files: no fix unit is "
-            "made and the unit is escalated with skipped_tests_rejected; then change the file in your own commit."
+            f"What was compared: these tests were also skipped in a base report{seen}, the file adds or "
+            "changes no skip construct the harness reads (decorators, marks and skip calls in the file), "
+            "and no support or runner-configuration file changed. What is not told apart: a skip that "
+            "comes from production code the unit changed, or from a module the test imports (a marker or "
+            "a fixture there): the tests were skipped at the base too, but the reason may have changed. "
+            "Often the cause is an environment the gate does not have (a stack, a service). `accept` means "
+            "you ran them where they can run, or know they pass there; it holds for this content of the "
+            "file only. `reject: <reason>` ends the round, because a fix unit cannot change test files: no "
+            "fix unit is made and the unit is escalated with skipped_tests_rejected; then change the file "
+            "in your own commit."
         )
     else:
         answer = "Answer `accept` if the unit can go on as it stands, " + (
@@ -917,9 +923,10 @@ def raise_verdict_questions(
             view = (hold_views or {}).get(hold)
             batch.append(
                 _hold_question(
-                    hold, round_no, quoted, tuple(view["paths"]) if view else (), generated, redactor.redact_text
+                    hold, round_no, quoted, tuple(view["paths"]) if view else (), generated, redactor.redact_text,
+                    str(view.get("base_source") or "") if view else "",
                 )
-            )
+            )  # fmt: skip
             ui = ui_hold_criterion(hold)  # step 5 finds the answer again by the criterion (L4-VER-067)
             about = (
                 {"criterion": ui, "criterion_sha256": text_sha256(by_id[ui])} if ui is not None and ui in by_id else {}

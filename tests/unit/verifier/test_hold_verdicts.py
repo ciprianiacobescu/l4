@@ -892,8 +892,8 @@ def test_scn_ver_353_a_half_key_block_in_a_record_that_0_4_59_wrote_is_not_in_th
 # ---- the hold on skipped tests that predate the unit (L4-VER-092, L4-VER-093) ---------------------------
 
 SKIPPED = (
-    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
-    "can affect them (2 tests)"
+    "skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or "
+    "changes no skip the harness reads (2 tests)"
 )
 SKIPPED_IDS = ["tests.test_live::test_a", "tests.test_live::test_b"]
 SKIPPED_VIEW = {SKIPPED: {"sha": "a" * 64, "paths": SKIPPED_IDS}}
@@ -925,12 +925,34 @@ def test_scn_ver_381_the_question_names_the_file_the_ids_and_what_each_answer_do
     text = " ".join((tmp_path / "questions.md").read_text().split())
     assert "tests/test_live.py" in text and "(2 tests)" in text
     assert "- tests.test_live::test_a" in text and "- tests.test_live::test_b" in text
-    assert "no base run was made" in text and "adds or changes no skip that can affect these tests" in text
+    assert "also skipped in a base report" in text and "no base run was made" not in text
+    assert "adds or changes no skip construct the harness reads (decorators, marks and skip calls in the file)" in text
+    assert "no support or runner-configuration file changed" in text
+    assert (
+        "not told apart" in text and "production code the unit changed" in text and "a module the test imports" in text
+    )
+    assert "did not add or change a skip" not in text  # nothing is claimed that was not compared
     assert "`accept` means you ran them where they can run, or know they pass there" in text
     assert "for this content of the file only" in text
     assert "`reject: <reason>` ends the round" in text and "a fix unit cannot change test files" in text
     assert "WHEN" not in text and "fixed by a fix unit" not in text and "a fix unit can be made" not in text
     assert "accept" in text and "reject: <reason>" in text  # the options
+
+
+def test_the_question_names_the_base_report_that_held_the_tests_as_skipped_and_is_stable(tmp_path):
+    from l4.verifier.verdicts import _hold_question
+
+    sources = ("step 1 base run", "an earlier round's record", "a base worktree run")
+    asked = {src: _hold_question(SKIPPED, 1, (), SKIPPED_IDS, base_source=src) for src in sources}
+    for src, question in asked.items():
+        assert f"({src})" in " ".join(question.context.split())
+        assert question == _hold_question(
+            SKIPPED, 1, (), SKIPPED_IDS, base_source=src
+        )  # the same inputs, the same text
+        assert question.title == asked[sources[0]].title  # the question's title carries the hold, not the source
+    assert "in a base report, the file adds" in " ".join(
+        _hold_question(SKIPPED, 1, (), SKIPPED_IDS).context.split()
+    )  # an old view
 
 
 def test_the_question_lists_at_most_the_bounded_number_of_ids_and_points_at_verdict_json():

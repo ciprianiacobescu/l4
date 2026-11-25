@@ -1,7 +1,7 @@
 import json
 
 from l4.evidence.diffcov import DiffCoverage, FunctionCoverage
-from l4.evidence.report import evidence_json, render_evidence_section
+from l4.evidence.report import evidence_json, render_evidence_json, render_evidence_section
 from l4.evidence.scope import FileScope, ScopeOutcome
 from l4.evidence.testsran import TestsRanOutcome, TestsSummary
 
@@ -98,11 +98,21 @@ HELD = TestsRanOutcome([], True, TestsSummary(total=5, passed=3, skipped=2, skip
 
 def test_the_section_lists_the_skips_that_predate_the_unit():
     text = "\n".join(render_evidence_section(SCOPE, DC, HELD))
-    assert (
-        "Skipped in a changed file before this unit (hold): `tests.test_live::test_a`, `tests.test_live::test_b`"
-        in text
-    )
+    assert "Skipped in a changed file before this unit (hold): also skipped in a base report; the file adds" in text
+    assert "is not told apart: `tests.test_live::test_a`, `tests.test_live::test_b`" in text
     assert "before this unit" not in "\n".join(render_evidence_section(SCOPE, DC, RAN))
+    named = TestsRanOutcome([], True, TestsSummary(skipped_predating=PREDATING, skipped_source="a base worktree run"))
+    assert "also skipped in a base report (a base worktree run);" in "\n".join(
+        render_evidence_section(SCOPE, DC, named)
+    )
+    stayed = TestsRanOutcome([], True, TestsSummary(skipped_note="no base report with statuses: FAKE"))
+    assert "Skipped tests were not matched with a base report: no base report with statuses: FAKE" in "\n".join(
+        render_evidence_section(SCOPE, DC, stayed)
+    )
+    for outcome in (named, stayed):  # the new keys survive verdict.json and an older file reads them as empty
+        assert render_evidence_json(
+            json.loads(json.dumps(evidence_json(SCOPE, DC, outcome)))
+        ) == render_evidence_section(SCOPE, DC, outcome)
 
 
 def test_skipped_predating_survives_verdict_json_and_an_older_file_reads_as_empty():  # SCN-VER-380

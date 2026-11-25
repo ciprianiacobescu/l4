@@ -27,6 +27,8 @@ class TestsSummary:
     new_passed: int = 0
     skipped_unchanged: tuple[str, ...] = ()  # skipped tests in files the unit did not touch: listed, never judged
     skipped_predating: tuple[str, ...] = ()  # skipped before the unit, in a file it changed: a hold, not a finding
+    skipped_source: str = ""  # the base report that held `skipped_predating` as skipped (L4-VER-092)
+    skipped_note: str = ""  # why old skipped tests stayed findings when no base report with statuses could be had
 
 
 @dataclass
@@ -88,6 +90,8 @@ def check_tests_ran(
     tree: Collection[str] | None = None,
     gate_passed: bool,
     predating: Collection[str] = (),
+    predating_source: str = "",
+    base_note: str = "",
 ) -> TestsRanOutcome:
     """`new_tests`: the ledger's red tests. The testcases of `added_test_files` (added files that define tests) count
     as new too; one of those files with no testcase in the report (wrong name, unmatched pattern) is a blocker. A
@@ -95,8 +99,9 @@ def check_tests_ran(
     skipped test that was already there is a major only in a file the unit changed (`changed_test_files`). `tree`:
     the files of the head tree, so that an unchanged file of the same name is never mistaken for an added one.
     `predating`: the ids whose skip predates the unit (`collect.skip_predating`, L4-VER-092); those of them that would
-    be named in the major finding leave it and go to `summary.skipped_predating`, where the caller raises a hold. The
-    default `()` is the behaviour without the rule."""
+    be named in the major finding leave it and go to `summary.skipped_predating`, where the caller raises a hold.
+    `predating_source` names the base report that held them as skipped; `base_note` says why no such report was had (it
+    is kept in the summary when the major stands). The default `()` is the behaviour without the rule."""
     tests = report.tests
     changed = set(changed_test_files) | set(added_test_files)
     tree = frozenset(tree) if tree is not None else frozenset(changed)
@@ -140,6 +145,8 @@ def check_tests_ran(
         new_passed=new_passed,
         skipped_unchanged=tuple(sorted(old_skipped - in_changed)),
         skipped_predating=tuple(sorted(held)),
+        skipped_source=predating_source if held else "",
+        skipped_note=base_note if touched else "",
     )
     label = gate_passed and not failing and not report.collection_errors and new_passed == len(new) and not uncollected
     return TestsRanOutcome(findings, label, summary)

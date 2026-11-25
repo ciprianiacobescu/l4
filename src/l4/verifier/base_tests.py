@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from l4.config.schema import duration_seconds
+from l4.evidence.skippred import EARLIER_SOURCE, STEP1_SOURCE, WORKTREE_SOURCE, BaseSkips
 from l4.gates.e2e import run_gate_at
 from l4.gates.junit import TestCase, TestReport, fold_subtest_id
 from l4.gates.runner import GateSpec
@@ -395,12 +396,77 @@ def _base_reference(
         return cached, "baseline", ""
     if (data := _evidence(wb, ctx.base_sha, command, round_no)) is not None:
         return _report_of(data["passed"], data.get("collection_errors") or []), "evidence", ""
+    report, why = _run_base_gate(wb, ctx.base_sha, command)
+    return (report, "base worktree", "") if report is not None else (None, "", why)
+
+
+def _run_base_gate(wb: Workbench, base_sha: str, command: str) -> tuple[TestReport | None, str]:
+    """The test gate in a worktree of the base, network off: (its report, why not). A report's skipped ids are kept on
+    `wb.base_skips`, whoever asked (step 1's reference, or step 3's lookup), so that no round runs the gate twice."""
     spec = GateSpec("base-tests-base", command, _reports(wb), "junit", duration_seconds(wb.cfg.gates.timeout))
-    with base_checkout(wb, ctx.base_sha) as tree:
+    with base_checkout(wb, base_sha) as tree:
         result = run_gate_at(wb, tree, spec, network=False)
     if result.report is None:
-        return None, "", f"the base's test gate gave no report ({result.reason})"
-    return result.report, "base worktree", ""
+        return None, f"the base's test gate gave no report ({result.reason})"
+    wb.base_skips[(base_sha, command)] = frozenset(_skipped_ids(result.report))
+    return result.report, ""
+
+
+def _skipped_ids(report: TestReport) -> list[str]:
+    return sorted(i for i, c in report.tests.items() if c.status == "skipped")
+
+
+def _recorded_skips(wb: Workbench, base_sha: str, command: str, round_no: int) -> list[str] | None:
+    """The `skipped` list of the newest earlier round's `integrity.base_tests` with this base sha and command that has
+    one. A record without the key says nothing (an older harness, or a round whose reference was rebuilt from passed ids
+    or was the head's own run): it is walked past, never read as "nothing was skipped"."""
+    for earlier in range(round_no - 1, 0, -1):
+        data = (((read_verdict(wb.ref.path, earlier) or {}).get("integrity") or {}).get("base_tests")) or {}
+        if (
+            isinstance(data, dict)
+            and data.get("base_sha") == base_sha
+            and data.get("command") == command
+            and isinstance(data.get("skipped"), list)
+        ):
+            return [i for i in data["skipped"] if isinstance(i, str)]
+    return None
+
+
+class SkipLookup:
+    """What the base's test report with statuses says about skipped tests (L4-VER-092, rule (a)), asked by step 3 once a
+    skipped test of a changed file could predate the unit. Where the answer comes from, in this order:
+
+    (i) the reference step 1 used this round, when it was a full report (`step1`, from `Outcome.base_report`: a cached
+        baseline or a base worktree run; never R1, which is the base's test files on the unit's code);
+    (ii) the newest earlier round's `integrity.base_tests` of this base sha and command that has a `skipped` key;
+    (iii) the run of the test gate in a base worktree, kept on the workbench (`wb.base_skips`) so that no round runs it
+        twice: step 1's reference may have made it already (it keeps the result even when it hands nothing over, for
+        example an all-kept or all-green step 1); else this lookup makes it. The implementer's `wb.baselines` is left
+        as it is.
+
+    The answer is kept in the object, so a round that asks twice gets the same one. No report is `skipped=None`."""
+
+    def __init__(self, wb: Workbench, base_sha: str, round_no: int, step1: TestReport | None = None) -> None:
+        self.wb, self.base_sha, self.round_no, self.step1 = wb, base_sha, round_no, step1
+        self._found: BaseSkips | None = None
+
+    def __call__(self) -> BaseSkips:
+        if self._found is None:
+            self._found = self._look()
+        return self._found
+
+    def _look(self) -> BaseSkips:
+        wb, command = self.wb, self.wb.cfg.gates.test.command
+        if self.step1 is not None:
+            return BaseSkips(frozenset(_skipped_ids(self.step1)), STEP1_SOURCE)
+        if (recorded := _recorded_skips(wb, self.base_sha, command, self.round_no)) is not None:
+            return BaseSkips(frozenset(recorded), EARLIER_SOURCE)
+        key = (self.base_sha, command)
+        if key not in wb.base_skips:  # not run by step 1's reference either (`_run_base_gate` keeps its result)
+            report, why = _run_base_gate(wb, self.base_sha, command)
+            if report is None:
+                return BaseSkips(None, "", f"no base report with statuses: {why}")
+        return BaseSkips(wb.base_skips[key], WORKTREE_SOURCE)
 
 
 def _support_reverted(
@@ -521,12 +587,15 @@ def check_base_tests(
     for task, count in sorted(over.items()):
         note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
     _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors, support)
-    record = {
+    record: dict[str, Any] = {
         "base_sha": ctx.base_sha,
         "command": command,
         "passed": sorted(i for i, c in r0.tests.items() if c.status == "passed"),
         "collection_errors": list(r0.collection_errors),
     }
+    full = source in ("baseline", "base worktree")  # R0 is the base's tests on the base's code, with every status
+    if full:  # absent means "not observed", never "nothing skipped": R1 and an evidence-built R0 do not say
+        record["skipped"] = _skipped_ids(r0)
     return Outcome(
         findings,
         note,
@@ -534,6 +603,7 @@ def check_base_tests(
         human_tests=[*people_files, *human],
         base_tests=record,
         failures=records,
+        base_report=r0 if full else None,
     )
 
 

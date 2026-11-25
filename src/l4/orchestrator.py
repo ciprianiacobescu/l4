@@ -1319,6 +1319,7 @@ class Orchestrator:
             return chosen
         fresh = self._workbench(selected=chosen)
         fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
+        fresh.base_skips = wb.base_skips
         fresh.previous_attempt = PreviousAttempt(
             request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
         )
@@ -1378,6 +1379,7 @@ class Orchestrator:
         self.switch_profile(exc.result, task)
         fresh = self._workbench()
         fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
+        fresh.base_skips = wb.base_skips
         return fresh
 
     def _close_parents(self, wb: Workbench) -> None:

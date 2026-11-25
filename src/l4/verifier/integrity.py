@@ -76,6 +76,9 @@ class Outcome:
     allowed_tests: list[str] = field(default_factory=list)  # pre-existing test changes an allowance covers: listed
     mocked: list[str] = field(default_factory=list)  # patches of the unit's code a support fixture makes on request
     base_tests: dict[str, Any] | None = None  # the passed ids of the base's run (L4-VER-038), kept for later rounds
+    base_report: Any = (
+        None  # step 1's R0 when it is a full report of the base (not recorded: step 3 reads it, L4-VER-092)
+    )
     listed: list[str] = field(default_factory=list)  # signs of a test run in production code, shown to the judge
     failures: dict[str, dict[str, str]] = field(
         default_factory=dict

@@ -566,6 +566,10 @@ class _Run:
     e2e: E2eGateOutcome | None = None  # step 3's end-to-end gate, when it ran: step 4 traces it, step 5 reads its page
     s1: S1Step | None = None  # step 8, until step 9 has spoken and the calibration rows can be written
     scope: ScopeEvidence | None = None  # step 1: what the unit changed and whether it stays in scope
+    base_report: TestReport | None = None  # step 1: the base's own report, with statuses, when it had one (L4-VER-092)
+    base_skips: base_tests.SkipLookup | None = (
+        None  # step 3: what a base report says about skipped tests, kept per round
+    )
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
     repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
@@ -776,6 +780,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         result.integrity = run_integrity(ctx)
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
+        run.base_report = ran.base_report
         if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
             result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
@@ -845,7 +850,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             ),
         )  # fmt: skip
         blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)
-        return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers)])
+        unmatched = run.evidence.ran.summary.skipped_note if run.evidence and run.evidence.ran else ""
+        return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers), *filter(None, [unmatched])])
 
     def traceability() -> tuple[bool, str]:
         assert report is not None
@@ -982,10 +988,12 @@ def _collect_step(
     tests-ran findings join the round here (the blockers are returned: they stop the ladder like a failed gate);
     step 6 reports the coverage ones."""
     wb, result = vc.wb, run.result
+    run.base_skips = run.base_skips or base_tests.SkipLookup(wb, base_sha, vc.round, run.base_report)
     try:
         ev = collect_evidence(
             wb, base_sha, result.head_sha, report, cov_dir, wb.ref, new_tests=set(result.red_green),
             gate_passed=gate_ok, cov_nonce=(extra or {}).get("L4_COV_NONCE"), step1=run.scope,
+            base_skips=run.base_skips,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001
         log.warning("%s: evidence collection failed: %s", wb.ref.id, exc)

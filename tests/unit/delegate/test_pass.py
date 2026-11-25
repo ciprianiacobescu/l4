@@ -822,8 +822,8 @@ def test_a_multi_line_configured_secret_in_a_long_escalate_reason_reaches_no_rec
 
 
 SKIPPED_HOLD = (
-    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
-    "can affect them (2 tests)"
+    "skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or "
+    "changes no skip the harness reads (2 tests)"
 )
 
 

@@ -616,8 +616,8 @@ def test_an_accepted_proof_is_not_rerun_and_a_rejection_is_rerun_at_a_new_head(r
 # ---- the skipped-test hold joins the round at step 3 (L4-VER-092, SCN-VER-379) -------------------------
 
 SKIPPED_HOLD = (
-    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
-    "can affect them (1 tests)"
+    "skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or "
+    "changes no skip the harness reads (1 tests)"
 )
 
 
@@ -646,15 +646,23 @@ def test_scn_ver_379_the_skipped_hold_is_in_the_round_at_step_3_and_in_no_later_
     from l4.verifier.types import Verdict, VerifyResult
 
     ev = _stub_evidence(DiffCoverage(100.0) if mode == "warn" else None)
-    monkeypatch.setattr(ladder, "collect_evidence", lambda *a, **k: ev)
+    given: list[dict] = []
+    monkeypatch.setattr(ladder, "collect_evidence", lambda *a, **k: given.append(k) or ev)
     monkeypatch.setattr(ladder, "_record_step", lambda vc, run, record: run.records.update({record.step: record}))
     cfg = L4Config.model_validate({"verifier": {"evidence": {"diff_coverage": {"mode": mode}}}})
     wb = SimpleNamespace(ref=SimpleNamespace(id=UNIT), cfg=cfg)
-    vc = SimpleNamespace(wb=wb)
-    result = VerifyResult(UNIT, 1, Verdict.FAIL, "b", "h")
+    vc = SimpleNamespace(wb=wb, round=3)
+    result = VerifyResult(UNIT, 3, Verdict.FAIL, "b", "h")
     run = ladder._Run(result)
+    step1 = object()  # stands for step 1's full report of the base (`Outcome.base_report`)
+    run.base_report = step1  # type: ignore[assignment]
     assert ladder._collect_step(vc, run, "base", None, True, None, None) == []
-    assert result.holds == [SKIPPED_HOLD]
+    lookup = given[0]["base_skips"]  # the lookup of rule (a): step 1's reference first, this round, kept per round
+    assert (lookup.base_sha, lookup.round_no, lookup.step1) == ("base", 3, step1)
+    ladder._collect_step(vc, run, "base", None, True, None, None)
+    assert given[1]["base_skips"] is lookup
+    assert result.holds == [SKIPPED_HOLD, SKIPPED_HOLD]
+    result.holds.pop()
     assert result.hold_views == {SKIPPED_HOLD: {"sha": "a" * 64, "paths": ["tests.test_live::test_a"]}}
     ladder._quality_step(vc, run)  # step 6: the coverage holds only
     assert result.holds == [SKIPPED_HOLD]

@@ -261,3 +261,61 @@ def test_skip_constructs_counts_repeats_and_ignores_what_is_not_a_skip():
     assert found == {("test_a", "pytest.skip('x')"): 2}
     more = scan.skip_constructs(source + "\n\ndef test_c():\n    pass\n")
     assert more == found
+
+
+# the rework of skipped-test-hold D1 (hardened rules): blocks, fixtures, run-time markers, aliases
+
+
+def test_skip_constructs_reads_a_module_and_a_class_level_block():
+    source = (
+        "import os\nimport pytest\n\n"
+        "if os.name:\n    try:\n        pass\n    except OSError:\n        pytestmark = pytest.mark.skip\n\n\n"
+        "class TestK:\n    with open('f'):\n        stack = pytest.mark.skipif(True, reason='r')\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "pytestmark = pytest.mark.skip"),
+        ("TestK", "stack = pytest.mark.skipif(True, reason='r')"),
+    }
+
+
+def test_skip_constructs_reads_runtime_markers_and_calls_that_carry_one():
+    source = (
+        "import pytest\n\npytestmark = []\npytestmark.append(pytest.mark.skip)\n\n\n"
+        "def pytest_collection_modifyitems(items):\n    for i in items:\n        i.add_marker(m)\n\n\n"
+        "def test_a(request):\n    request.node.applymarker(pytest.mark.xfail)\n    register(pytest.mark.skipif(1))\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "pytestmark.append(pytest.mark.skip)"),
+        ("pytest_collection_modifyitems", "i.add_marker(m)"),
+        ("test_a", "request.node.applymarker(pytest.mark.xfail)"),
+        ("test_a", "register(pytest.mark.skipif(1))"),
+    }
+
+
+def test_skip_constructs_reads_import_aliases_and_a_name_assigned_a_skip_callable():
+    source = (
+        "import pytest as pt\nimport unittest as ut\nfrom pytest import mark as m\nfrom pytest import skip as s\n"
+        "stop = pt.skip\n\n\n@m.skip\ndef test_a():\n    s('x')\n    stop('y')\n\n\n"
+        "class TestK:\n    @ut.skip('z')\n    def test_b(self):\n        pass\n"
+    )
+    assert _keys(source) == {
+        ("<module>", "stop = pt.skip"),
+        ("test_a", "m.skip"),
+        ("test_a", "s('x')"),
+        ("test_a", "stop('y')"),
+        ("TestK.test_b", "ut.skip('z')"),
+    }
+
+
+def test_collected_tests_and_shared_scopes_read_a_fixture_by_its_decorator_not_its_name():
+    source = (
+        "import pytest\nfrom pytest import fixture as fx\n\n\n"
+        "@pytest.fixture(scope='module')\ndef test_env():\n    pass\n\n\n"
+        "@fx\ndef tester():\n    pass\n\n\ndef test_a(test_env):\n    pass\n\n\ndef helper():\n    pass\n\n\n"
+        "class TestK:\n    @pytest.fixture\n    def test_inner(self):\n        pass\n\n"
+        "    def test_b(self):\n        pass\n"
+    )
+    assert scan.collected_tests(source) == {"test_a", "TestK.test_b"}
+    assert scan.shared_scopes(source) == {"test_env", "tester", "helper", "TestK.test_inner"}
+    assert scan.defined_tests(source) >= {"test_env", "tester", "TestK.test_inner"}  # the old reading is unchanged
+    assert scan.collected_tests("def (:") == set() and scan.shared_scopes("def (:") == set()

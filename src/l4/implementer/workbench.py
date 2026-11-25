@@ -275,6 +275,9 @@ class Workbench:
     runner: ProcRunner = field(default_factory=ProcRunner)
     baselines: dict[str, TestReport] = field(default_factory=dict)
     static_baselines: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)  # per base commit
+    # (base commit, test command) -> the ids a base worktree run held as skipped (L4-VER-092): kept apart from
+    # `baselines`, whose reports the implementer's red and green steps compare against
+    base_skips: dict[tuple[str, str], frozenset[str]] = field(default_factory=dict)
     # (base commit, job) -> how a failing CI step ran at that base: (reproduced|skipped, reason), M1.10 decision 4
     ci_reproductions: dict[tuple[str, str], tuple[str, str | None]] = field(default_factory=dict)
     setup_at: str | None = None  # the HEAD `gates.setup` last ran at, valid until an agent step has run

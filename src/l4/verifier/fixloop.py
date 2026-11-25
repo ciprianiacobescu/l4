@@ -386,6 +386,7 @@ def _fall_back(
     ctx.shared["fall_back"](exc.result, task)
     fresh = _child_workbench(ctx, fix, iteration, retried=retried)
     fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
+    fresh.base_skips = wb.base_skips
     kind = limit.kind if limit is not None else exc.result.status
     fresh.previous_attempt = PreviousAttempt(
         previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind in STALL_KINDS else None
@@ -412,6 +413,7 @@ def _escalation(
         fresh = _child_workbench(ctx, fix, iteration, selected=chosen, retried=retried)
         moved[request.task] = chosen.profile_name
         fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
+        fresh.base_skips = wb.base_skips
         fresh.previous_attempt = PreviousAttempt(
             request.profile, None, request.task, why="escalation", phase=request.phase, failures=request.failures
         )
@@ -433,7 +435,10 @@ def _close_for_retry(ctx: HookContext, wb: Workbench, fix: UnitRef, marker: FixM
     pending task of the fix unit is still held by an open question (and each such question can be set aside) does the
     harness tick each task `already-done` in a harness commit (the commit and the `task.done` that `_already_done`
     writes, with `closed_by: retry`), set each question that held it to `superseded by retry` in the same commit as
-    the last task it held (a crash leaves what is left still held), and record `question.superseded`. A task that can
+    the last task it held (a crash leaves what is left still held), and record `question.superseded` before that
+    commit, so that the line travels inside it. The `task.done` that follows names the commit's sha and cannot come
+    first: a run that ends between the two leaves the commit without it, which step 1 reads as a step with no red and
+    green to check, and the next run finds nothing to close (`fix.close_skipped`) and ends the fix unit. A task that can
     run, or one that cannot be ticked, drops the request: `fix.close_skipped`, and the loop runs the fix unit as it
     always does, so a retry never ticks a task that no question holds. True when the fix unit is closed (the caller
     appends `fix.done`)."""
@@ -459,6 +464,7 @@ def _close_for_retry(ctx: HookContext, wb: Workbench, fix: UnitRef, marker: FixM
         if free:
             file.save(path)
             set_aside.extend(free)
+            wb.emit("question.superseded", ids=free, closed_by="retry")  # before the commit: it travels inside it
         sha = wb.commit(
             f"fix({fix.name}): {task.title} already done [skip ci]", task=task.key, attempt=1, phase="single",
             tdd="already-done",
@@ -467,8 +473,6 @@ def _close_for_retry(ctx: HookContext, wb: Workbench, fix: UnitRef, marker: FixM
             "task.done", task=task.key, sha=sha, parents=parents, tdd="already-done", closed_by="retry", reason=reason,
             findings=[],
         )  # fmt: skip
-        if free:
-            wb.emit("question.superseded", ids=free, closed_by="retry")  # `fix_unit` is in the bench's context
         tasks = wb.provider.tasks(fix)
     s.ledger.append("fix.done", fix_unit=name, round=marker.round, findings=list(marker.findings), closed_by="retry")
     wb.push()

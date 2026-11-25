@@ -102,8 +102,8 @@ def test_a_verdict_without_by_folds_as_human(tmp_path: Path):
 # ---- a skipped-test hold is a person's: a model-authored answer is not in force (L4-VER-094, SCN-VER-388) ------------
 
 SKIPPED = (
-    "skipped: existing tests in `tests/test_live.py` are skipped, and this unit did not add or change a skip that "
-    "can affect them (2 tests)"
+    "skipped: existing tests in `tests/test_live.py` were also skipped in a base report, and the file adds or "
+    "changes no skip the harness reads (2 tests)"
 )
 SKIPPED_VIEW = {"sha": "b" * 64, "paths": ["tests.test_live::test_a", "tests.test_live::test_b"]}
 

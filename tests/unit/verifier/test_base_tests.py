@@ -313,6 +313,7 @@ class ScriptedWb:
         self.worktree = repo.path
         self.cfg = L4Config(gates={"test": {"command": "pytest", "reports": ["junit.xml"]}})
         self.baselines = {}
+        self.base_skips = {}
         self.redactor = Redactor({})
         self.unit_cache = unit_dir / "cache"
         self.ref = SimpleNamespace(path=unit_dir, id=UNIT)
