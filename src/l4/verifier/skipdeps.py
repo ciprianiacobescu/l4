@@ -24,7 +24,6 @@ the runbook's known limits stand in front of these.
 import ast
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from l4.verifier import scan
 
@@ -64,16 +63,18 @@ def _assigned(node: ast.Assign | ast.AnnAssign | ast.AugAssign) -> set[str]:
 
 
 def _bind_one(found: dict[str, list[_Binding]], statement: ast.stmt, whole: ast.stmt) -> None:
-    """The names `statement` binds, each with a binding: an import alias by its own text (an unrelated name added to the
-    same import line is no change), anything else by `whole`, the statement of the scope's body that holds it."""
+    """The names `statement` binds, each with a binding: an import alias of the body's own statement by its own text
+    (an unrelated name added to the same import line is no change), anything else, an import inside a block too, by
+    `whole`, the statement of the scope's body that holds it (the block's condition decides which binding holds)."""
+    own = statement is whole
     if isinstance(statement, ast.Import):
         for a in statement.names:
-            text = f"import {a.name} as {a.asname}"
-            found.setdefault(a.asname or a.name.split(".")[0], []).append(_Binding(statement, text))
+            text = f"import {a.name} as {a.asname}" if own else None
+            found.setdefault(a.asname or a.name.split(".")[0], []).append(_Binding(whole, text))
     elif isinstance(statement, ast.ImportFrom):
         for a in statement.names:
-            text = f"from {'.' * statement.level}{statement.module} import {a.name} as {a.asname}"
-            found.setdefault(a.asname or a.name, []).append(_Binding(statement, text))
+            text = f"from {'.' * statement.level}{statement.module} import {a.name} as {a.asname}" if own else None
+            found.setdefault(a.asname or a.name, []).append(_Binding(whole, text))
     elif isinstance(statement, _FUNCTIONS | ast.ClassDef):
         found.setdefault(statement.name, []).append(_Binding(whole))
     elif isinstance(statement, ast.Assign | ast.AnnAssign | ast.AugAssign):
@@ -129,14 +130,6 @@ def _used_fixtures(decorators: Iterable[ast.expr]) -> list[str]:
     return out
 
 
-@dataclass(frozen=True)
-class _Scope:
-    """What one class (or the module) contributes to every test below it."""
-
-    parts: tuple[ast.AST, ...]
-    bindings: dict[str, list[_Binding]]
-
-
 class SkipFacts:
     """Everything the skip rule reads from one source, computed once: `ok` (it parses), the constructs, the collected
     tests, the shared scopes, and, per test, the closure (`closure`)."""
@@ -163,6 +156,9 @@ class SkipFacts:
         self._fixture_names = names
         self._module = _bindings(tree.body)
         self._class_cache: dict[str, dict[str, list[_Binding]]] = {}
+        self._methods_cache: dict[str, frozenset[str]] = {}
+        self._dumps: dict[int, str] = {}
+        self._loads: dict[int, frozenset[str]] = {}
         self._skippy_names: frozenset[str] | None = None
         self._fixtures: dict[str | None, dict[str, list[_FUNCTIONS]]] = {}
         self._fixtures[None] = self._fixtures_of(tree.body)
@@ -218,14 +214,33 @@ class SkipFacts:
             self._shared_cache[key] = parts
         return self._shared_cache[key]
 
+    def _dump(self, node: ast.AST) -> str:
+        """`ast.dump` of a part, once: the module's own parts are in the closure of every test of the file."""
+        if id(node) not in self._dumps:
+            self._dumps[id(node)] = ast.dump(node)
+        return self._dumps[id(node)]
+
+    def _loads_of(self, node: ast.AST) -> frozenset[str]:
+        if id(node) not in self._loads:
+            self._loads[id(node)] = _loaded([node])
+        return self._loads[id(node)]
+
+    def _skippy_methods(self, cls: ast.ClassDef | None) -> frozenset[str]:
+        """The names of the methods of `cls` that no runner collects and that skip (`self.need()` in a body)."""
+        if cls is None:
+            return frozenset()
+        if cls.name not in self._methods_cache:
+            self._methods_cache[cls.name] = frozenset(
+                m.name
+                for m in cls.body
+                if isinstance(m, _FUNCTIONS) and f"{cls.name}.{m.name}" not in self.collected and self._skippy(m)
+            )
+        return self._methods_cache[cls.name]
+
     def _prefix(self, function: _FUNCTIONS, cls: ast.ClassDef | None) -> list[ast.stmt]:
         """The statements of the body up to and including the last that can skip."""
         names = self._skippy_binding_names()
-        methods = set()
-        if cls is not None:
-            for m in cls.body:
-                if isinstance(m, _FUNCTIONS) and f"{cls.name}.{m.name}" not in self.collected and self._skippy(m):
-                    methods.add(m.name)
+        methods = self._skippy_methods(cls)
         last = -1
         for i, statement in enumerate(function.body):
             walked = list(ast.walk(statement))
@@ -283,10 +298,10 @@ class SkipFacts:
             if id(part) not in seen_parts:
                 seen_parts.add(id(part))
                 unique.append(part)
-                out[("part", ast.dump(part))] += 1
+                out[("part", self._dump(part))] += 1
         class_bindings = self._class_bindings(cls) if cls is not None else {}
         seen: set[str] = set()
-        frontier = set(_loaded(unique))
+        frontier = set().union(*(self._loads_of(part) for part in unique))
         for _ in range(DEPTH):
             seen |= frontier
             following: set[str] = set()

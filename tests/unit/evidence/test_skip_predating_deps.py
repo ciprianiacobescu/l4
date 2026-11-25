@@ -89,6 +89,20 @@ def test_g1_a_conditional_import_fallback_that_changed_is_a_change():
     assert not predates(source("docker"), source("podman"))
 
 
+def test_g1_the_condition_of_a_block_that_picks_an_import_is_part_of_its_binding():
+    def source(condition: str) -> str:
+        return (
+            f"import sys\nimport pytest\n\nif {condition}:\n    import json as codec\n"
+            "else:\n    import pickle as codec\n\n\n"
+            "@pytest.mark.skipif(codec is None, reason='r')\ndef test_x():\n    assert 1\n"
+        )
+
+    assert not predates(source("sys.platform == 'linux'"), source("sys.platform == 'win32'"))
+    assert predates(
+        source("sys.platform == 'linux'"), source("sys.platform == 'linux'").replace("assert 1", "assert 2")
+    )
+
+
 def test_g1_the_fixture_the_test_takes_and_an_autouse_fixture_count_whole():
     def source(fixture: str, autouse: str) -> str:
         return (

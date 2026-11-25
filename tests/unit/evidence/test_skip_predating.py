@@ -322,3 +322,23 @@ def test_g3_six_hundred_skipped_tests_of_one_file_are_decided_in_seconds(run):
     found = run({LIVE: source(0)}, {LIVE: source(1)}, ids=ids)
     assert len(found) == 600
     assert time.monotonic() - started < 10
+
+
+def test_g3_six_hundred_skipped_methods_of_one_class_are_decided_in_seconds(run):
+    import time
+
+    def source(k: int) -> str:
+        lines = ["import os", "import pytest", "", "STACK = os.getenv('STACK') == 'true'", "", "", "class TestBig:"]
+        lines += [f"    def helper_{i}(self):\n        return {i}\n" for i in range(20)]
+        for i in range(600):
+            lines.append(
+                f"    @pytest.mark.skipif(not STACK, reason='stack')\n    def test_t{i}(self):\n"
+                f"        x = self.helper_{i % 20}()\n        assert x == {k + i % 20}\n"
+            )
+        return "\n".join(lines)
+
+    ids = tuple(f"tests.test_live.TestBig::test_t{i}" for i in range(600))
+    started = time.monotonic()
+    found = run({LIVE: source(0)}, {LIVE: source(1)}, ids=ids)
+    assert len(found) == 600
+    assert time.monotonic() - started < 10

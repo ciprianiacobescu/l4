@@ -152,6 +152,46 @@ def test_the_run_after_the_retry_closes_the_fix_unit_in_harness_commits_and_veri
     assert listed == 0 and "Q-001" not in out  # nothing is open: SCN-VER-390
 
 
+def test_a_close_whose_commit_fails_leaves_the_ledger_ahead_of_the_file_until_the_next_run_repairs_it(
+    waiting, run_l4, tdd_repo, monkeypatch
+):
+    """F9, review G6: `question.superseded` is written before the commit that carries it (so that a run that ends
+    after the commit loses nothing), and the harness cannot take a line back out of a ledger. When the closing commit
+    itself fails, the run's ledger commit still carries the event: the ledger says superseded while `questions.md` says
+    open and the task is unticked. KEPT, and documented in the runbook's known limits: the request to close is still
+    pending, so the next run closes the fix unit from the start (a second event, the same ids), and nothing is lost."""
+    from l4.implementer.workbench import Workbench
+
+    real, failures = Workbench.commit, []
+
+    def commit(self, message, **kw):
+        if message.endswith("already done [skip ci]") and not failures:
+            failures.append(message)
+            raise RuntimeError("injected: the closing commit failed")
+        return real(self, message, **kw)
+
+    monkeypatch.setattr(Workbench, "commit", commit)
+    assert retry(tdd_repo) == 0
+    failed = run_l4([chore_fix(), judge()])
+    assert failed.code == 1 and len(failures) == 1
+    [early] = failed.events("question.superseded")  # in the ledger of the failed run
+    assert (early["fix_unit"], early["ids"]) == (FIX_UNIT, ["Q-001"])
+    question = QuestionsFile.parse(failed.pushed(f"{FIX_DIR}/questions.md")).get("Q-001")
+    assert question is not None and question.status is QuestionStatus.OPEN  # the file did not change
+    assert "- [ ] 1.1" in failed.pushed(f"{FIX_DIR}/tasks.md")
+    assert (
+        fold_of(failed).questions.open == [] and fold_of(failed).close_fix_unit == FIX_UNIT
+    )  # the window, and its way out
+    healed = run_l4([chore_fix(), judge()])
+    assert healed.code == 0
+    assert len(healed.events("question.superseded")) == 2  # the same ids twice: harmless to the fold
+    one = QuestionsFile.parse(healed.pushed(f"{FIX_DIR}/questions.md")).get("Q-001")
+    assert one is not None and one.status is QuestionStatus.SUPERSEDED and one.retried
+    assert "- [x] 1.1" in healed.pushed(f"{FIX_DIR}/tasks.md")
+    state = fold_of(healed)
+    assert state.close_fix_unit is None and state.questions.open == []
+
+
 def test_the_close_keeps_the_questions_text_and_the_fix_units_marker(waiting, run_l4, tdd_repo):
     assert retry(tdd_repo) == 0
     second = run_l4([chore_fix(), judge()])
