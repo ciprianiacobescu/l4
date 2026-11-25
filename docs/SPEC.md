@@ -7327,7 +7327,7 @@ gives a chore task to remove the change from this unit or relocate it to its own
 (`diff coverage: changed code not run by any test: …`) gives a chore task to add tests that run the functions it names.
 (A chore runs without a red step, D8: a test of code that already exists cannot be red.) A reject with no text, or of any
 other hold (not measured, unsafe path name, no scope declared, a UI criterion without an e2e test, a discarded judge
-reply, a diff over the judge's limit), has nothing to act on unless its reason ends with a `WHEN … THEN …` sentence:
+reply, a diff over the judge's limit; not a skipped-test hold, whose reject is never converted, L4-VER-093), has nothing to act on unless its reason ends with a `WHEN … THEN …` sentence:
 then the hold becomes a **deterministic** major behaviour finding, and its fix task carries the reason and the scenario
 exactly as a rejected judge finding with no criterion does (the question of such a hold says "end the reason with a
 sentence WHEN … THEN … so that a fix unit can be made", and promises a fix unit only for scope and coverage holds).

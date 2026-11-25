@@ -901,7 +901,10 @@ run. `l4 status` shows `fixing` with `fix unit questions: Q-NNN`. Do these steps
    the reason `closed by l4 retry: <why>`, sets the question that held it to `superseded by retry` (the text stays; it
    is not open, and `l4:needs-answers` goes), ends the fix unit and verifies the unit again in a fresh round. If an
    answer came between the retry and the run, the run closes nothing and records `fix.close_skipped`. The fix round
-   that the closed fix unit used stays counted.
+   that the closed fix unit used stays counted. Until that run, `l4 plan` says `implement` with `fix unit <name>:
+   closed by the retry at the next run`, in place of `fixing: fix unit questions open`. The ledger shows the steps:
+   `unit.retried` with `close_fix_unit`, then `task.done`, `question.superseded` and `fix.done`, each with
+   `closed_by: retry` (read them as in [4.5](#45-read-the-ledger)).
 3. **Answer the hold.** The fresh round, under the new harness, raises the hold above and no finding for the skipped
    tests. Answer it as the bullet in this section says.
 
@@ -1185,7 +1188,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
 - To tell the fix what is wrong, end the reason with a sentence `WHEN … THEN …`. Write `WHEN` and `THEN` in capital
   letters. Everything after `THEN` to the end of the answer is the THEN clause. The fix must make the scenario true.
   The scenario is required for a rejected finding that has no criterion, and for a rejected hold of any kind other
-  than scope, coverage or judge view (for example `diff coverage: not measured: …`). That hold becomes a behaviour
+  than scope, coverage, judge view or skipped tests (for example `diff coverage: not measured: …`). That hold becomes a behaviour
   finding with the scenario as its task. Without the scenario the unit escalates, and the question of such a hold
   says so: it does not promise a fix unit.
 - Without a `WHEN … THEN …`, the fix is checked against the criterion as it is written (the question's own criterion,
