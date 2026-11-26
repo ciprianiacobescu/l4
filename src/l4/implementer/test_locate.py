@@ -59,6 +59,20 @@ def file_of_id(
     return choose([path for path, name in dotted.items() if name.endswith("." + head)])
 
 
+def test_names_of(path: str, ids: Iterable[str], paths: Collection[str]) -> list[str]:
+    """The test names (after the first `::`) of the report `ids` that lie in the file `path`, `paths` being the files
+    that `file_of_id` chooses among. The red step (L4-IMP-089) and the carry (L4-VER-097) read a report the one way."""
+    heads: dict[str, str | None] = {}
+    names: list[str] = []
+    for test in ids:
+        head = test.partition("::")[0]
+        if head not in heads:
+            heads[head] = file_of_id(test, paths)
+        if heads[head] == path:
+            names.append(test.partition("::")[2])
+    return names
+
+
 def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
@@ -146,6 +160,18 @@ def _span(lines: list[str], name: str) -> tuple[int, int] | None:
             break
         inside = _backticks(line, inside)
     return start, end
+
+
+def call_span(lines: list[str], name: str) -> tuple[int, int] | None:
+    """The first line and the line after the last of the test `name`, as `window` gives them, but only when the block
+    starts at a call line (`test`, `it`, `describe`, `suite` or `bench`, with its modifiers) whose string names the test
+    (L4-VER-097): not `_start`'s last resort, the first line that holds the name, and not a Go function. None when the
+    test is not found, or is found at several places that the enclosing strings do not tell apart."""
+    span = _span(lines, name)
+    if span is None:
+        return None
+    literal = _literal(lines, span[0])
+    return span if literal is not None and _names(literal, name) else None
 
 
 def window(text: str, name: str) -> str | None:

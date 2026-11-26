@@ -168,7 +168,7 @@ from l4.implementer.stubs import (
 )
 from l4.implementer.tamper import Tampered, compare, facts_of, moved, names_test_id
 from l4.implementer.tasks import task_scope, tick_completed_parents
-from l4.implementer.test_locate import file_of_id, outside_tests, window
+from l4.implementer.test_locate import outside_tests, test_names_of, window
 from l4.implementer.unfreeze import Unfreeze, config_opened, named_by_task, unfrozen
 from l4.implementer.unit_context import CHARS_PER_TOKEN, prompt_inputs
 from l4.implementer.uvseed import ensure_uv_seed
@@ -1479,19 +1479,6 @@ def preexisting_test_changes(
     return split_named(_preexisting_changes(wb, task, base, stale), named or NamedTests())[0]
 
 
-def _test_names_of(path: str, report: TestReport, paths: Collection[str]) -> list[str]:
-    """The test names (after the first `::`) of the ids of `report` that lie in the file `path`."""
-    heads: dict[str, str | None] = {}
-    names: list[str] = []
-    for test in report.tests:
-        head = test.partition("::")[0]
-        if head not in heads:
-            heads[head] = file_of_id(test, paths)
-        if heads[head] == path:
-            names.append(test.partition("::")[2])
-    return names
-
-
 def named_other_changed(
     wb: Workbench, base: str, named: NamedTests, base_report: TestReport, report: TestReport
 ) -> list[str]:
@@ -1521,8 +1508,8 @@ def named_other_changed(
         elif test in report.tests and report.tests[test].status in ("failed", "error"):
             if paths is None:
                 paths = wb.git.run("ls-tree", "-r", "--name-only", base).stdout.splitlines()
-            if outside_tests(shown.stdout, _test_names_of(path, base_report, paths)) != outside_tests(
-                after_text, _test_names_of(path, report, paths)
+            if outside_tests(shown.stdout, test_names_of(path, base_report.tests, paths)) != outside_tests(
+                after_text, test_names_of(path, report.tests, paths)
             ):
                 changed.append(test)
     return changed

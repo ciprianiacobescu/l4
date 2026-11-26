@@ -30,7 +30,7 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
 
 ## 2. The rule for a test file the unit only added tests to (L4-VER-097, L4-VER-098, D2)
 
-- [ ] 2.1 Tests first, in a new `tests/unit/verifier/test_carry_appended.py` (pure functions over two texts, a name list and
+- [x] 2.1 Tests first, in a new `tests/unit/verifier/test_carry_appended.py` (pure functions over two texts, a name list and
   the facts of the diff): SCN-VER-416..420 and 422..425 one case per row of D4: the real shape (+11/-0, an `it` between two
   tests, at the end of a `describe`, at the end of the file); a deleted blank line or comment; a line added inside the traced
   test, inside another old test, a new test nested in an old one; a hook, an import, a constant, a `vi.mock`, a `describe`
@@ -38,12 +38,12 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
   apostrophe, a traced test whose first line is not a call line; and for Python a function, a method of an old class, a
   redefinition of an old name, a decorator, a nested def, a changed line, a syntax error, blank and comment lines. Also a
   reading of ids of the form `<dotted path>::C-... title` through `test_locate.window`.
-- [ ] 2.2 Then add `src/l4/verifier/carry_appended.py` (new): `appended_only(path, base_text, head_text, traced, names,
+- [x] 2.2 Then add `src/l4/verifier/carry_appended.py` (new): `appended_only(path, base_text, head_text, traced, names,
   stat)` for JavaScript and TypeScript and for Python, returning a bool and never raising (any failure is `False`); the
   closed-block scanner; move `_test_names_of` from `src/l4/implementer/tdd.py` to `test_locate` (the red step imports it
   from there; its tests stay green). Reuse `test_locate.window` and `outside_tests` and `scan._qualified`; do not change their
   behaviour for their other callers.
-- [ ] 2.3 Run `tests/unit/implementer/test_test_locate.py`, `test_red_preexisting_tests.py` (it holds the
+- [x] 2.3 Run `tests/unit/implementer/test_test_locate.py`, `test_red_preexisting_tests.py` (it holds the
   `named_other_changed` tests) and `tests/unit/verifier/test_scan.py`, one at a time.
 
 ## 3. The carry and what it records (L4-VER-097, D2)
