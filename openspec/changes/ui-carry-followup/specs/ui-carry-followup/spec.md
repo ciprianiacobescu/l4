@@ -18,10 +18,13 @@ means the same four, and only the body can differ); (b) its text is not empty an
 `normalise`. The criterion SHALL then keep its id, alias, capability, requirement, scenario, `source_path` and `source_line`,
 and its `text` SHALL be the base's. The base SHALL be the archived specs at the unit's base commit read from git
 (`criteria.base_criteria_at`, the baseline of L4-VER-009 that step 4 and the red step read), and the unit's base commit SHALL
-be the merge base of `refs/remotes/origin/<forge.base_branch>` and `HEAD`, read as `preconditions` and `discrimination.unit_base`
-read it. A criterion SHALL keep the parent's text, word for word as before, when: the base has no criterion with that id (the
+be the merge base of `refs/remotes/origin/<forge.base_branch>` and `HEAD`, read as `preconditions` reads it; for this
+reading the family SHALL use the origin ref only (`unit_base_commit(..., local_fallback=False)`): with no
+`refs/remotes/origin/<forge.base_branch>` no base commit is known and the parent's text stays (a local base branch that was
+moved onto the unit's own head would otherwise make the unit's edit of the spec the "base"); `discrimination.unit_base`
+and every other caller keep their fallback to the local base branch. A criterion SHALL keep the parent's text, word for word as before, when: the base has no criterion with that id (the
 requirement or the scenario was renamed or removed on the base) or has two; the base's text equals the parent's, or is empty;
-no base commit is known or git cannot read the specs; or the follow-up is a Kiro follow-up (a Kiro id hashes the text, so no
+no base commit is known (also: there is no origin ref, whatever the local base branch holds) or git cannot read the specs; or the follow-up is a Kiro follow-up (a Kiro id hashes the text, so no
 criterion has the same id and another text, and its baseline is the parent's own criteria). A criterion of the follow-up's own
 delta SHALL never be rewritten and SHALL still win over a parent criterion with the same id (`FamilyProvider.criteria`). The
 family's ids, their number and their order SHALL NOT change; the rewritten criterion is the one reading that the verifier's
@@ -68,6 +71,13 @@ their tests]
 - **Then** all of them read the base's text, the old accept is not in force (its `text_sha256` is not the text's) and the
   criterion is decided again by the round, and no other criterion's accept is touched
 
+#### Scenario: SCN-VER-430 (−) A local base branch that moved onto the unit is no base
+- **Given** a follow-up whose merged parent's scenario S the base reworded, a repository with no `refs/remotes/origin/<base>`
+  and a local `<base>` branch moved onto the unit's own head, where the unit edited the base spec's wording of S
+- **When** the family's criteria are read
+- **Then** no base commit is known to the family, S keeps the parent's text (the unit's own edit is never read as the base's
+  wording), and the red step and every other caller of `unit_base_commit` keep their fallback to the local branch
+
 ### Requirement: L4-VER-097 A test file the unit only added tests to does not keep a UI criterion a gap (JavaScript and TypeScript)
 Condition 3 of L4-VER-086 (the file of every tracing test, listed or ignored, is not among the files the unit changed since
 its merge base) SHALL also be met by a file F of a JavaScript or TypeScript test (its extension is one of `ts`, `tsx`, `js`,
@@ -76,20 +86,36 @@ diff --name-status --no-renames <base> <head>` gives F as `M` (not added, delete
 0 deleted lines (a binary file, a mode change and a line removed or changed anywhere in F fail), and both blobs are read from
 git, are at most `MAX_SOURCE_BYTES` and decode as UTF-8; (b) step 1 of this round ran F at its base version on the unit's
 code, which is the record of that run (`reverted`, `failing`, `not_run`, `flaky`: the fields of its `verify.base_tests` event)
-listing F in `reverted`, and no tracing test of F (listed or ignored, any criterion's) among its `failing`, `not_run` or
-`flaky` ids; (c) with `name` the part of a test id after its first `::`, the
-*block* of a test in a text is what `test_locate.window` gives it, and counts only when the first line of the block is a
+listing F in `reverted`, every tracing test of F (listed or ignored, any criterion's) among the ids that PASSED in that
+run (`passed`, read from the run's own report, R1, not from the event: a test the run never saw is in none of the other
+lists) and none of them among its `failing`, `not_run` or `flaky` ids; a record without the list of the passed ids fails
+closed; (c) with `name` the part of a test id after its first `::`, the
+*block* of an OLD test in a text is what `test_locate.window` gives it, and counts only when the first line of the block is a
 call line of `test`, `it`, `describe`, `suite` or `bench` whose string names the test (not the fallback of `window`, the
 first line that holds the name), `window` finds it exactly once (a name carried by two calls that the enclosing
 `describe` strings do not tell apart is not found), and the block is *closed* (its `(`, `{` and `[` balance, with strings,
-template literals and comments skipped, and no count is negative); (d) let H be the names of the tests of F in the
+template literals and comments skipped, and no count is negative); the *block* of a NEW test is exactly one plain test
+statement (a scanner that reads the file once, `carry_appended._plain_calls`): one expression statement that starts its line,
+outside every string, template literal and comment, directly in the file or in a `{` block, after a `;`, a `{`, a `}` or a `)`
+that does not close the head of an `if`, `for`, `while`, `switch`, `with` or `catch`, of the form `it(` or `test(` (never
+`describe`, `suite`, `bench`, a hook, `.each`, `.only`, `.skip` or `.todo`, which are all refused), whose first argument
+is one string literal (quotes, or a backtick template with no `${`) and whose second is a function literal (`() => {`,
+`async () => {`, `function (`, `async function (`, `name => {`) with at most one parameter, a name or a destructuring pattern
+with an optional type and no default value, an optional third argument that is a number (the timeout) and an optional trailing
+comma, and whose closing `)` ends its last line, followed only by an optional `;`, whitespace and a `//` comment (with no `;`,
+the next code character does not continue the statement: not one of `(`, `[`, a backtick, `.`, `,` or an operator); the block is
+the lines from that statement's first to its last, and the title of a describe, whatever it says, never starts a block; (d) let
+H be the names of the tests of F in the
 step-3 reports at the head (the unit gate's and the end-to-end gate's, `test_locate.test_names_of`, which moved there from `tdd`), OLD the names of H that have
-a block at the base and NEW the names of H that are not in OLD and have a block at the head: every tracing test of F is in
+a block at the base and NEW the names of H that are not in OLD and have a block at the head, found once (one plain statement
+carries the longest string that names the name, and it is not a line of an OLD block): every tracing test of F is in
 OLD (its title is still at the base); every name of OLD has a block at the head that is the very text of its block at the
 base, so no line was added inside any old test, the traced ones included; and the lines of the base outside the blocks of
-OLD equal the lines of the head outside the blocks of OLD and NEW, blank lines dropped (`test_locate.outside_tests`), so that
-what the unit added to F is whole new tests (a hook, an import, a constant, a `describe` wrapper, a `vi.mock` or any other
-line outside a test is not a new test and fails the rule). A criterion SHALL be carried by L4-VER-086 when each file of each
+OLD equal the lines of the head outside the blocks of OLD and NEW, blank lines dropped, so that
+what the unit added to F is whole new tests (a hook, an import, a constant, a `describe` wrapper, a `vi.mock`, a statement on the same line as
+a test, a test whose arguments run code when the file is collected or any other line outside a test is not a new test and fails
+the rule). Both texts are read once, whatever the number of tests (the names are looked up in an index of the file, so a file
+of some thousands of tests is decided in seconds). A criterion SHALL be carried by L4-VER-086 when each file of each
 of its tracing tests is either not changed by the unit or meets this requirement (or L4-VER-098), and its other conditions
 (the criterion unchanged on the base, every tracing test passed with the proof `pass_to_pass`, nobody rejected it) hold as
 before; a file that is changed and neither is a gap. A language other than JavaScript, TypeScript and Python SHALL keep the
@@ -142,7 +168,7 @@ the file in `reverted` with empty `failing` and `not_run`. [V, the diff of that 
 #### Scenario: SCN-VER-421 (−) The base's file was not run on the unit's code, or its traced test did not pass there
 - **Given** SCN-VER-416 where F is not in the `reverted` list of step 1's run of the round (it was kept at head because
   a person's commit changed it last, step 1 did not run, or F is outside `tdd.test_globs`), or a tracing test of F is in the
-  event's `failing`, `not_run` or `flaky`
+  event's `failing`, `not_run` or `flaky` or not among the ids that passed in that run (SCN-VER-429)
 - **When** step 5 runs
 - **Then** the rule fails and the criteria F traces are gaps, whatever the text of F says
 
@@ -158,6 +184,34 @@ the file in `reverted` with empty `failing` and `not_run`. [V, the diff of that 
 - **When** step 5 runs
 - **Then** none of C1, C2, C3 and C4 is carried, and each one's outcome is what 0.4.60 gives it
 
+#### Scenario: SCN-VER-427 (−) A new block that is more than one plain `it(` or `test(` statement keeps the hold
+- **Given** SCN-VER-416 where the new test is written as one of: `it("t", () => {}); beforeEach(() => { counter = 5; });` on one
+  line (or `vi.mock(...)`, or an assignment, after the call on its line, or a statement before it), a multi-line test whose
+  closing line goes on with a hook that closes later, a `describe` whose title is the new test's and that holds a hook and the
+  test, a test whose arguments run code when the file is collected (`it("t", (counter = 7, () => {}))`, an immediately
+  called function as the second argument, a parameter with a default value), `it.only`, `it.skip`, `test.todo`, an
+  `.each` table, a title that is not one string literal, a body that is not a function block, a second argument that is not a
+  function literal, an options object, a statement that the next line goes on with (`(`, `.`), a test that is the argument or
+  the body of another statement, or one inside a template literal or a comment
+- **When** step 5 runs
+- **Then** the block is not a plain test statement, its lines are outside every block and differ from the base's (or the
+  rule refuses it), and the criteria F traces are gaps; and a plain `it(` or `test(` statement (an async arrow, a `function`,
+  one destructured or named parameter, a timeout number, backtick title without `${`, a trailing `;` or `//` comment, a title on
+  its own line) is a new block wherever it lies at statement level, also at the end of a `describe`
+
+#### Scenario: SCN-VER-429 (−) A traced test that step 1's run did not pass keeps the hold
+- **Given** SCN-VER-416 where the traced test of F is absent from the ids that passed in step 1's run of the base's file on
+  the unit's code, though it is in none of `failing`, `not_run` and `flaky` (the run never saw it), or step 1's record has
+  no list of passed ids
+- **When** step 5 runs
+- **Then** the rule fails and the criteria F traces are gaps
+
+#### Scenario: SCN-VER-431 (+) A test file of some thousands of tests is decided in seconds
+- **Given** a generated TypeScript file of 3000 tests and one new test appended, and a generated Python file of 3000 tests and
+  300 new ones
+- **When** the rule decides each file
+- **Then** each decision takes under ten seconds, and a new block that is not a plain statement is refused in as little time
+
 ### Requirement: L4-VER-098 The same rule for a Python test file
 A Python test file F (`.py`, found by `carry_file` with the dotted-module walk in agreement, L4-VER-086) that the unit changed
 SHALL meet condition 3 of L4-VER-086 under the conditions (a) and (b) of L4-VER-097 and these: both blobs parse as Python; the
@@ -165,10 +219,14 @@ SHALL meet condition 3 of L4-VER-086 under the conditions (a) and (b) of L4-VER-
 `test` (`scan._qualified`), with the span of a test from its first decorator, or its `def`, to its `end_lineno`; every tracing
 test of F is a collected test at the base and at the head (its qualified name read from its id as `tamper.names_test_id`
 reads it: a parametrised `test_x[a-b]` names `test_x`); NEW is the set of collected tests of the head whose qualified name is
-not a collected test of the base, and each has no decorator, is bound by exactly one statement of its scope at the head and
+not a collected test of the base, and each has no decorator, has no default value (positional or keyword-only) and no type
+parameter, has only annotations that are names, attributes, subscripts of those (tuples and lists inside a subscript
+included) and constants, the return annotation too (a call, a lambda, an assignment expression or an operator in an
+annotation runs at collection: refused; plain fixture parameters such as `db` or `db: Session` pass), is bound by exactly one statement of its scope at the head and
 by none at the base (no second `def`, assignment, class or import of that name: a later definition of an old name would
 replace the old test); and the head's text with the spans of NEW removed equals the base's text, a line that is blank or
-only a comment (read with `tokenize`) dropped on both sides. A file that does not parse, a test nested in a function or a
+only a comment (read with `tokenize`) dropped on both sides, except a shebang on line 1 and a coding declaration (PEP 263,
+`^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)`) on line 1 or 2, which are code here: any difference in them keeps the criterion a gap. A file that does not parse, a test nested in a function or a
 class that is not module-level, a changed or deleted line, a decorator on a new test, a new test with an old test's name and
 anything else that is unclear SHALL keep the criterion a gap. [I, the same facts as L4-VER-097; no Python consumer data]
 
@@ -191,3 +249,12 @@ anything else that is unclear SHALL keep the criterion a gap. [I, the same facts
 - **When** the next round runs
 - **Then** the stored outcome stands and nothing is decided again, and the generated UI tests table row of each carried
   criterion reads `carried from the base: <ids> (...); the unit only added tests to <F>; a note, not a hold (L4-VER-086)`
+
+#### Scenario: SCN-VER-428 (−) A coding declaration or a shebang, a default value or a computed annotation of a new Python test keeps the hold
+- **Given** SCN-VER-424 where the unit also added a coding declaration (`# -*- coding: latin-1 -*-`) on line 1 or 2 or a
+  shebang on line 1, or changed or removed one (the same declaration on both sides is no difference), or the new test is
+  `def test_new(x=compute())`, `def test_new(*, x=1)`, `def test_new(a: compute())`, `def test_new(a: (lambda: 1)())` or
+  `def test_new() -> compute()`
+- **When** step 5 runs
+- **Then** the rule fails and the criterion is a gap as in 0.4.60; plain fixture parameters (`db`, `db: Session`,
+  `-> None`) and an ordinary comment on line 1 do not fail it

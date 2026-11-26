@@ -1291,11 +1291,16 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   not carried; a requirement or scenario that was renamed or removed keeps the parent's text and its hold). And a test
   file that the unit changed does not keep the hold when the unit only added whole new tests to it: the row says `the
   unit only added tests to <file>`. That needs git to show no deleted line and no mode change, step 1 to have run the
-  file at its base version (it lists the file in `reverted` of `verify.base_tests` and none of its tracing tests among
-  `failing`, `not_run` or `flaky`), every old test's block to be the base's text, and nothing outside the tests to
-  differ; a new import, hook, constant, `describe` wrapper, `vi.mock` or decorator, a new test with an old test's title,
-  a template-literal title or an `.each` table that the report names differently, a file whose brackets the scanner
-  cannot close and a test file of another language keep the hold. A new test that changes shared state in a way that
+  file at its base version (it lists the file in `reverted` of `verify.base_tests`, every tracing test of the file
+  passed in that run, and none is among `failing`, `not_run` or `flaky`), every old test's block to be the base's text,
+  and nothing outside the tests to differ. A new JavaScript or TypeScript test must be exactly one plain `it(` or
+  `test(` statement on its own lines (a string title, a function literal with at most one parameter and no default
+  value, an optional timeout number); a new import, hook, constant, `describe` wrapper, `vi.mock` or decorator, a
+  statement on the same line as the test, `.only`, `.skip` or `.each`, arguments that run code when the file is
+  collected, a Python test with a default value or a computed annotation, a changed coding declaration or shebang, a
+  new test with an old test's title, a template-literal title that the report names differently, a file whose
+  brackets the scanner cannot close and a test file of another language keep the hold. A follow-up whose repository
+  has no `origin/<base>` ref reads no base wording and keeps the parent's text. A new test that changes shared state in a way that
   passes both runs, or a `vi.mock` written inside the new test's body, is seen only by those two runs.
 - A criterion question whose `Why:` starts `uncovered: the judge passed it, and only the per-test cap left it uncovered`
   (harness 0.4.21 and later): the judge passed the criterion, and the only tests that trace it trace more criteria

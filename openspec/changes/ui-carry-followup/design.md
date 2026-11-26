@@ -78,8 +78,11 @@ which is what `check_preconditions` computes (`preconditions.py:288`) and what `
 (`discrimination.py:736-746`, which also tries the local base branch) [V for `verify_hook`; the other callers of `family_of` (`delegate/run.py:233`, `verifier/legacy.py:52`, `fixloop.py:346` and
 `:489`) were not read, and there the merge base may be older than the head of the base branch [U]: task 1.3 reads them]. `family_of` (`fixloop.py:240-259`) passes the
 provider a `base_rev` read once, lazily (the git call is made only for a follow-up), by one shared helper that `unit_base`
-and `preconditions` also call, so that the three never disagree. `FamilyProvider.git` may be `None` and `merge-base` may fail:
-then `base_rev` is `None` and nothing is rewritten (today's behaviour). `spec_baseline` and the rewrite read the same commit.
+and `preconditions` also call, so that the three never disagree. The family reads the ORIGIN ref only (`unit_base_commit(...,
+local_fallback=False)`, as `preconditions` does; group 5, F6): with `refs/remotes/origin/<base>` missing and a local base
+branch that was moved onto the unit's head, the fallback would have read the unit's own edit of the spec as "the base". The
+red step (`discrimination.unit_base`) keeps its fallback to the local branch. `FamilyProvider.git` may be `None` and
+`merge-base` may fail: then `base_rev` is `None` and nothing is rewritten (today's behaviour). `spec_baseline` and the rewrite read the same commit.
 
 What step 4 does with it: the criterion is now `unchanged` (same id, same text as `base_criteria_at(rev)` by construction),
 so a test that traces it and passed at the base and passes at the head has the proof `pass_to_pass`, and L4-VER-086 can
@@ -104,7 +107,10 @@ the 0-deleted test: a changed line is a deleted line and an added one. (b): step
 this round lists F in `reverted` and none of the tracing tests of F is in its `failing`, `not_run` or `flaky`. `verify_unit`
 reads `events` once, at `ladder.py:750`, before step 1 emits `verify.base_tests`, and `_generate_step` gets that list [V], so
 this round's event is not in it: `check_base_tests` hands the four fields to the round (`Outcome`, then `_Run`) and step 5
-reads them there; the ledger is not read.
+reads them there; the ledger is not read. A fifth field, `passed`, is the ids that PASSED in step 1's run (R1, the report of
+the base's file on the unit's code): the four lists say what failed, was absent from the base or flaky, and a test that the
+run never saw is in none of them, so the rule requires every tracing test of F to be in `passed` as well, and a record with no
+`passed` (None) fails closed (group 5, F5).
 `_kept` can leave F at head (a person's commit changed it last), `check_base_tests` can return early (setup failed, no base
 reference) or not run at all (no test or support file changed), and F can lie outside `tdd.test_globs`; in each case no event
 lists F and the rule fails closed. This costs some real cases and is the price of the argument above [I]. In the consumer's
@@ -125,19 +131,52 @@ strings [I]). A block counts only when:
   a block cut short would let an added line look "outside" it). A single-quoted string that does not end on its line, JSX
   text with an apostrophe that leaves a quote open, a negative count or a non-zero count at the end of the block: not closed.
 
+The block of an OLD test is the one above. The block of a NEW test is stricter (group 5, F1): `window` ends a block at the next
+dedented line, so a line such as `it("t", () => {}); beforeEach(() => { counter = 5; });`, a closing line that goes on with a
+hook, or a `describe` titled like the test would have been read as "one test" and accepted. A NEW test is exactly one plain
+test statement, found by one scan of the head (`carry_appended._plain_calls`: the same string, template and comment aware
+scanner as `is_closed`, lenient about a quote that does not end, since a whole file has JSX text; `_tokens`):
+- it starts its line, is outside every string, template literal and comment, and is a statement: directly in the file or in a
+  `{` block, after a `;`, a `{`, a `}` or a `)` that does not close the head of an `if`, `for`, `while`, `switch`, `with` or
+  `catch` (so `if (x)\nit(...)` and `foo(\nit(...)\n)` are no statements);
+- it is `it(` or `test(`: not `describe`, `suite`, `bench`, a hook, and not `.each`, `.only`, `.skip`, `.todo` or any modifier
+  (chosen for simplicity: a modifier changes whether the test runs, which the run leg would have to see; they stay refused);
+- its first argument is one string literal (quotes, or a backtick template with no `${`), its second a function literal
+  (`() => {`, `async () => {`, `function (`, `async function (`, `name => {`) with at most one parameter that is a name or a
+  destructuring pattern with an optional type and no `=` (no default value; no call, string or comma at the top level in the
+  parameter list), an optional third argument that is a number (the timeout) and an optional trailing comma; no comment
+  between the arguments;
+- its closing `)` (found with the bracket scan) ends its last line, followed only by an optional `;`, whitespace and a `//`
+  comment; with no `;`, the next code character must not be one of `( [` a backtick `+ - * / . , ? : = & | < > % ^ ~ !`
+  (an `it(...)` before a line that starts so would be continued by it).
+The title of a `describe` never starts a block, whatever the strings say (the scan has no `describe`). What the old scan
+accepted and this refuses: a statement on the same line, arguments that run code at collection (`it("t", (counter = 7, () =>
+{}))`, an immediately called function), `it.only` and the like, a block whose closing line goes on. What it keeps: a new test
+at the end of a `describe` (a `{` block), with or without semicolons (after a `)`), a timeout, a title on its own line (prettier),
+a trailing `//` comment. Cost: a new test that wants a comment between its arguments, a typed parameter list that holds a
+function type, a modifier or an `it` after a non-`)`-ending semicolon-free line is refused (lost cases, fail closed).
+
 Then, with H the names of F's tests in the head's step-3 reports (the unit gate's and the e2e gate's; `_test_names_of`,
 `tdd.py:1482-1492`, which moves to `test_locate` so the verifier and the red step share it): OLD = names of H with a block at
-the base; NEW = names of H not in OLD with a block at the head. The rule holds when every tracing test of F (listed and
-ignored) is in OLD, every name of OLD has a block at the head equal to its block at the base, and `outside_tests(base, OLD)`
-equals `outside_tests(head, OLD | NEW)` (it drops blank lines, as a test appended to a file brings the blank line before it).
+the base; NEW = names of H not in OLD with one plain statement at the head that carries the longest string that names the
+name (`describe` strings of a reported name are tolerated as for OLD) and is no line of an OLD block at the head (several
+statements with that string: not found). The rule holds when every tracing test of F (listed and ignored) is in OLD, every
+name of OLD has a block at the head equal to its block at the base, and the base's lines outside the OLD blocks equal the
+head's outside the OLD and NEW blocks (blank lines dropped, as a test appended to a file brings the blank line before it).
 Read together: the head is the base plus whole test blocks. A line added inside a traced test, inside another old test, or
 as a new test nested inside one fails the block equality. A hook, an import, a constant, a `describe` wrapper, a `vi.mock`,
-a comment outside a test: outside lines differ. A new test that `window` cannot find by its reported name (a template-literal
+a comment outside a test: outside lines differ. A new test that is not found by its reported name (a template-literal
 title with `${...}`, an `.each` table: the expanded names do not match the literal) leaves its lines outside any block, and
 they differ. All of those fail closed, which also keeps `vi.mock`, which a runner may hoist to the top of the file wherever it
 is written, out of the text leg's reach for added lines outside tests (a `vi.mock` inside a new test's body is another
 case: see D3). Some real cases are lost: a new test that needs a new import, or that opens a new
 `describe`.
+
+Cost (group 5, F4): the old reading ran `_span`, `_start` and `_literal` over every line for every name (800 tests of 46 KB
+took 3.6 s, and `MAX_SOURCE_BYTES` is 500 000). A file is now read once: `test_locate.CallIndex` holds the string of every
+call line and the lines that carry each string, and a name is looked up through the suffixes of the name (the strings it can
+carry, `_names`), and the new blocks come from the one scan. The same result as the line-by-line reading is tested for the
+index; a generated 3000-test file is decided in well under 10 s.
 
 Python (`.py`): the blocks are the AST's. A collected test is a module function or a method of a module-level class whose
 name starts with `test` (`scan._qualified`, `scan.py:214-222`), spanning its decorators to `end_lineno`. A tracing test of F is
@@ -147,7 +186,14 @@ collected tests of the head whose qualified name is not collected at the base. E
 be bound once in its scope at the head and not at the base: Python lets a later `def` of an old name REPLACE the old test while
 the old lines stay in the file, which a text rule alone would read as "old test unchanged". Remove the spans of NEW from the
 head and compare with the base with blank and comment-only lines (read by `tokenize`) dropped on both sides: equal text is
-the whole rule. A test nested in a function or in a non-module-level class is not collected, so its lines stay in the
+the whole rule. Two additions (group 5): a shebang on line 1 and a PEP 263 coding declaration (`^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)`
+on line 1 or 2) are NOT droppable, they change how the file is read, so any difference in them refuses (the blobs are decoded
+as UTF-8 before the rule, and an added `# coding: latin-1` would make the interpreter read the same bytes differently); and a
+new test's `def` line runs when the module is collected, so it must have no default value (positional or keyword-only), no
+type parameter, and only annotations that are names, attributes, subscripts of those (a tuple or list inside a subscript is
+kept as structure) and constants, the return annotation too: a call, a lambda, an assignment expression or any operator
+(`int | None` included) refuses; plain fixture parameters (`db`, `db: Session`, `-> None`) pass. The bindings of a scope are
+counted once per scope, not once per new test. A test nested in a function or in a non-module-level class is not collected, so its lines stay in the
 head's text and differ: fail closed. A file that does not parse: fail closed.
 
 Other languages: the file-level rule stays (a Go, Java or C# test file that the unit changed keeps its criteria gaps). The
@@ -186,9 +232,17 @@ R2 (L4-VER-097, L4-VER-098):
 - A `vi.mock(...)` (or `jest.mock`) written inside the BODY of a new test passes the text leg, because the new test is a whole
   new block, and a runner may hoist it to the top of the file, where it changes the old tests. Only the run leg covers it: the
   base's file ran on the unit's code at step 1 and the traced test passed there. Named, accepted.
-- A new test written as `it.only(...)` or inside a `describe.only` leaves the old tests `skipped` at the head; C2 needs
-  `passed`, so the carry fails there, not in the text leg [I].
-- `window` is an indentation reader and the closed-block check is a scanner, not a parser. Unusual code (a regex literal that
+- A new test written as `it.only(...)` or inside a `describe.only`: `it.only` is refused by the text leg (a NEW block is a
+  plain `it(` or `test(` statement, no modifier); a `describe.only` wrapper is outside lines and refused too; either way the
+  old tests would be `skipped` at the head and C2 needs `passed` [I].
+- "Statement level" for a NEW block is any `{` block or the file: a helper, a hook, a loop or an `if` body that already exists
+  at the base counts, not only the file and `describe` callbacks. It is a new test only when the head's report holds its
+  name and the lines outside the blocks equal the base's, so the risk is a new test registered inside an existing block
+  that the base's code runs. Named, accepted. The head of an `if`, `for`, `for await`, `while`, `switch`, `with` or `catch` is
+  read from the 24 characters before its `(`: a comment between the keyword and the paren is not seen, so a braceless body
+  with such a comment can take a test inserted in front of it. Residual, named.
+- A NEW block is one plain statement, so nothing else rides on its lines; an OLD block is still `window`'s, an indentation
+  reader, checked closed, and its text must equal the base's. `window` is an indentation reader and the closed-block check is a scanner, not a parser. Unusual code (a regex literal that
   holds a quote, JSX text that balances by accident) can mislead the scanner into a block that looks closed and is not.
   The block-equality and the outside-lines equality are then taken over the wrong lines, and what protects the carry is step
   1's and step 3's runs and the fail-closed cases. Residual risk, named.

@@ -1,4 +1,4 @@
-Read `design.md` first (D1-D5). Requirements: L4-VER-096..098, scenarios SCN-VER-412..426 (`specs/ui-carry-followup/spec.md`).
+Read `design.md` first (D1-D5). Requirements: L4-VER-096..098, scenarios SCN-VER-412..431 (`specs/ui-carry-followup/spec.md`).
 R1 (group 1) and R2 (groups 2 and 3) need nothing of each other. Run single test files only
 (`uv run --frozen pytest <file> -q -p no:cacheprovider`), never a directory, never two runs at once, and never a wait loop
 on `pgrep`. Every group writes its tests first, runs them and sees them fail, then changes the code.
@@ -69,9 +69,30 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
 - [x] 4.1 `docs/SPEC.md`: L4-VER-086 (condition 3: `or meets L4-VER-097/098`; the "Residual risk" and "restated" sentences:
   a parent scenario that a later change reworded is read at the base's wording, L4-VER-096); L4-FBK-010 (the family's parent
   criteria at the base's wording for an OpenSpec follow-up); the step 5 row of the ladder; the `verify.generated` entry of 12.1
-  (`appended`); change-table row 141 and a new row for this change, marked SLIPPABLE; the three requirements and SCN-VER-412..426.
+  (`appended`); change-table row 141 and a new row for this change, marked SLIPPABLE; the three requirements and SCN-VER-412..431.
   Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
 - [x] 4.2 `docs/runbook.md`: the paragraph that starts `From 0.4.60 a UI criterion that the unit did not change`; `CHANGELOG.md`
   (Changed: both rules; Upgrade: an accept bound to the old text of a rewritten criterion is asked once more).
 - [x] 4.3 Checks: `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files changed;
   `openspec validate ui-carry-followup --strict`.
+
+## 5. Review findings (L4-VER-096, L4-VER-097, L4-VER-098, D1, D2)
+
+Each case a reviewer reproduced is a test that failed before its fix.
+
+- [x] 5.1 F1: a NEW JavaScript or TypeScript block is exactly one plain `it(` or `test(` statement (`carry_appended._plain_calls`,
+  `_plain_call`, `_function_body`, `_ends_cleanly`; no `describe`, hook, `.each`, `.only`, `.skip` or `.todo`: modifiers stay refused),
+  found by one scan of the head; the start line is the `it(` line, never a describe's. Tests: `test_carry_appended.py`
+  (SCN-VER-419 table, SCN-VER-416 table, SCN-VER-427).
+- [x] 5.2 F2: a shebang on line 1 and a PEP 263 coding declaration on line 1 or 2 are code in `_droppable`. F3: a new Python
+  test has no default value, no type parameter and only plain annotations (`_plain_signature`). SCN-VER-428.
+- [x] 5.3 F4: a file is read once: `test_locate.CallIndex` (the string of every call line, a name looked up by its suffixes),
+  the new blocks from one scan, the bindings of a scope counted once (`_binding_counts`). A generated 3000-test file of each
+  language is decided in under 10 s (SCN-VER-431); the index gives the line-by-line spans (`test_test_locate.py`).
+- [x] 5.4 F5: `Step1Run.passed` (the ids that passed in R1, from `check_base_tests`); `base_run_covers` requires every traced test
+  of the file in it and fails closed when it is None. SCN-VER-429 (`test_carry_appended.py`, `test_ui_flow.py`).
+- [x] 5.5 F6: `family_of` reads the base commit with `local_fallback=False` (origin only); with no origin ref the parent's text
+  stays. Other callers are unchanged. SCN-VER-430 (`test_family_parent_text.py`).
+- [x] 5.6 Documents: `docs/SPEC.md` and the change's `spec.md` (L4-VER-096, L4-VER-097 (b) (c) (d), L4-VER-098, SCN-VER-427..431,
+  row 146), `design.md` D1-D3, `docs/runbook.md`, `CHANGELOG.md`. Checks: the test files of groups 1-3 one at a time,
+  `ruff`, `scripts/check_spec.py`, `openspec validate ui-carry-followup --strict`.
