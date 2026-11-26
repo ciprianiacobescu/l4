@@ -30,7 +30,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -109,6 +109,7 @@ from l4.verifier import base_tests, diffparts
 from l4.verifier.aggregate import aggregate_criterion, aggregate_unit, judge_findings, pick_verdicts
 from l4.verifier.audit import choose, run_audit
 from l4.verifier.basemerge import bring_in_base
+from l4.verifier.carry_appended import AppendedFiles, Step1Run
 from l4.verifier.carryover import apply_carried, carried_verdicts, carry_over
 from l4.verifier.conventions import test_conventions
 from l4.verifier.diffparts import (
@@ -190,7 +191,7 @@ from l4.verifier.judge_followup import (
 )
 from l4.verifier.judge_parts import merge_part_verdicts
 from l4.verifier.notes import verdict_section
-from l4.verifier.playwright import playwright_enabled, ui_files, unit_changed_files
+from l4.verifier.playwright import changed_file_facts, playwright_enabled, ui_files, unit_changed_files
 from l4.verifier.preconditions import check_preconditions, record_ci_steps, record_feedback
 from l4.verifier.report import write_round_evidence
 from l4.verifier.s1_labels import record_human_labels
@@ -577,6 +578,7 @@ class _Run:
         None  # step 5, when it took a note: step 9 may remove its basis (VER-067)
     )
     unchanged: frozenset[str] = frozenset()  # step 4: the criteria the base's archived specs hold word for word
+    step1: Step1Run | None = None  # step 1: this round's `verify.base_tests` lists, for the carry of L4-VER-097 (b)
 
 
 def _step(vc: VerifyContext, run: _Run, step: str, name: str, body: Callable[[], tuple[bool, str]]) -> bool:
@@ -781,6 +783,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
         run.base_report = ran.base_report
+        run.step1 = ran.base_run
         if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
             result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
@@ -1372,6 +1375,23 @@ def _test_blobs(
     )
 
 
+def _appended_of(
+    carried: Mapping[str, Sequence[str]],
+    trace: Sequence[CriterionEvidence],
+    files: Mapping[str, str | None],
+    accepted: Collection[str],
+) -> dict[str, tuple[str, ...]]:
+    """criterion -> the changed test files that its carry rests on (L4-VER-097): the files of its tracing tests, listed
+    or ignored, that the rule accepted. A criterion whose files the unit did not change has none."""
+    out: dict[str, tuple[str, ...]] = {}
+    for e in trace:
+        if e.criterion in carried:
+            tests = [*(t.id for t in e.tests), *(t for t, _ in e.ignored)]
+            if found := sorted({str(files[t]) for t in tests if files.get(t) in accepted}):
+                out[e.criterion] = tuple(found)
+    return out
+
+
 def _generate_step(
     vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], base_sha: str, events: Sequence[LedgerEvent]
 ) -> None:
@@ -1412,10 +1432,15 @@ def _generate_step(
     # hold. A waived one stays waived. Every condition that cannot be checked leaves the gap as it was.
     files = _carry_files(wb, result.trace)
     open_gaps = [c for c in plan.gaps if c.id not in waived]
+    only_added = AppendedFiles(
+        wb.git, base_sha, result.head_sha, run=run.step1, files=files, reports=[run.report, browser.report],
+        paths=lambda: worktree_files(wb), facts=lambda: changed_file_facts(wb.git, base_sha, result.head_sha),
+    )  # fmt: skip
     carried = carried_from_base(
         open_gaps, result.trace, run.unchanged, files.get, changed,
-        rejected_ui_criteria(events, [c.id for c in open_gaps]),
+        rejected_ui_criteria(events, [c.id for c in open_gaps]), appended=only_added,
     )  # fmt: skip
+    appended = _appended_of(carried, result.trace, files, only_added.accepted)
     result.findings.extend(gap_findings(plan.gaps, plan.unproved, waived, carried))
     for criterion in plan.gaps:
         if criterion.id in waived:
@@ -1427,13 +1452,15 @@ def _generate_step(
             )
         elif criterion.id in carried:
             tests = list(carried[criterion.id])
-            wb.emit("verify.generated", criterion=criterion.id, status="carried", covered_by=tests, attempts=0)
+            added = {"appended": list(appended[criterion.id])} if appended.get(criterion.id) else {}  # L4-VER-097
+            wb.emit("verify.generated", criterion=criterion.id, status="carried", covered_by=tests, attempts=0, **added)
             result.generated.append(
                 GeneratedOutcome(
                     criterion.id,
                     "carried",
                     reason="carried from the base (L4-VER-086)",
                     covered_by=carried[criterion.id],
+                    appended=appended.get(criterion.id, ()),
                 )
             )
     gaps = [c for c in open_gaps if c.id not in carried]

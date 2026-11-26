@@ -220,6 +220,7 @@ class GeneratedOutcome:
     ] = ()  # not_testable: the step-4 tests that cover the criterion; a note, no hold (L4-VER-067)
     excerpt: str = ""  # fails_at_head (the attempt that wrote `code`): why the head run failed, redacted (L4-VER-083)
     code_lines: int = 0  # the lines of the whole `code` test, redacted, before the cut; 0: unknown (L4-VER-083)
+    appended: tuple[str, ...] = ()  # carried: the changed test files the unit only added tests to (L4-VER-097)
 
     @property
     def accepted(self) -> bool:

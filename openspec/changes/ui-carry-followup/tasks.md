@@ -48,12 +48,12 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
 
 ## 3. The carry and what it records (L4-VER-097, D2)
 
-- [ ] 3.1 Tests first, in `tests/unit/verifier/test_ui_step.py` (`carried_from_base(..., appended=...)`: a changed file that
+- [x] 3.1 Tests first, in `tests/unit/verifier/test_ui_step.py` (`carried_from_base(..., appended=...)`: a changed file that
   the predicate accepts is carried; one it refuses is not; every other condition still decides per file: SCN-VER-423) and
   `tests/unit/verifier/test_ui_flow.py` (the ladder: step 1's record lists F in `reverted`, lists it not,
   names a tracing test in `failing`, `not_run` or `flaky`: SCN-VER-416, 421; `verify.generated{appended}`; the row of
   `_generated_rows`; a reused round keeps the outcome: SCN-VER-426), and `tests/unit/verifier/test_report_m15.py` for the row.
-- [ ] 3.2 Then `carried_from_base` (`src/l4/verifier/ui_step.py`) takes an optional predicate `appended(test_id, file)` that
+- [x] 3.2 Then `carried_from_base` (`src/l4/verifier/ui_step.py`) takes an optional predicate `appended(test_id, file)` that
   accepts a changed file (default: none), `ladder._generate_step` builds it from `git diff --name-status` and `--numstat`
   (`src/l4/verifier/playwright.py` beside `unit_changed_files`), the blobs of `base_sha` and the head read through git, the
   step-3 reports (`run.report`, `run.e2e`) and step 1's `reverted`, `failing`, `not_run` and `flaky`. These last four are not
@@ -62,7 +62,7 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
   and read that field; do not re-read the ledger; `GeneratedOutcome` and the
   `verify.generated` event carry `appended`; `report._generated_rows` writes the row of SCN-VER-426. A file that is changed and
   neither unchanged nor accepted keeps the criterion a gap.
-- [ ] 3.3 Run `test_ui_step.py`, `test_ui_flow.py`, `test_report_m15.py`, `test_resume.py` and `test_fixunit.py`, one at a time.
+- [x] 3.3 Run `test_ui_step.py`, `test_ui_flow.py`, `test_report_m15.py`, `test_resume.py` and `test_fixunit.py`, one at a time.
 
 ## 4. Documents (after 1-3, by the orchestrator)
 

@@ -801,3 +801,158 @@ def test_scn_ver_342_a_criterion_and_its_ui_hold_rejected_after_a_needs_human_ro
     assert len([line for line in tasks.splitlines() if line.startswith("- [ ]")]) == 1 and hold in tasks
     delta = second.pushed(f"{UNIT_DIR}-fix-1/specs/pricing/spec.md")
     assert delta.count("#### Scenario:") == 1 and "finding H-" not in delta  # the same text is pinned once
+
+
+# -- ui-carry-followup (L4-VER-097, L4-VER-098): a changed test file that the unit only added tests to
+
+PRICING = "tests/test_pricing.py"  # the fixture's own test file: the base holds it, the unit appends one test to it
+OLD_PRICING = {
+    KNOWN: "tests.test_pricing::test_total_adds_prices",
+    UNKNOWN: "tests.test_pricing::test_total_of_nothing_is_zero",
+}
+NEW_TEST = (
+    "def test_total_of_one_price_and_a_discount():\n"
+    "    from pytdd.pricing import apply_discount\n\n"
+    "    assert apply_discount(total([10.0]), 'SAVE10') == 9.0\n"
+)
+
+
+def appending_red(*, test: str = NEW_TEST) -> Step:
+    """The red step of the unit, which also appends one new test to the base's `tests/test_pricing.py`."""
+    from ..conftest import FIXTURE
+
+    base = (FIXTURE / PRICING).read_text()
+    red = red_step()
+    return Step(
+        writes={**red.writes, PRICING: base + "\n\n" + test}, structured=red.structured,
+    )  # fmt: skip
+
+
+@pytest.fixture
+def appended_repo(carry_repo):
+    """`carry_repo` whose base tests are the real ones of `tests/test_pricing.py`, a file the unit appends to."""
+    carry_repo.update(file=PRICING, ids=dict(OLD_PRICING), tree=None)
+    return carry_repo
+
+
+def test_scn_ver_416_a_test_file_the_unit_only_appended_to_carries_its_criteria_through_the_real_ladder(
+    run_l4, valid_spec, web_repo, appended_repo
+):
+    import json
+
+    run = run_l4([appending_red(), web_green(), ui_test(UNKNOWN, 'data-testid="coupon"', "slot"), JUDGE], **web_repo)
+    assert run.code == 0, run.outcome
+    assert PRICING in run.raw(run.tdd.origin, "diff", "--name-only", "main", BRANCH).split()  # the file is changed
+    made = {e["criterion"]: e for e in run.events("verify.generated")}
+    assert made[KNOWN]["status"] == "carried" and made[KNOWN]["appended"] == [PRICING]
+    assert made[KNOWN]["covered_by"] == [OLD_PRICING[KNOWN]] and made[KNOWN]["attempts"] == 0
+    assert made[UNKNOWN]["status"] == "accepted" and "appended" not in made[UNKNOWN]  # the writer's own test
+    [asked] = writer_requests(run)
+    assert UNKNOWN in asked and KNOWN not in asked  # only the other gap goes to the writer
+    text = run.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {KNOWN} | carried"))
+    assert f"the unit only added tests to {PRICING}; a note, not a hold (L4-VER-086)" in row
+    body = json.loads(run.pushed(f"{UNIT_DIR}/.l4/evidence/round-1/verdict.json"))
+    assert {g["criterion"]: g.get("appended") for g in body["generated"]}[KNOWN] == [PRICING]
+    assert not [h for h in body["holds"] if KNOWN in h] and run.events("question.raised") == []
+
+
+def test_scn_ver_421_step_1s_record_of_the_round_decides_through_outcome_into_the_carry(
+    run_l4, valid_spec, web_repo, appended_repo, monkeypatch
+):
+    from l4.verifier import base_tests
+    from l4.verifier.carry_appended import Step1Run
+
+    seen: list[Step1Run | None] = []
+    real = base_tests.check_base_tests
+
+    def checked(*args, **kwargs):
+        outcome = real(*args, **kwargs)
+        seen.append(outcome.base_run)
+        outcome.base_run = None
+        return outcome
+
+    monkeypatch.setattr(base_tests, "check_base_tests", checked)
+    refused = [appending_red(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE]
+    run = run_l4(refused, **web_repo)  # step 1's record is gone: the file is not known to have run at its base version
+    assert run.code == 11, run.outcome
+    made = {e["criterion"]: e["status"] for e in run.events("verify.generated")}
+    assert made == {KNOWN: "accepted", UNKNOWN: "uncollectable"}  # nothing carried, as in 0.4.60
+    [record] = seen
+    assert record is not None and PRICING in record.reverted  # the real record lists the file `reverted`
+    assert not (record.failing or record.not_run or record.flaky)
+
+
+@pytest.mark.parametrize("field", ["failing", "not_run", "flaky"])
+def test_scn_ver_421_a_tracing_test_among_failing_not_run_or_flaky_at_step_1_keeps_the_hold(
+    run_l4, valid_spec, web_repo, appended_repo, monkeypatch, field
+):
+    import dataclasses as dc
+
+    from l4.verifier import base_tests
+
+    real = base_tests.check_base_tests
+
+    def checked(*args, **kwargs):
+        outcome = real(*args, **kwargs)
+        outcome.base_run = dc.replace(outcome.base_run, **{field: (OLD_PRICING[KNOWN],)})
+        return outcome
+
+    monkeypatch.setattr(base_tests, "check_base_tests", checked)
+    run = run_l4(
+        [appending_red(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE],
+        **web_repo,
+    )
+    assert run.code == 11, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")} == {
+        KNOWN: "accepted", UNKNOWN: "uncollectable",
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["an import", "a tracing test"],
+    ids=["import", "new-test-traces-a-criterion"],
+)
+def test_scn_ver_419_an_appended_test_that_is_not_a_plain_test_keeps_the_hold_through_the_real_ladder(
+    run_l4, valid_spec, web_repo, appended_repo, variant
+):
+    """Each variant is refused by one rule of the pure function alone: a line outside the tests, a new test of the file
+    that traces a criterion (so not every tracing test of the file is an old one). A decorator, a hook or a `vi.mock` is
+    a case of the pure function's own tests."""
+    red = appending_red(test={
+        "an import": NEW_TEST,
+        "a tracing test": NEW_TEST.replace("test_total_of", f"test_{UNKNOWN.replace('-', '_')}_total_of"),
+    }[variant])  # fmt: skip
+    if variant == "an import":
+        red.writes[PRICING] = "import os\n" + red.writes[PRICING]
+    run = run_l4(
+        [red, web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE], **web_repo
+    )
+    assert run.code == 11, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")}[KNOWN] == "accepted"  # not carried
+
+
+def test_scn_ver_426_a_reused_round_keeps_the_carry_and_the_row_still_names_the_file(
+    run_l4, valid_spec, web_repo, appended_repo, tdd_repo, raw
+):
+    import json
+
+    from ..orchestrator.conftest import edit_questions_on_origin
+
+    first = run_l4([appending_red(), web_green(), no_test(UNKNOWN), JUDGE], **web_repo)  # KNOWN carried, UNKNOWN held
+    assert first.code == 11, first.outcome
+    edit_questions_on_origin(tdd_repo, raw, status="answered", answer="accept: a unit test covers it")
+    second = run_l4([], **web_repo)  # the stored round is reused: nothing is decided again
+    assert second.code == 0, second.outcome
+    assert second.adapter.requests == []
+    carried = [e for e in second.events("verify.generated") if e["status"] == "carried"]
+    assert [e["criterion"] for e in carried] == [KNOWN]  # recorded once, by round 1
+    body = json.loads(second.pushed(f"{UNIT_DIR}/.l4/evidence/round-2/verdict.json"))
+    assert {g["criterion"]: g.get("appended") for g in body["generated"]}[KNOWN] == [PRICING]
+    text = second.pushed(f"{UNIT_DIR}/verification.md")
+    row = next(line for line in text.splitlines() if line.startswith(f"| {KNOWN} | carried"))
+    assert (
+        f"carried from the base: {OLD_PRICING[KNOWN]} (" in row and f"the unit only added tests to {PRICING}; " in row
+    )
+    assert "reused (round 1)" in text

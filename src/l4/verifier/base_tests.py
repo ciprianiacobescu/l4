@@ -34,6 +34,7 @@ from l4.implementer.workbench import BaseRun, Workbench
 from l4.security.protected import glob_match
 from l4.vcs.authorship import SHA, is_harness
 from l4.verifier.audit import BASE_RUN_ENV, _collection_error
+from l4.verifier.carry_appended import Step1Run
 from l4.verifier.evidence import read_verdict
 from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, BASE_TESTS_GATE
 from l4.verifier.gate_repeat import JS_EXTENSIONS
@@ -634,6 +635,7 @@ def check_base_tests(
     for task, count in sorted(over.items()):
         note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
     _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors, support)
+    ran = Step1Run(tuple(reverted), tuple(judged.failing), tuple(judged.not_run), tuple(flaky))  # what the event says
     record: dict[str, Any] = {
         "base_sha": ctx.base_sha,
         "command": command,
@@ -651,6 +653,7 @@ def check_base_tests(
         base_tests=record,
         failures=records,
         base_report=r0 if full else None,
+        base_run=ran,
     )
 
 

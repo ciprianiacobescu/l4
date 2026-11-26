@@ -121,9 +121,10 @@ def _generated_rows(result: VerifyResult) -> list[str]:
         if g.covered_by:  # L4-VER-067: the writer's answer and step 4's, both visible
             shown = ", ".join(g.covered_by[:3]) + (f" (+{len(g.covered_by) - 3} more)" if len(g.covered_by) > 3 else "")
             if g.status == "carried":  # L4-VER-086: no writer ran; the base's own tests are the evidence
+                added = f"the unit only added tests to {', '.join(g.appended)}; " if g.appended else ""  # L4-VER-097
                 reason = (
                     f"carried from the base: {shown} (the scenario and these tests are the base's, and they pass); "
-                    "a note, not a hold (L4-VER-086)"
+                    f"{added}a note, not a hold (L4-VER-086)"
                 )
             else:
                 reason = f"{reason + '; ' if reason else ''}covered by step 4: {shown}; a note, not a hold (L4-VER-067)"
@@ -385,6 +386,9 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     data = dataclasses.asdict(g)
     data["tests"], data["artifacts"] = list(g.tests), list(g.artifacts)
     data["covered_by"] = list(g.covered_by)
+    data["appended"] = list(g.appended)
+    if not data["appended"]:  # an optional key: a round that appended nothing is stored as 0.4.60 stored it
+        del data["appended"]
     data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]  # a copy `generate` already bounded and redacted
     if not data["code"]:
         del data["code"]

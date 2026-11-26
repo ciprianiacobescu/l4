@@ -281,6 +281,32 @@ def test_the_row_of_a_carried_outcome_says_it_is_carried_from_the_base_and_not_s
     assert "carried from the base: tests.a::t1 (the scenario" in row and "more" not in row
 
 
+def test_scn_ver_426_the_row_of_a_carried_outcome_names_the_files_the_unit_only_added_tests_to():
+    carried = GeneratedOutcome(
+        CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",),
+        appended=("web/src/a.test.ts", "tests/test_b.py"),
+    )  # fmt: skip
+    row = next(line for line in render_verification_md(result(generated=[carried])).splitlines() if "| carried" in line)
+    assert (
+        "carried from the base: tests.a::t1 (the scenario and these tests are the base's, and they pass); "
+        "the unit only added tests to web/src/a.test.ts, tests/test_b.py; a note, not a hold (L4-VER-086)" in row
+    )
+    plain = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",))
+    row = next(line for line in render_verification_md(result(generated=[plain])).splitlines() if "| carried" in line)
+    assert "only added tests" not in row  # the 0.4.60 row, word for word
+
+
+def test_scn_ver_426_appended_is_stored_only_when_there_is_one_and_a_reused_round_restores_it():
+    carried = GeneratedOutcome(
+        CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",), appended=("web/src/a.test.ts",)
+    )
+    body = json.loads(json.dumps(verdict_json(result(generated=[carried]))))
+    assert body["generated"][0]["appended"] == ["web/src/a.test.ts"]
+    assert restore_round(body, UNIT, 2).generated == [carried]
+    plain = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",))
+    assert "appended" not in json.loads(json.dumps(verdict_json(result(generated=[plain]))))["generated"][0]
+
+
 def test_verdict_json_stores_a_carried_outcome_and_a_reused_round_restores_it():  # SCN-VER-349
     carried = GeneratedOutcome(CID, "carried", reason="carried from the base", covered_by=("tests.a::t1",))
     body = json.loads(json.dumps(verdict_json(result(generated=[carried]))))

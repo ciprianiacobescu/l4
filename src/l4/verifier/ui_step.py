@@ -232,6 +232,7 @@ def carried_from_base(
     file_of: Callable[[str], str | None],
     changed: Collection[str],
     rejected: Collection[str],
+    appended: Callable[[str, str], bool] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """criterion -> the sorted ids of its tracing tests, for each gap that step 5 carries from the base instead of
     asking the writer (L4-VER-086). All four hold, and any doubt keeps the gap:
@@ -240,7 +241,8 @@ def carried_from_base(
        `pass_to_pass`, no note, within the cap and adequate; every test listed as not evidence for it is a passing
        candidate over the cap (`capped`);
     3. the file of every such test, listed or ignored, is found (`file_of`) and is not one of the files the unit
-       `changed` since its merge base;
+       `changed` since its merge base, unless `appended(test id, file)` accepts that changed file: the unit only
+       added whole new tests to it (L4-VER-097, L4-VER-098; none by default);
     4. the criterion is not in `rejected` (`rejected_ui_criteria`)."""
     evidence = {e.criterion: e for e in trace}
     out: dict[str, tuple[str, ...]] = {}
@@ -256,8 +258,13 @@ def carried_from_base(
         if not {test for test, _ in e.ignored} <= {t.id for t in e.capped}:
             continue
         ids = sorted(t.id for t in e.tests)
-        files = [file_of(test) for test in (*ids, *sorted(test for test, _ in e.ignored))]
-        if any(f is None or f in changed for f in files):
+        tests = (*ids, *sorted(test for test, _ in e.ignored))
+        files = [file_of(test) for test in tests]
+        if any(f is None for f in files):
+            continue
+        if any(
+            f in changed and (appended is None or not appended(t, str(f))) for t, f in zip(tests, files, strict=True)
+        ):
             continue
         out[c.id] = tuple(ids)
     return out

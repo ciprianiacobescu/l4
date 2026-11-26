@@ -3,8 +3,10 @@
 Condition 3 of the carry (L4-VER-086) wants the files of a criterion's tracing tests to be the base's. A file that the
 unit changed only by adding new tests keeps every old test as it was, and the rule here proves that from the two texts:
 no deleted line, every old test's block is the base's text, and the lines outside the tests are the base's, so that what
-was added is whole new tests. Pure: two texts, names and the facts of the diff; nothing is read from git here, and
-nothing raises (any failure is False, the criterion stays a gap).
+was added is whole new tests. `appended_only` is pure: two texts, names and the facts of the diff, and it never
+raises (any failure is False, the criterion stays a gap). `AppendedFiles` is the glue step 5 hands to
+`ui_step.carried_from_base`: it reads the facts and the two blobs from git, once per file, and only for a file that a
+criterion's other conditions asked about.
 
 JavaScript and TypeScript read a block as `test_locate` does and require it to be a call line that names the test, found
 once and closed. Python reads the AST. Step 1's run of the base's file on the unit's code (the other leg of the rule) is
@@ -14,11 +16,14 @@ once and closed. Python reads the AST. Step 1's run of the base's file on the un
 import ast
 import io
 import tokenize
-from collections.abc import Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from l4.evidence.collect import MAX_SOURCE_BYTES
+from l4.gates.junit import TestReport
 from l4.implementer.tamper import names_test_id
-from l4.implementer.test_locate import call_span, outside_tests
+from l4.implementer.test_locate import call_span, outside_tests, test_names_of
+from l4.vcs.git import Git
 from l4.verifier.gate_repeat import JS_EXTENSIONS
 from l4.verifier.scan import _qualified
 
@@ -36,7 +41,7 @@ class FileFacts:
 
 
 @dataclass(frozen=True)
-class BaseRun:
+class Step1Run:
     """The four lists of step 1's `verify.base_tests` event of this round (L4-VER-097 (b)): the files it ran at their
     base version on the unit's code and the test ids that failed there, did not run there or were flaky."""
 
@@ -46,7 +51,7 @@ class BaseRun:
     flaky: tuple[str, ...] = ()
 
 
-def base_run_covers(run: BaseRun | None, path: str, traced: Iterable[str]) -> bool:
+def base_run_covers(run: Step1Run | None, path: str, traced: Iterable[str]) -> bool:
     """(b): step 1 ran `path` at its base version on the unit's code, and no tracing test of the file (any criterion's)
     is among what failed, did not run or was flaky there. No record of step 1 (it did not run, or stopped early) says
     no."""
@@ -287,3 +292,63 @@ def appended_only(
     except Exception:  # noqa: BLE001 - a doubt is a gap, never a crash of the verifier
         return False
     return False
+
+
+MAX_BLOB_BYTES = MAX_SOURCE_BYTES  # a test file read for this rule is at most as big as any source the harness reads
+
+
+def _blob(git: Git, rev: str, path: str) -> str | None:
+    """The text of `path` at `rev` from git, strictly UTF-8 and at most `MAX_BLOB_BYTES` bytes; else None."""
+    data = git.run_bytes("show", f"{rev}:{path}", check=False)
+    if not data or len(data) > MAX_BLOB_BYTES:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+class AppendedFiles:
+    """The predicate `carried_from_base(appended=...)` takes: `__call__(test id, file)` says whether the changed `file`
+    that holds the test meets L4-VER-097 / L4-VER-098, decided once per file; `accepted` lists the files it said yes to.
+    `files`: test id -> the file that holds it, for every test step 4 traced to any criterion (listed or ignored);
+    `reports`: the step-3 reports at the head (the unit gate's and the end-to-end gate's); `paths`: the work tree's
+    files, read only when a name list is needed; `facts`: `playwright.changed_file_facts`, read only when asked."""
+
+    def __init__(
+        self, git: Git, base_sha: str, head: str, *, run: Step1Run | None, files: Mapping[str, str | None],
+        reports: Sequence[TestReport | None], paths: Callable[[], Collection[str]],
+        facts: Callable[[], Mapping[str, FileFacts]],
+    ) -> None:  # fmt: skip
+        self._git, self._base, self._head, self._run = git, base_sha, head, run
+        self._files, self._reports, self._paths, self._facts = files, reports, paths, facts
+        self._decided: dict[str, bool] = {}
+        self.accepted: set[str] = set()
+
+    def __call__(self, test_id: str, file: str) -> bool:
+        if file not in self._decided:
+            try:
+                self._decided[file] = self._decide(file)
+            except Exception:  # noqa: BLE001 - a doubt is a gap, never a crash of the verifier
+                self._decided[file] = False
+            if self._decided[file]:
+                self.accepted.add(file)
+        return self._decided[file]
+
+    def _decide(self, file: str) -> bool:
+        traced = sorted(i for i, f in self._files.items() if f == file)
+        if not base_run_covers(self._run, file, traced):  # (b), the cheap leg, before any blob is read
+            return False
+        facts = self._facts().get(file)
+        if facts is None or facts.status != "M" or facts.deleted != 0:
+            return False
+        base, head = _blob(self._git, self._base, file), _blob(self._git, self._head, file)
+        if base is None or head is None:
+            return False
+        names: list[str] = []
+        if file.rsplit(".", 1)[-1] in JS_EXTENSIONS:
+            tree = self._paths()
+            for report in self._reports:
+                if report is not None:
+                    names += test_names_of(file, report.tests, tree)
+        return appended_only(file, base, head, traced, list(dict.fromkeys(names)), facts)

@@ -25,6 +25,7 @@ from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.base import Criterion
 from l4.vcs.git import Git
+from l4.verifier.carry_appended import FileFacts
 
 BASE_DIR = "e2e-base"
 ARTIFACT_DIR = "test-results"
@@ -37,6 +38,25 @@ def unit_changed_files(git: Git, base_sha: str, head: str = "HEAD") -> list[str]
     """Paths the unit branch changed since its merge base (`Preconditions.base_sha`), renames as delete plus add."""
     raw = git.run_bytes("diff", "--name-only", "-z", "--no-renames", base_sha, head)
     return sorted({name.decode("utf-8", "surrogateescape") for name in raw.split(b"\0") if name})
+
+
+def changed_file_facts(git: Git, base_sha: str, head: str = "HEAD") -> dict[str, FileFacts]:
+    """For each path the unit changed since its merge base: the `--raw` status letter and the number of deleted lines of
+    `--numstat` (None for a binary file), renames as delete plus add (L4-VER-097 (a)). A modified file whose mode
+    changed has the status `T`, so it is never `M`. Empty when git cannot say."""
+    raw = git.run_bytes("diff", "--raw", "--no-abbrev", "--no-renames", "-z", base_sha, head, check=False).split(b"\0")
+    letters: dict[str, str] = {}
+    for meta, path in zip(raw[0::2], raw[1::2], strict=False):
+        fields = meta.decode("ascii", "replace").lstrip(":").split(" ")
+        if len(fields) == 5 and path:
+            letter = "T" if fields[0] != fields[1] and fields[4] == "M" else fields[4]
+            letters[path.decode("utf-8", "surrogateescape")] = letter
+    deleted: dict[str, int | None] = {}
+    for record in git.run_bytes("diff", "--numstat", "--no-renames", "-z", base_sha, head, check=False).split(b"\0"):
+        parts = record.decode("utf-8", "surrogateescape").split("\t", 2)
+        if len(parts) == 3:
+            deleted[parts[2]] = int(parts[1]) if parts[1].isdigit() else None
+    return {path: FileFacts(letter, deleted.get(path)) for path, letter in letters.items() if path in deleted}
 
 
 def ui_files(changed: Iterable[str], ui_paths: Sequence[str]) -> list[str]:

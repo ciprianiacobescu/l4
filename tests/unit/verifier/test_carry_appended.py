@@ -8,7 +8,7 @@ import pytest
 
 from l4.implementer.test_locate import call_span, window
 from l4.implementer.test_locate import test_names_of as names_in_file
-from l4.verifier.carry_appended import BaseRun, FileFacts, appended_only, base_run_covers, is_closed
+from l4.verifier.carry_appended import FileFacts, Step1Run, appended_only, base_run_covers, is_closed
 
 TS = "web/src/journey.test.ts"
 PREFIX = "web.src.journey.test.ts::"
@@ -251,12 +251,12 @@ def test_two_sibling_tests_with_one_title_are_not_found():
 
 def test_the_base_file_must_have_been_run_by_step_1_and_no_traced_test_failed_there():
     traced = [f"{PREFIX}C-00000003 old test 3"]
-    assert base_run_covers(BaseRun(reverted=(TS,)), TS, traced)
+    assert base_run_covers(Step1Run(reverted=(TS,)), TS, traced)
     assert not base_run_covers(None, TS, traced)  # step 1 did not run
-    assert not base_run_covers(BaseRun(reverted=("web/src/other.test.ts",)), TS, traced)  # kept at head, or not run
+    assert not base_run_covers(Step1Run(reverted=("web/src/other.test.ts",)), TS, traced)  # kept at head, or not run
     for field in ("failing", "not_run", "flaky"):
-        assert not base_run_covers(BaseRun(reverted=(TS,), **{field: tuple(traced)}), TS, traced)
-    assert base_run_covers(BaseRun(reverted=(TS,), failing=("web.src.other.test.ts::x",)), TS, traced)
+        assert not base_run_covers(Step1Run(reverted=(TS,), **{field: tuple(traced)}), TS, traced)
+    assert base_run_covers(Step1Run(reverted=(TS,), failing=("web.src.other.test.ts::x",)), TS, traced)
 
 
 # -- SCN-VER-422: other files and other languages --------------------------------------------------------------------
@@ -417,3 +417,96 @@ def test_the_names_of_a_file_in_a_report_are_read_through_file_of_id():
     assert names_in_file(TS, ids, paths) == ["one", "two > three"]
     assert names_in_file("tests/test_page.py", ids, paths) == ["test_y"]
     assert names_in_file("web/src/none.test.ts", ids, paths) == []
+
+
+# -- the facts and the blobs, read from a real repository (L4-VER-097 (a), SCN-VER-422) -------------------------------
+
+
+@pytest.fixture
+def repo(make_repo, raw, git_for):
+    """`web/src/journey.test.ts` (the base's file), a binary file, a big one, a file to rename and one to delete."""
+    path = make_repo("facts")
+
+    class Repo:
+        root, git = path, git_for(path)
+
+        def write(self, name: str, data: str | bytes) -> None:
+            target = path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data if isinstance(data, bytes) else data.encode())
+
+        def commit(self, message: str) -> str:
+            raw(path, "add", "-A")
+            raw(path, "commit", "-q", "-m", message)
+            return raw(path, "rev-parse", "HEAD").strip()
+
+    r = Repo()
+    r.write(TS, BASE)
+    r.write("web/src/binary.test.ts", b"\x00\x01\x02\n")
+    r.write("web/src/gone.test.ts", "test('x', () => {});\n")
+    r.write("web/src/moved.test.ts", BASE)
+    r.write("web/src/exec.test.ts", "test('x', () => {});\n")
+    r.base = r.commit("base")
+    return r
+
+
+def test_the_facts_of_a_diff_say_modified_added_deleted_binary_renamed_and_mode_changed(repo, raw):
+    from l4.verifier.playwright import changed_file_facts
+
+    repo.write(TS, flat(new=new_block()))  # +11 -0
+    repo.write("web/src/binary.test.ts", b"\x00\x01\x02\x03\n")
+    repo.write("web/src/new.test.ts", "test('y', () => {});\n")
+    (repo.root / "web/src/gone.test.ts").unlink()
+    (repo.root / "web/src/moved.test.ts").rename(repo.root / "web/src/moved2.test.ts")
+    (repo.root / "web/src/exec.test.ts").chmod(0o755)
+    head = repo.commit("the unit")
+    facts = changed_file_facts(repo.git, repo.base, head)
+    assert facts[TS] == FileFacts("M", 0)
+    assert facts["web/src/new.test.ts"] == FileFacts("A", 0)
+    assert facts["web/src/gone.test.ts"].status == "D"
+    assert facts["web/src/binary.test.ts"] == FileFacts("M", None)
+    assert facts["web/src/moved.test.ts"].status == "D" and facts["web/src/moved2.test.ts"].status == "A"  # no rename
+    assert facts["web/src/exec.test.ts"].status == "T"  # a mode change is not a plain modification
+    repo.write(TS, flat(new=new_block()).replace("const done = 1;\n", ""))
+    assert changed_file_facts(repo.git, repo.base, repo.commit("a line less"))[TS] == FileFacts("M", 1)
+    assert changed_file_facts(repo.git, "0" * 40, head) == {}  # git cannot say
+
+
+def glue(repo, head, *, run=None, traced=None, reports=()):
+    from l4.gates.junit import TestCase, TestReport
+    from l4.verifier.carry_appended import AppendedFiles
+    from l4.verifier.playwright import changed_file_facts
+
+    ids = traced if traced is not None else [f"{PREFIX}C-00000003 old test 3"]
+    report = TestReport({i: TestCase(i, "passed") for i in [*ids, *(f"{PREFIX}{n}" for n in reports)]})
+    return AppendedFiles(
+        repo.git, repo.base, head, run=run or Step1Run(reverted=(TS,)), files=dict.fromkeys(ids, TS),
+        reports=[report, None], paths=lambda: [TS], facts=lambda: changed_file_facts(repo.git, repo.base, head),
+    )  # fmt: skip
+
+
+def test_the_glue_reads_git_decides_once_per_file_and_remembers_what_it_accepted(repo):
+    repo.write(TS, flat(new=new_block()))
+    head = repo.commit("the unit adds one test")
+    only = glue(repo, head, reports=["C-0badf00d the new test"])
+    test = f"{PREFIX}C-00000003 old test 3"
+    assert only(test, TS) is True and only(test, TS) is True and only.accepted == {TS}
+    assert glue(repo, head, run=Step1Run())(test, TS) is False  # step 1 did not run the base's file
+    assert glue(repo, head, run=Step1Run(reverted=(TS,), failing=(test,)))(test, TS) is False
+    refused = glue(repo, head)  # the report of the head lacks the new test: its lines are outside every block
+    assert refused(test, TS) is False and refused.accepted == set()
+
+
+def test_scn_ver_422_a_binary_or_oversized_or_not_utf8_blob_keeps_the_hold(repo):
+    from l4.verifier.carry_appended import MAX_BLOB_BYTES
+
+    for data in (flat(new=new_block()) + "// é\n".encode("latin-1").decode("latin-1"), None):
+        if data is None:
+            continue
+    repo.write(TS, flat(new=new_block()).encode() + b"\xff\xfe\n")  # not UTF-8
+    head = repo.commit("not utf-8")
+    assert glue(repo, head, reports=["C-0badf00d the new test"])(f"{PREFIX}C-00000003 old test 3", TS) is False
+    big = flat(new=new_block()) + "// " + "x" * MAX_BLOB_BYTES + "\n"
+    repo.write(TS, big)
+    head = repo.commit("oversized")
+    assert glue(repo, head, reports=["C-0badf00d the new test"])(f"{PREFIX}C-00000003 old test 3", TS) is False

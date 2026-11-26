@@ -596,6 +596,68 @@ def test_scn_ver_345_a_file_the_unit_changed_or_that_is_not_found_keeps_the_gap(
     assert carry(two, files={BASE_TEST: BASE_FILE}) == {}  # one test's file not found is enough
 
 
+def appended_carry(accept, *, changed=(BASE_FILE,), trace=None, rejected=frozenset(), unchanged=UNCHANGED, gaps=None):
+    """`carry` with the predicate of L4-VER-097: it is asked `(test id, file)` for a changed file only."""
+    asked: list[tuple[str, str]] = []
+
+    def appended(test: str, file: str) -> bool:
+        asked.append((test, file))
+        return accept(test, file)
+
+    found = carried_from_base(
+        gaps if gaps is not None else [crit(CID)], base_tests(p2p()) if trace is None else trace, unchanged,
+        FILES.get, changed, rejected, appended=appended,
+    )  # fmt: skip
+    return found, asked
+
+
+def test_scn_ver_416_a_changed_file_that_the_predicate_accepts_is_carried():
+    found, asked = appended_carry(lambda test, file: True)
+    assert found == {CID: (BASE_TEST,)} and asked == [(BASE_TEST, BASE_FILE)]
+
+
+def test_scn_ver_417_a_changed_file_that_the_predicate_refuses_keeps_the_gap():
+    found, asked = appended_carry(lambda test, file: False)
+    assert found == {} and asked == [(BASE_TEST, BASE_FILE)]
+
+
+def test_the_predicate_is_asked_only_about_changed_files_and_only_when_the_other_conditions_hold():
+    found, asked = appended_carry(lambda *_: True, changed=["src/other.py"])
+    assert found == {CID: (BASE_TEST,)} and asked == []  # nothing changed among the tests' files: not asked
+    for kwargs in (
+        {"unchanged": frozenset()}, {"rejected": frozenset({CID})}, {"trace": base_tests(p2p(proof="red_assertion"))},
+        {"trace": base_tests(p2p(), state="fail")},
+    ):  # fmt: skip
+        found, asked = appended_carry(lambda *_: True, **kwargs)
+        assert found == {} and asked == []  # C1, C4, C2 are decided first and the file is never read
+
+
+def test_scn_ver_423_every_other_condition_still_decides_file_by_file():
+    wide = {"tests.test_wide::test_all": "tests/test_wide.py"}
+    two_files = base_tests(p2p(), p2p("tests.test_wide::test_all"))
+
+    def accept_only(only: str):
+        return lambda test, file: file == only
+
+    both = (BASE_FILE, "tests/test_wide.py")
+    found, asked = appended_carry(accept_only(BASE_FILE), changed=both, trace=two_files)
+    assert found == {}  # C1's second file fails the rule: one file that is changed and neither is a gap
+    assert {file for _, file in asked} >= {BASE_FILE}
+    found, _ = appended_carry(lambda *_: True, changed=both, trace=two_files)
+    assert found == {CID: (BASE_TEST, "tests.test_wide::test_all")}
+    assert FILES.items() >= wide.items()
+    assert carried_from_base([crit(CID)], two_files, UNCHANGED, FILES.get, both, frozenset()) == {}  # no predicate
+
+
+def test_a_changed_file_that_is_not_found_is_never_asked_and_keeps_the_gap():
+    found, asked = appended_carry(lambda *_: True, changed=[BASE_FILE])
+    assert found == {CID: (BASE_TEST,)}
+    found = carried_from_base(
+        [crit(CID)], base_tests(p2p()), UNCHANGED, {}.get, [BASE_FILE], frozenset(), appended=lambda *_: True
+    )
+    assert found == {}  # a file that is not found is a gap, whatever the predicate says
+
+
 def test_scn_ver_347_a_rejected_criterion_is_never_carried():
     assert carry(rejected=frozenset({CID})) == {}
     assert carry(rejected=frozenset({OTHER})) == {CID: (BASE_TEST,)}
