@@ -12,11 +12,12 @@ own `questions.md`, and no clarifier: a human answers. A fix unit is an OpenSpec
 
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+from l4.agents.base import STALL_KINDS
 from l4.agents.factory import Selected
 from l4.ci.unfixed import CiHistory, ci_history
 from l4.clarifier.actor import answer_actor
@@ -27,8 +28,15 @@ from l4.config.defaults import cache_root
 from l4.config.schema import L4Config
 from l4.exitcodes import ExitCode, L4Exit
 from l4.implementer.held_patch import NearPass
-from l4.implementer.loop import Escalate, EscalationRequest, run_task
-from l4.implementer.tasks import open_blocking_questions, questions_hold, select_next_step, unselectable
+from l4.implementer.loop import Escalate, EscalationRequest, run_task, stall_plan_for
+from l4.implementer.tasks import (
+    open_blocking_questions,
+    questions_hold,
+    select_next_step,
+    tick_completed_parents,
+    unselectable,
+    waiting_questions,
+)
 from l4.implementer.tdd import BaselineFailed, PlantedLink, RoleLimit
 from l4.implementer.workbench import PreviousAttempt, Workbench, clip_subject, make_workbench
 from l4.sandbox.caches import mount_caches
@@ -55,14 +63,20 @@ from l4.specs.base import (
 from l4.specs.criteria import kiro_criteria, openspec_criteria
 from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the prompt, red and doctor read it here
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
-from l4.specs.fixmark import read_fix_marker, split_fix_name
+from l4.specs.fixmark import FixMarker, read_fix_marker, split_fix_name
 from l4.specs.followup import feedback_home, parent_folder, read_follow_up_marker
-from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, blocked_tasks, is_answered
+from l4.specs.questions import QUESTIONS_FILENAME, QuestionsFile, answer_sha256, blocked_tasks, holds, is_answered
 from l4.state.budget import FEEDBACK_ROUNDS_EXHAUSTED, feedback_round_limit, feedback_rounds_left
 from l4.state.fold import UnitState, fold
 from l4.state.ledger import LedgerEvent, ledger_path, read_ledger
 from l4.state.lifecycle import Trigger
-from l4.state.next_step import CI_NOT_FIXED, JUDGE_VIEW_REJECTED, NO_CONVERTIBLE_FINDING, UNCONVERTED_AND_JUDGE_VIEW
+from l4.state.next_step import (
+    CI_NOT_FIXED,
+    JUDGE_VIEW_REJECTED,
+    NO_CONVERTIBLE_FINDING,
+    SKIPPED_TESTS_REJECTED,
+    UNCONVERTED_AND_JUDGE_VIEW,
+)
 from l4.vcs.authorship import commit_records, is_harness_strict
 from l4.vcs.git import Git
 from l4.vcs.trailers import CommitTrailers
@@ -75,7 +89,7 @@ from l4.verifier.provenance import introduction_problem
 from l4.verifier.repairs import log_tail, repair_candidates
 from l4.verifier.report import write_round_evidence
 from l4.verifier.types import Finding, FixDecision, Severity, Verdict, VerifyResult
-from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE
+from l4.verifier.verdicts import JUDGE_VIEW_REJECTED_TITLE, SKIPPED_REJECTED_TITLE
 
 
 def is_fix_unit(ref: UnitRef) -> bool:
@@ -314,7 +328,15 @@ def _section(ctx: HookContext, fix: UnitRef, ids: Sequence[str]) -> str | None:
     )
 
 
-def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: Selected | None = None) -> Workbench:
+def _child_workbench(
+    ctx: HookContext,
+    fix: UnitRef,
+    iteration: int,
+    selected: Selected | None = None,
+    retried: Container[str] = frozenset(),
+) -> Workbench:
+    """`retried`: the tasks of this fix unit that already moved after a limit. A stall of one of them is not a limit of
+    its profile (L4-IMP-115): the second limit parks the unit on a path that discards nothing."""
     s = ctx.services
     current = ctx.shared.get("implementer")  # the orchestrator's `_select`: the profile in use after any fallback
     if selected is None:
@@ -324,7 +346,7 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: S
     family = family_of(ctx)
     # the parent and every sibling fix unit are the harness's while this one runs; the running one is `unit_dir`
     others = tuple(u.path.resolve().relative_to(root).as_posix() for u in family.units() if u.name != fix.name)
-    return make_workbench(
+    wb = make_workbench(
         cfg=ctx.cfg, app=s.app, ref=fix, provider=family, worktree=s.worktree, git=s.git,
         ledger=s.ledger, sandbox=s.sandbox, selected=selected, iteration=iteration, push=ctx.push,
         event_context={"fix_unit": fix.name}, extra_unit_dirs=others, family_glob=f"{parent_rel}-fix-*",
@@ -333,10 +355,23 @@ def _child_workbench(ctx: HookContext, fix: UnitRef, iteration: int, selected: S
         ),
         ledger_rel=ledger_path(s.ref.path, s.app.run_id).resolve().relative_to(root).as_posix(),
     )  # fmt: skip
+    veto = ctx.shared.get("task_veto")
+    wb.stall_plan = stall_plan_for(
+        wb, s.factory, task_veto=veto if veto is not None else (lambda key: None),
+        movable=lambda key: key not in retried and "fall_back" in ctx.shared,
+    )  # fmt: skip
+    return wb
 
 
 def _fall_back(
-    ctx: HookContext, wb: Workbench, fix: UnitRef, exc: RoleLimit, task: str, iteration: int, on: str | None = None
+    ctx: HookContext,
+    wb: Workbench,
+    fix: UnitRef,
+    exc: RoleLimit,
+    task: str,
+    iteration: int,
+    on: str | None = None,
+    retried: Container[str] = frozenset(),
 ) -> Workbench:
     """Contract C21: a limit in a fix task goes through the orchestrator (`ctx.shared["fall_back"]`, its
     `switch_profile`), which cools the profile down and selects the next one of the chain, so the run's profiles,
@@ -349,16 +384,18 @@ def _fall_back(
     wb.discard_changes()
     previous = on or wb.selected.profile_name
     ctx.shared["fall_back"](exc.result, task)
-    fresh = _child_workbench(ctx, fix, iteration)
+    fresh = _child_workbench(ctx, fix, iteration, retried=retried)
     fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
     kind = limit.kind if limit is not None else exc.result.status
     fresh.previous_attempt = PreviousAttempt(
-        previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind == "silent" else None
+        previous, kind, task, detail=limit.raw_excerpt if limit is not None and kind in STALL_KINDS else None
     )
     return fresh
 
 
-def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str, str]) -> Escalate | None:
+def _escalation(
+    ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str, str], retried: Container[str] = frozenset()
+) -> Escalate | None:
     """The hook of `run_task` for a fix unit's task (fix-unit-escalate D2): the orchestrator's selection step
     (`ctx.shared["escalate"]`) picks the next usable profile, and the task's child workbench is rebuilt on it, with the
     baselines carried over and the earlier failures told to the new profile. `moved` records the profile each task
@@ -372,7 +409,7 @@ def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str,
         chosen = choose(request)
         if isinstance(chosen, str):
             return chosen
-        fresh = _child_workbench(ctx, fix, iteration, selected=chosen)
+        fresh = _child_workbench(ctx, fix, iteration, selected=chosen, retried=retried)
         moved[request.task] = chosen.profile_name
         fresh.baselines, fresh.static_baselines, fresh.gate_peak = wb.baselines, wb.static_baselines, wb.gate_peak
         fresh.previous_attempt = PreviousAttempt(
@@ -381,6 +418,63 @@ def _escalation(ctx: HookContext, fix: UnitRef, iteration: int, moved: dict[str,
         return fresh
 
     return escalate
+
+
+def _retry_reason(ctx: HookContext, name: str) -> str:
+    """The reason of the last `l4 retry` that asked to close the fix unit `name` (its `unit.retried`)."""
+    events = read_ledger(ctx.services.ref.path).events
+    asked = [e for e in events if e.type == "unit.retried" and e.data.get("close_fix_unit") == name]
+    return str(asked[-1].data.get("reason") or "no reason recorded") if asked else "no reason recorded"
+
+
+def _close_for_retry(ctx: HookContext, wb: Workbench, fix: UnitRef, marker: FixMarker) -> bool:
+    """`unit.retried{close_fix_unit}` (L4-VER-095, design D6): `l4 retry` of a unit in `fixing` whose fix unit waits on
+    a person asked this run to close it. Checked again now, because an answer may have come since: only when every
+    pending task of the fix unit is still held by an open question (and each such question can be set aside) does the
+    harness tick each task `already-done` in a harness commit (the commit and the `task.done` that `_already_done`
+    writes, with `closed_by: retry`), set each question that held it to `superseded by retry` in the same commit as
+    the last task it held (a crash leaves what is left still held), and record `question.superseded` before that
+    commit, so that the line travels inside it. The `task.done` that follows names the commit's sha and cannot come
+    first: a run that ends between the two leaves the commit without it, which step 1 reads as a step with no red and
+    green to check, and the next run finds nothing to close (`fix.close_skipped`) and ends the fix unit. A task that can
+    run, or one that cannot be ticked, drops the request: `fix.close_skipped`, and the loop runs the fix unit as it
+    always does, so a retry never ticks a task that no question holds. True when the fix unit is closed (the caller
+    appends `fix.done`)."""
+    s, name = ctx.services, fix.name
+    tasks = wb.provider.tasks(fix)
+    path = fix.path / QUESTIONS_FILENAME
+    file = QuestionsFile.load(path)
+    if not waiting_questions(file, tasks) or unselectable(tasks) or file is None:
+        why = "a task of the fix unit can run: an answer arrived, or a question can no longer be set aside"
+        s.ledger.append("fix.close_skipped", fix_unit=name, reason=why)
+        return False
+    held = holds(file.questions, [t.key for t in tasks if not t.done])
+    reason = f"closed by l4 retry: {_retry_reason(ctx, name)}"
+    ticked: set[str] = set()
+    set_aside: list[str] = []
+    while (task := select_next_step(tasks)) is not None:
+        wb.provider.set_marker(fix, task.key, Marker.DONE)
+        parents = tick_completed_parents(wb.provider, fix)
+        ticked.update((task.key, *parents))
+        free = [qid for qid, keys in held.items() if qid not in set_aside and keys <= ticked]
+        for qid in free:
+            file = file.supersede_by_retry(qid)
+        if free:
+            file.save(path)
+            set_aside.extend(free)
+            wb.emit("question.superseded", ids=free, closed_by="retry")  # before the commit: it travels inside it
+        sha = wb.commit(
+            f"fix({fix.name}): {task.title} already done [skip ci]", task=task.key, attempt=1, phase="single",
+            tdd="already-done",
+        )  # fmt: skip
+        wb.emit(
+            "task.done", task=task.key, sha=sha, parents=parents, tdd="already-done", closed_by="retry", reason=reason,
+            findings=[],
+        )  # fmt: skip
+        tasks = wb.provider.tasks(fix)
+    s.ledger.append("fix.done", fix_unit=name, round=marker.round, findings=list(marker.findings), closed_by="retry")
+    wb.push()
+    return True
 
 
 def fix_hook(ctx: HookContext) -> FixOutcome:
@@ -396,11 +490,13 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
     marker = read_fix_marker(fix.path) if fix is not None else None
     if fix is None or marker is None or marker.parent != s.ref.id:
         return _halt(ctx, f"the fix unit {name} is not a fix unit of {s.ref.id}", fix_unit=name)
-    wb = _child_workbench(ctx, fix, state.iteration)
     retried: set[str] = set()  # tasks already moved to another profile after a limit
+    wb = _child_workbench(ctx, fix, state.iteration, retried=retried)
     carries: dict[str, NearPass] = {}  # task -> the near pass the limit cut short, for its next profile (L4-IMP-100)
     moved: dict[str, str] = {}  # task -> the profile it moved to (fix-unit-escalate D2)
-    escalate = _escalation(ctx, fix, state.iteration, moved)
+    escalate = _escalation(ctx, fix, state.iteration, moved, retried)
+    if state.close_fix_unit == name and _close_for_retry(ctx, wb, fix, marker):  # before the first selection
+        return FixOutcome("done")
     while True:
         if _reenter(ctx, fix) and "answers_recorded" in ctx.shared:
             ctx.shared["answers_recorded"]()  # the mirror drops `l4:needs-answers` before the chore's agent runs
@@ -437,7 +533,7 @@ def fix_hook(ctx: HookContext) -> FixOutcome:
             retried.add(task.key)
             if exc.carry is not None:
                 carries[task.key] = exc.carry
-            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key))
+            wb = _fall_back(ctx, wb, fix, exc, task.key, state.iteration, moved.get(task.key), retried)
             continue
         finally:
             moved.pop(task.key, None)
@@ -668,10 +764,19 @@ def ci_not_fixed_detail(unfixed: Sequence[CiHistory]) -> str:
 
 
 def _no_task_cause(findings: Sequence[Finding]) -> tuple[str, str]:
-    """Why a failed round with no fix group escalates: a person rejected a hold on the judge's view of the diff (a fix
-    unit cannot shrink it, L4-VER-044), or no finding can be converted (L4-OPS-022), or both: each way out is named."""
+    """Why a failed round with no fix group escalates: a person rejected a hold on the skipped tests of a changed file
+    (a fix unit cannot change test files, L4-VER-093), or on the judge's view of the diff (a fix unit cannot shrink it,
+    L4-VER-044), or no finding can be converted (L4-OPS-022), or both of the last two: each way out is named. A
+    skipped reject beside another cause keeps its own code and says so: the other cause shows once it is resolved."""
+    skipped = any(f.title == SKIPPED_REJECTED_TITLE for f in findings)
     view = any(f.title == JUDGE_VIEW_REJECTED_TITLE for f in findings)
-    others = any(f.source == "human" and f.blocking and f.title != JUDGE_VIEW_REJECTED_TITLE for f in findings)
+    own = (JUDGE_VIEW_REJECTED_TITLE, SKIPPED_REJECTED_TITLE)
+    others = any(f.source == "human" and f.blocking and f.title not in own for f in findings)
+    if skipped:
+        text = "a person rejected a hold on skipped tests of a changed file: a fix unit cannot change test files"
+        if view or others:
+            text += " (another finding of a person also cannot be converted into a fix task)"
+        return text, SKIPPED_TESTS_REJECTED
     if view and others:
         return (
             "a person rejected a hold on the judge's view of the diff (a fix unit cannot shrink the diff), and "

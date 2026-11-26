@@ -97,6 +97,7 @@ class ProgressTrace:
             "task.started": self._task_started,
             "step.started": self._step_started,
             "agent.idle": self._agent_idle,
+            "agent.time_limit": self._agent_time_limit,
             "agent.finished": self._agent_finished,
             "result.normalized": self._result_normalized,
             "budget.cost": self._budget,
@@ -282,8 +283,12 @@ class ProgressTrace:
         d = e.data
         silent = _num(d.get("silent_s"))
         limit = ""
+        calls = _num(d.get("tool_calls"))
         if d.get("silent"):
             limit = "; no tool call was made, so it is a limit of the profile, not a failed attempt"
+        elif d.get("as_limit") and d.get("kind") == "idle":  # L4-IMP-116: the count only when a reader counted
+            counted = f"; {int(calls)} tool calls were made" if calls else ""
+            limit = f"{counted}; it is a limit of the profile, not a failed attempt"
         elif d.get("reason"):
             limit = f"; {d['reason']}, so it counts as a failed attempt"
         key = "implementer.idle_timeout"
@@ -293,6 +298,20 @@ class ProgressTrace:
             logging.WARNING,
             f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: no activity from {d.get('profile')} "
             f"for {ago(silent or 0)}; L4 stopped it ({key}){limit}",
+        )
+
+    def _agent_time_limit(self, e: LedgerEvent) -> tuple[int, str]:
+        """L4-IMP-116: the agent step reached its wall-clock limit."""
+        d = e.data
+        suffix = ""
+        if d.get("as_limit"):
+            suffix = "; it is a limit of the profile, not a failed attempt"
+        elif d.get("reason"):
+            suffix = f"; {d['reason']}, so it counts as a failed attempt"
+        return (
+            logging.WARNING,
+            f"task {d.get('task')} {d.get('phase')} attempt {d.get('attempt')}: {d.get('profile')} reached the time "
+            f"limit ({ago(_num(d.get('limit_s')) or 0)}){suffix}",
         )
 
     def _agent_finished(self, e: LedgerEvent) -> tuple[int, str]:

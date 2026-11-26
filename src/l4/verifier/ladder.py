@@ -226,6 +226,7 @@ from l4.verifier.types import (
     FeedbackRef,
     Finding,
     GeneratedOutcome,
+    HumanVerdict,
     Severity,
     StepRecord,
     TracingTest,
@@ -257,6 +258,7 @@ from l4.verifier.verdicts import (
     finding_sha256,
     hold_covers,
     hold_id,
+    hold_kind,
     hold_sha256,
     raise_verdict_questions,
     regressions,
@@ -564,6 +566,10 @@ class _Run:
     e2e: E2eGateOutcome | None = None  # step 3's end-to-end gate, when it ran: step 4 traces it, step 5 reads its page
     s1: S1Step | None = None  # step 8, until step 9 has spoken and the calibration rows can be written
     scope: ScopeEvidence | None = None  # step 1: what the unit changed and whether it stays in scope
+    base_report: TestReport | None = None  # step 1: the base's own report, with statuses, when it had one (L4-VER-092)
+    base_skips: base_tests.SkipLookup | None = (
+        None  # step 3: what a base report says about skipped tests, kept per round
+    )
     evidence: Evidence | None = None  # step 3: scope, tests ran and diff coverage (step 6 reports the coverage part)
     report: TestReport | None = None  # step 3's JUnit report
     repeat_notes: list[str] = field(default_factory=list)  # step 3: what each repeated gate found (L4-VER-076)
@@ -774,6 +780,7 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
         result.integrity = run_integrity(ctx)
         ran = base_tests.check_base_tests(wb, ctx, prior=result.integrity.checks, round_no=vc.round)
         record_outcome(result.integrity, base_tests.ROW, ran)
+        run.base_report = ran.base_report
         if ran.failures:  # the base tests step 1's run failed (L4-VER-080); step 3 never runs after such a blocker
             result.failures = dict(ran.failures)
         findings.extend(result.integrity.findings)
@@ -843,7 +850,8 @@ def verify_unit(vc: VerifyContext) -> VerifyResult:
             ),
         )  # fmt: skip
         blockers = _collect_step(vc, run, base_sha, seen, gate_ok, extra, cov_dir)
-        return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers)])
+        unmatched = run.evidence.ran.summary.skipped_note if run.evidence and run.evidence.ran else ""
+        return gate_ok and not blockers, "; ".join([*notes, *(f.detail for f in blockers), *filter(None, [unmatched])])
 
     def traceability() -> tuple[bool, str]:
         assert report is not None
@@ -967,6 +975,15 @@ def _merged(unit: TestReport | None, browser: TestReport | None) -> TestReport |
     return TestReport({**unit.tests, **browser.tests}, [*unit.collection_errors, *browser.collection_errors])
 
 
+def _keep_base_run(result: VerifyResult, lookup: base_tests.SkipLookup) -> None:
+    """A base worktree run of the lookup goes into this round's `integrity.base_tests` (L4-VER-092): the next round, on
+    a workbench of its own, reads the statuses there instead of running the base's gate again."""
+    if result.integrity is None:
+        return
+    if (record := lookup.record(result.integrity.base_tests)) is not None:
+        result.integrity.base_tests = record
+
+
 def _collect_step(
     vc: VerifyContext,
     run: _Run,
@@ -980,18 +997,26 @@ def _collect_step(
     tests-ran findings join the round here (the blockers are returned: they stop the ladder like a failed gate);
     step 6 reports the coverage ones."""
     wb, result = vc.wb, run.result
+    lookup = run.base_skips = run.base_skips or base_tests.SkipLookup(wb, base_sha, vc.round, run.base_report)
     try:
         ev = collect_evidence(
             wb, base_sha, result.head_sha, report, cov_dir, wb.ref, new_tests=set(result.red_green),
             gate_passed=gate_ok, cov_nonce=(extra or {}).get("L4_COV_NONCE"), step1=run.scope,
+            base_skips=lookup,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001
         log.warning("%s: evidence collection failed: %s", wb.ref.id, exc)
         result.holds.append(f"evidence: could not be collected ({type(exc).__name__})")
+        _keep_base_run(result, lookup)
         return []
+    _keep_base_run(result, lookup)
     run.evidence = ev
     ran = ev.ran.findings if ev.ran is not None else []
     result.findings.extend(ran)
+    # the holds of old skipped tests whose skip predates the unit (L4-VER-092) join here, beside the finding they
+    # replace: step 6 stops early when diff coverage is off, and the finding was raised in that case too
+    result.holds.extend(h.text for h in ev.ran_hold_records)
+    result.hold_views |= ev.hold_views
     return [f for f in ran if f.severity is Severity.BLOCKER]
 
 
@@ -1095,7 +1120,7 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     current = {c.id: text_sha256(c) for c in criteria}
     current |= {f.id: finding_sha256(f.id) for f in result.findings if f.source == "judge" and f.blocking}
     current |= {hold_id(h): hold_sha256(h, result.hold_views) for h in result.holds}
-    effective = effective_verdicts(events, current)
+    effective = _person_only_holds(wb, result.holds, effective_verdicts(events, current), events)
     result.findings, effective = carry_rejects(
         result.findings, effective, events, lambda n, target: stored_finding(read_verdict(wb.ref.path, n), target)
     )
@@ -1132,6 +1157,30 @@ def _finalize(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion], event
     result.verdict = aggregate_unit(result.findings, result.criteria, result.holds)
     if result.verdict is Verdict.PASS:
         _hold_unjudged(vc, result)
+
+
+def _person_only_holds(
+    wb: Workbench, holds: Sequence[str], effective: dict[str, HumanVerdict], events: Sequence[LedgerEvent]
+) -> dict[str, HumanVerdict]:
+    """L4-VER-094: a skipped-test hold is a person's decision. A verdict of one whose `by` is not `human` (an agent that
+    `clarifier.answer_by_agents` lets write one, the delegate, the clarifier) is not in force: it is dropped, with one
+    `human.void` for its question, and the hold stays unresolved, so the next round asks it again (its question is
+    consumed, and nothing waits on the hold). A question that a `human.void` already names is not voided twice."""
+    voided = {str(e.data.get("question")) for e in events if e.type == "human.void"}
+    kept = dict(effective)
+    for hold in holds:
+        target = hold_id(hold)
+        verdict = kept.get(target)
+        if verdict is None or verdict.by == "human" or hold_kind(hold) != "skipped":
+            continue
+        del kept[target]
+        if verdict.question not in voided:
+            voided.add(verdict.question)
+            wb.emit(
+                "human.void", question=verdict.question, target=target,
+                reason=f"a skipped-test hold is answered by a person, not by {verdict.label}",
+            )  # fmt: skip
+    return kept
 
 
 def _carry_judge_passes(vc: VerifyContext, run: _Run, criteria: Sequence[Criterion]) -> None:

@@ -1,4 +1,4 @@
-"""The delegate's prompt `delegate@7` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
+"""The delegate's prompt `delegate@8` and its result schema `l4/delegate-result@1` (delegate-answers 6.1 and 25.1;
 L4-DLG-004, L4-DLG-005, L4-DLG-023 to L4-DLG-025; design D5, D7).
 
 The delegate runs read-only in a worktree of the unit head (Claude Code's `Read`, `Grep` and `Glob`, or the `read`,
@@ -37,7 +37,7 @@ from l4.specs.questions import QuestionKind
 from l4.state.ledger import LedgerEvent
 from l4.verifier.verdicts import cap_only_test, hold_id, hold_kind, hold_subjects, ui_hold_criterion
 
-PROMPT_VERSION = 7
+PROMPT_VERSION = 8
 SCHEMA_ID = "l4/delegate-result@1"
 BATCH_PROMPT_VERSION = "delegate-batch@1"  # L4-DLG-028: the verdict questions of one round in one call
 BATCH_MAX_CHARS = 160_000  # the user text of a batch: about 40,000 tokens; a longer batch is shortened from its end
@@ -92,6 +92,9 @@ cites the test's file as `path:line` (a `test:` id alone is not enough). A crite
 parts of the diff lists the files the judge did not see: read them yourself.
 - A hold on what the judge could not see of the diff may be `accept`ed only after you read one of the files it names \
 and cite it in `checked`. Never `reject` such a hold: it stops the unit and only a person decides that, so `escalate`.
+- A hold on existing tests that are skipped in a changed test file (`skipped: existing tests in ...`) cannot be \
+checked by reading: an accept says the tests ran where they can run, and a reject stops the unit. Never `accept` or \
+`reject` such a hold: only a person decides that, so `escalate`.
 - A question that says it comes from a fix task cannot be answered with a change to a test file or a test-support \
 file (a conftest, fixtures, mocks): the fix step would put it back, and a person commits such a change. `escalate` it \
 unless your answer is about production code.

@@ -47,7 +47,7 @@ from pathlib import Path
 from l4 import cancel, deadline
 from l4 import services as services_module
 from l4.accepted import ACCEPTED_FILE, ACCEPTED_SCHEMA
-from l4.agents.base import AgentAdapter, LimitSignal, RunResult
+from l4.agents.base import STALL_KINDS, AgentAdapter, LimitSignal, RunResult
 from l4.agents.factory import RoleUnavailable, Selected, SelectionRequest
 from l4.availability.cooldown import iso_utc
 from l4.availability.errors import WaitingCapacity
@@ -72,7 +72,7 @@ from l4.forge.urls import app_forge_urls, origin_url
 from l4.fsutil import UnsafeFile, atomic_write_bytes, read_regular_file, reject_symlinks
 from l4.gates.odd import raise_open_questions, raise_scenario_questions, scenario_conflicts
 from l4.implementer.held_patch import NearPass
-from l4.implementer.loop import EscalationRequest, run_task, spent_constraint, used_constraint
+from l4.implementer.loop import EscalationRequest, run_task, spent_constraint, stall_plan_for, used_constraint
 from l4.implementer.reopen import reopen_for_changed_requirements
 from l4.implementer.tasks import (
     open_blocking_questions,
@@ -292,12 +292,14 @@ class RunWaits:
     started: set[str] = field(default_factory=set)  # the units whose run ledger was opened (`run.started` written)
 
 
-def _with_constraints(selected: Selected, extra: tuple[Constraint, ...], *, drop: Constraint | None = None) -> Selected:
+def _with_constraints(
+    selected: Selected, extra: tuple[Constraint, ...], *, drop: tuple[Constraint, ...] = ()
+) -> Selected:
     """`selected` whose limit fallback (`Factory.on_limit`) asks again with `extra` added to its constraints and `drop`
     left out. A selection without a request is returned as it is."""
     if selected.request is None:
         return selected
-    kept = tuple(c for c in selected.request.constraints if c is not drop)
+    kept = tuple(c for c in selected.request.constraints if not any(c is gone for gone in drop))
     return replace(selected, request=replace(selected.request, constraints=(*kept, *extra)))
 
 
@@ -329,6 +331,7 @@ class Orchestrator:
         ctx.shared["fall_back"] = self.switch_profile  # for hooks that see a limit themselves (the audit writer)
         ctx.shared["escalate"] = self._escalation_profile  # the fix loop moves a fix unit's task along the chain
         ctx.shared["escalation_ended"] = self._escalation_ended  # ... and clears the task's profile after the task
+        ctx.shared["task_veto"] = self._veto_of  # ... and asks a move's veto of a task for a stall's plan (L4-IMP-115)
         ctx.shared["answers_recorded"] = self.answers_recorded  # the fix loop records a fix unit's answers itself
         ctx.shared["job_remaining_s"] = self._job_remaining_s  # the delegate pass asks nothing the deadline would cut
         ctx.shared["idle_run"] = self.idle_run  # a pass in a run that did nothing for the unit asks all that are due
@@ -683,10 +686,11 @@ class Orchestrator:
         extend_fix_rounds: int | None = None,
         extend_feedback_rounds: int | None = None,
         event: str = "unit.resumed",
-        trigger: Trigger = Trigger.RESUMED,
+        trigger: Trigger | None = Trigger.RESUMED,
         what: str = "resume",
         note_task: str | None = None,
         note_fix_unit: str | None = None,
+        close_fix_unit: str | None = None,
     ) -> UnitRunResult:
         """`l4 resume` (L4-IMP-013, SCN-RES-01, SCN-RES-03): `unit.resumed{reason}` and the halted or escalated unit
         goes back to the phase it was halted from (`verifying` for an escalated one). Nothing else runs; the next
@@ -699,7 +703,9 @@ class Orchestrator:
 
         `l4 retry` is the same step with its own words (L4-OPS-001): `event` is `unit.retried` (it folds like
         `unit.resumed`), `what` is `retry` (the subject of the commit), and `trigger` is the edge of the phase it
-        leaves (`capacity_restored`, `retry_requested`).
+        leaves (`capacity_restored`, `retry_requested`). `close_fix_unit` (a retry of a unit in `fixing` whose open fix
+        unit waits on a person, L4-VER-095) is recorded in the event and `trigger` is None: no edge is taken, the unit
+        stays `fixing`, and the run that follows closes the fix unit before it selects a task (`fix_hook`).
 
         The commit of this step would bury a person's change to the unit folder (review M3), so the tail is checked
         first: a halted or escalated unit takes `spec_edit_since_stop` instead (L4-OPS-003), an `in_review` unit takes
@@ -715,8 +721,10 @@ class Orchestrator:
             }
             self.services.ledger.append("budget.extended", **rounds, reason=reason[:300], **extra)
         who = {"actor": actor[0], "marker": actor[1]} if actor is not None else {}  # a command's, never a label's
-        self.services.ledger.append(event, reason=reason[:300], **extra, **who, **binding)
-        self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
+        closing = {"close_fix_unit": close_fix_unit} if close_fix_unit else {}
+        self.services.ledger.append(event, reason=reason[:300], **extra, **who, **binding, **closing)
+        if trigger is not None:
+            self._notes = ()  # the halted section is out of date: the mirror says nothing is waiting
         edit = self._spec_edit() if self._takes_spec_edit else None
         stop_edge = {
             Phase.HALTED.value: Trigger.SPEC_EDIT_SINCE_STOP, Phase.ESCALATED.value: Trigger.SPEC_EDIT_SINCE_STOP,
@@ -727,7 +735,10 @@ class Orchestrator:
             trigger, context = stop_edge, {"commits": list(edit.shas)[-MAX_EDIT_COMMITS:]}
         elif edit is not None:
             self._see_spec_edit(edit)  # this step's commit buries it: the run that follows takes it
-        self._go(trigger, **context)
+        if trigger is not None:
+            self._go(trigger, **context)
+        else:
+            self._refold()  # no edge: the fix unit still waits, and the run that follows closes it
         if edit is not None and context:  # the tasks that cite a changed criterion are open again (L4-OPS-015)
             self._reopen(edit.base)
         else:
@@ -1107,6 +1118,7 @@ class Orchestrator:
             sandbox=s.sandbox, selected=selected or self._select(), iteration=self.state.iteration, push=self.push,
         )  # fmt: skip
         wb.previous_attempt = self._previous_attempt
+        wb.stall_plan = stall_plan_for(wb, s.factory, task_veto=self._veto_of)  # L4-IMP-115, read when a step stalls
         if self._activated is not None:
             wb.activated_plan, wb.activated_digest = self._activated
         return wb
@@ -1232,6 +1244,10 @@ class Orchestrator:
         self.services.ledger.append("breaker.tripped", reason="planted_link", task=task, links=links)
         return self._halt("planted_link", f"task {task}: {exc}")
 
+    def _veto_of(self, task: str | None) -> Constraint | None:
+        """A move's spent veto of `task` (L4-IMP-094 D1), None when no move of this run set one for it."""
+        return self._task_veto[1] if self._task_veto is not None and self._task_veto[0] == task else None
+
     def switch_profile(self, limit: RunResult | LimitSignal, task: str | None = None) -> Selected:
         """The implementer hit a limit: cool it down and select the next profile. The one place `_selected` changes
         after the first selection, so a caller that saw the limit itself (M1.3's fix loop, the audit writer) goes
@@ -1240,19 +1256,21 @@ class Orchestrator:
         previous = task_profile or self._select()
         # a move of this task refused its spent profiles (L4-IMP-094 D1): every fallback of the task refuses them too,
         # a later limit included, but the run's profile does not keep that veto for later tasks
-        veto = self._task_veto[1] if self._task_veto is not None and self._task_veto[0] == task else None
-        asked = previous if veto is None else _with_constraints(previous, (veto,))
+        signal = limit if isinstance(limit, LimitSignal) else limit.limit
+        # a stall limit's fallback also refuses the profiles that are spent for the task's phase (L4-IMP-115): it asks
+        # again from the chain's start, and a spent profile would end the task at once. Neither veto outlives the move
+        vetoes = tuple(c for c in (self._veto_of(task), signal.veto if signal is not None else None) if c is not None)
+        asked = previous if not vetoes else _with_constraints(previous, vetoes)
         try:
             chosen = self.services.factory.on_limit(asked, limit)
         except WaitingCapacity as exc:
-            # a short cool-down is waited out (the veto holds there too); else this raises `exc` again
-            chosen = self._wait_in_run(exc, () if veto is None else (veto,))
+            # a short cool-down is waited out (the vetoes hold there too); else this raises `exc` again
+            chosen = self._wait_in_run(exc, vetoes)
         if task_profile is None or chosen.profile_name != self._select().profile_name:
             # the run's profile moves; a task's own profile that limited leaves it as it is
-            self._selected = chosen if veto is None else _with_constraints(chosen, (), drop=veto)
-        signal = limit if isinstance(limit, LimitSignal) else limit.limit
+            self._selected = chosen if not vetoes else _with_constraints(chosen, (), drop=vetoes)
         kind = signal.kind if signal else limit.status if isinstance(limit, RunResult) else "rate_limit"
-        detail = signal.raw_excerpt if signal is not None and kind == "silent" else None
+        detail = signal.raw_excerpt if signal is not None and kind in STALL_KINDS else None
         self._previous_attempt = PreviousAttempt(previous.profile_name, kind, task, detail=detail)
         return self._select()
 
@@ -1778,8 +1796,9 @@ def run_unit_in_worktree(
     resume_extend_fix_rounds: int | None = None,
     resume_extend_feedback_rounds: int | None = None,
     resume_event: str = "unit.resumed",
-    resume_trigger: Trigger = Trigger.RESUMED,
+    resume_trigger: Trigger | None = Trigger.RESUMED,
     resume_what: str = "resume",
+    resume_close_fix_unit: str | None = None,
     note_task: str | None = None,
     note_fix_unit: str | None = None,
     take_spec_edit: bool = True,
@@ -1790,7 +1809,8 @@ def run_unit_in_worktree(
     """Lease, worktree, ledger, services, `run_unit` (or `resume` when `resume_reason` is given), then the final
     ledger commit. Order matters: the worktree is deleted and recreated by `ensure`, so it is only touched once the
     lease is held. `resume_event`, `resume_trigger` and `resume_what` make the resume an `l4 retry` (L4-OPS-001,
-    `Orchestrator.resume`). `note_task` and `note_fix_unit` bind a person's note to the halted task (L4-OPS-018).
+    `Orchestrator.resume`); `resume_close_fix_unit` is the retry of a `fixing` unit (L4-VER-095).
+    `note_task` and `note_fix_unit` bind a person's note to the halted task (L4-OPS-018).
     `take_spec_edit=False` (`l4 verify`) leaves a person's spec edit for the next `l4 run`.
     `waits`: what the run's earlier units waited for a cool-down (L4-AVL-011). `accepted`: the plan id and the accepted
     review items of this unit, from the plan step (L4-YOLO-028). `activated`: the plan id and the digest of the unit's
@@ -1861,6 +1881,7 @@ def run_unit_in_worktree(
                 what=resume_what,
                 note_task=note_task,
                 note_fix_unit=note_fix_unit,
+                close_fix_unit=resume_close_fix_unit,
             )
         )
         code, failed = result.exit_code, False

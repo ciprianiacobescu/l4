@@ -11,6 +11,7 @@ the unit continues from where it stopped, by its recorded phase (design D2).
 | `waiting_capacity` | `capacity_restored` now, to `previous_phase`; `retry_after` is ignored |
 | `in_review` | `verifying` (`retry_requested`); after a person's change to the unit folder `implementing` |
 | | (`spec_edit_after_handoff`) |
+| `fixing`, its fix unit waits on a person | no edge: `unit.retried{close_fix_unit}`; the run closes it (L4-VER-095) |
 
 A person's change to the unit folder is checked before the retry's own commit buries it (review M3): a phase that
 cannot take it at once (`waiting_capacity` back to `fixing`) records `spec.edit_seen`, and the run takes it later.
@@ -36,6 +37,7 @@ from l4.context import AppContext
 from l4.exitcodes import ExitCode, L4Exit
 from l4.forge.base import ForgeError, ForgeUnavailable, fetch_auth_config, forge_platform, make_forge, parse_remote_url
 from l4.forge.urls import origin_url
+from l4.implementer.tasks import waiting_questions
 from l4.orchestrator import UnitOutcome, UnitRunResult, run_unit_in_worktree
 from l4.outcome import CommandResult
 from l4.progress import project_web_url
@@ -45,6 +47,7 @@ from l4.state.budget import feedback_rounds_exhausted, fix_rounds_exhausted
 from l4.state.fold import UnitState
 from l4.state.lifecycle import Phase, Trigger
 from l4.state.status import (
+    UnitSnapshot,
     load_snapshot,
     note_binding,
     note_lines,
@@ -65,9 +68,32 @@ _CONTINUES = frozenset(
 _EDGE_OF = {Phase.WAITING_CAPACITY: Trigger.CAPACITY_RESTORED, Phase.IN_REVIEW: Trigger.RETRY_REQUESTED}
 
 
-def refuse(ref: UnitRef, state: UnitState, cfg: L4Config, relative: str) -> L4Exit | None:
-    """The refusal of a phase that a retry cannot move, with what moves the unit instead (D2); None when it can."""
+def fix_unit_waiting(snapshot: UnitSnapshot) -> tuple[str, bool] | None:
+    """`(name, waiting)` of the open fix unit of a unit in `fixing`, read from the branch as the planner reads it:
+    `waiting` is true when every pending task of it is held by an open question and each such question can be set
+    aside (L4-VER-095). None when no fix unit is open, or its files are not on the branch."""
+    name = snapshot.state.open_fix_unit
+    child = next((c for c in snapshot.children if c.name == name), None) if name else None
+    if name is None or child is None:
+        return None
+    return name, bool(waiting_questions(child.questions, child.tasks))
+
+
+def refuse(
+    ref: UnitRef, state: UnitState, cfg: L4Config, relative: str, *, fix_unit: tuple[str, bool] | None = None
+) -> L4Exit | None:
+    """The refusal of a phase that a retry cannot move, with what moves the unit instead (D2); None when it can.
+    `fix_unit` (`fix_unit_waiting`): a unit in `fixing` is retried when its open fix unit waits on a person, and is
+    told that the fix unit is running when a task of it can run (L4-VER-095)."""
     phase = state.phase
+    if phase == Phase.FIXING.value and fix_unit is not None:
+        name, waiting = fix_unit
+        if waiting:
+            return None
+        return L4Exit(
+            ExitCode.USAGE_ERROR,
+            f"retry: {ref.id} is fixing: the fix unit {name} is running: the harness continues it at the next run",
+        )
     head = f"retry: {ref.id} is {phase or 'not started'}"
     branch = unit_branch(ref.id, cfg.forge.branch_prefix)
     if phase is None:
@@ -112,16 +138,18 @@ def retry_unit(
     a plan) binds the reason to the task of a unit halted with `max_task_attempts` (L4-OPS-018, D11)."""
     if rounds is not None and rounds < 1:
         raise L4Exit(ExitCode.USAGE_ERROR, "retry: --rounds must be at least 1")
-    state = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix).state
     relative = provider.unit_dir(ref).resolve().relative_to(app.repo.resolve()).as_posix()
-    if (refusal := refuse(ref, state, cfg, relative)) is not None:
+    snapshot = load_snapshot(provider, git, ref, branch_prefix=cfg.forge.branch_prefix)
+    state = snapshot.state
+    if (refusal := refuse(ref, state, cfg, relative, fix_unit=fix_unit_waiting(snapshot))) is not None:
         raise refusal
     phase = Phase(state.phase)
     if phase is Phase.MERGED:
         return _retry_archive(app, cfg, git, ref)
     if rounds is not None and phase is not Phase.ESCALATED:
         raise L4Exit(ExitCode.USAGE_ERROR, f"retry: {ref.id} is {phase}, not escalated: it has no rounds to add")
-    if phase is not Phase.IN_REVIEW and state.previous_phase not in {p.value for p in Phase}:
+    close = state.open_fix_unit if phase is Phase.FIXING else None  # `refuse` let it through: its fix unit waits
+    if phase not in (Phase.IN_REVIEW, Phase.FIXING) and state.previous_phase not in {p.value for p in Phase}:
         raise L4Exit(ExitCode.USAGE_ERROR, f"retry: {ref.id} is {phase} with no recorded phase to go back to")
     fix = feedback = None
     if phase is Phase.ESCALATED:
@@ -136,7 +164,8 @@ def retry_unit(
         app, cfg, git, provider, ref, resume_reason=reason, resume_signal=signal, resume_by=by,
         resume_actor=actor, resume_extend_fix_rounds=fix, resume_extend_feedback_rounds=feedback,
         note_task=note_task, note_fix_unit=note_fix_unit,
-        resume_event="unit.retried", resume_trigger=_EDGE_OF.get(phase, Trigger.RESUMED), resume_what="retry",
+        resume_event="unit.retried", resume_trigger=None if close else _EDGE_OF.get(phase, Trigger.RESUMED),
+        resume_what="retry", resume_close_fix_unit=close,
     )  # fmt: skip
 
 

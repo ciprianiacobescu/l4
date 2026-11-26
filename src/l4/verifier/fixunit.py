@@ -42,6 +42,7 @@ from l4.verifier.types import FeedbackRef, HumanVerdict, Severity, Verdict, Veri
 from l4.verifier.types import Finding as VerifierFinding
 from l4.verifier.verdicts import (
     JUDGE_VIEW_REJECTED_TITLE,
+    SKIPPED_REJECTED_TITLE,
     WHEN_THEN,
     is_coverage_hold_finding,
     is_ui_hold_finding,
@@ -261,6 +262,13 @@ def _candidates(
             continue
         if f.title == JUDGE_VIEW_REJECTED_TITLE:  # a hold on the judge's view: a person's, whatever its reason says
             skipped.append(f"{f.id}: a hold on the judge's view of the diff: a fix unit cannot shrink the diff")
+            if (judged := rejects.get(f.id)) is not None and judged.question not in unconverted:
+                unconverted.append(judged.question)
+            continue
+        if (
+            f.title == SKIPPED_REJECTED_TITLE
+        ):  # a fix unit cannot change test files: a person's, whatever its reason says
+            skipped.append(f"{f.id}: a skipped-test hold: a fix unit cannot change test files")
             if (judged := rejects.get(f.id)) is not None and judged.question not in unconverted:
                 unconverted.append(judged.question)
             continue

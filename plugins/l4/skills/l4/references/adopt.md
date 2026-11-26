@@ -22,7 +22,7 @@ A public repository can never use a private repository's action: GitHub fails it
 ## 2. A local `l4` at the version you adopt
 
 ```sh
-uv tool install git+https://github.com/OWNER/l4@v0.4.60 && l4 skills install   # or @<sha>
+uv tool install git+https://github.com/OWNER/l4@v0.4.61 && l4 skills install   # or @<sha>
 l4 --version
 ```
 
@@ -34,9 +34,9 @@ commit it for the team, `--agent NAME` for one agent); run it again after an upg
 On the adopting repository's default branch, with a clean tree:
 
 ```sh
-l4 init --ci github --action --harness-ref v0.4.60 [--dependabot] [--s1 laya|jev|none]
+l4 init --ci github --action --harness-ref v0.4.61 [--dependabot] [--s1 laya|jev|none]
 # a private harness, and a public or other-owner repository:
-l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.60
+l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l4.git --harness-ref v0.4.61
 ```
 
 - **`--action-repo OWNER/l4`** is optional. By default it is the repository the running `l4` was installed from
@@ -45,7 +45,7 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
   Jev profile that reads `TYPESAFE_API_KEY` (pass `--secret TYPESAFE_API_KEY=TYPESAFE_API_KEY` to `l4 setup github`);
   `--s1 none` writes neither, and every implementer question then goes to a person. `l4 doctor --adoption` says which
   is in use.
-- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.60`; that line
+- **The pin.** `--harness-ref` resolves the tag once and writes `uses: …/.github/actions/l4@<sha> # v0.4.61`; that line
   is the only pin. `--harness-ref` takes a tag or a branch; a commit sha goes to `--harness-commit` (40 hex characters).
 - **Upgrades by pull request.** `--dependabot` makes Dependabot propose upgrades. It does not work with
   `--action-copy`.
@@ -77,9 +77,13 @@ l4 init --ci github --action --action-copy --harness-repo git@github.com:OWNER/l
     transcripts (secrets masked), and any signed-in user can download it.
   - The test gate and the role chains; `l4 doctor --adoption` checks them. The test gate must write
     `.l4-out/junit.xml` (for example `pytest --junitxml=.l4-out/junit.xml`), or set `gates.test.reports`.
+  - **`gates.test.red_check: targeted`** (optional, default `full`): a red step that only adds new test files runs only
+    those, with `gates.test.targeted`, a command that holds `{files}` as a word of its own and writes the same report.
+    Set it after you run both commands once and their test ids match, and after the pin has moved (an older harness
+    refuses the key). A slow or flaky whole suite is the reason to want it.
   - **CI jobs the gates do not mirror** (a database job, a chart or image check): `l4 doctor --adoption` lists them.
     Add their commands to `gates`, or accept that L4 will not run them.
-- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.60`. The workflow is always re-rendered from the config,
+- **Re-render after editing:** `l4 upgrade --harness-ref v0.4.61`. The workflow is always re-rendered from the config,
   so never edit `l4.yml` by hand.
 
 ## 4. GitHub setup
@@ -180,7 +184,7 @@ implementer:
   chain has one profile.
 - `escalate_after: 0` turns escalation off. `l4 doctor` (CFG-009) warns when `escalate_after` is not below
   `max_task_attempts`, or when two profiles run the same model.
-- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.60`) before you
+- The key `implementer.escalate_after` needs harness 0.4.4. Move the pin (`l4 upgrade --harness-ref v0.4.61`) before you
   edit the config: the schema is strict.
 
 ## 4c. A polyglot repository

@@ -453,6 +453,15 @@ class FallbackSelector:
         `options.cli_major: 2`, else its adapter's."""
         return self._ctx.pins.get(profile_cli(profile)[0])
 
+    def cached_failure(self, name: str, profile: Profile) -> bool:
+        """Does the probe cache hold a failed ladder for this profile, as the next selection would read it? Then the
+        selection skips the profile without a probe (L4-AVL-005). Reads the cache only: no build, no probe, no
+        record."""
+        ttl = float(duration_seconds(self._cfg.availability.cache_ttl))
+        identity = probe_identity(profile, self._cfg.availability, self._ctx.environ, self._pin(profile))
+        hit = self._store.probes.get_aged(name, identity, ttl, self._clock.now())
+        return hit is not None and LadderReport.from_json(hit[0]).failed is not None
+
     def _probe(
         self, walk: "_Walk", index: int, name: str, profile: Profile, *, fresh: bool = False, wait: bool = False
     ) -> Selection | None:

@@ -54,6 +54,7 @@ HARNESS_ROOT_DIRS = (
     "bin",
 )  # what the harness writes in a root `.l4/`; the rest is the repository's
 HARNESS_REASON = "cites a harness-written file (questions.md, verification.md, the harness's .l4/ files): not evidence"
+SKIPPED_HOLD_REASON = "a skipped-test hold is a person's decision"  # L4-VER-094: no call, and no reply is kept
 FIT: Mapping[QuestionKind, tuple[str, ...]] = {
     QuestionKind.TECHNICAL: ("answer", "accept", "escalate"),
     QuestionKind.PRODUCT: ("answer", "accept", "escalate"),
@@ -411,7 +412,7 @@ def _check_reply(
     `chore` the question is a blocked fix chore's and `fix_task` it belongs to a fix task (nothing is unfrozen in
     one), `cap_only` the question is a cap-only criterion's and `cap_only_file` the file of its candidate test,
     `judge_view_files` the files a judge-view hold names, `test_globs` and `support_globs` `tdd.test_globs` and
-    `tdd.test_support_globs`."""
+    `tdd.test_support_globs`. A reply to a `skipped` hold is escalated whatever it decides (L4-VER-094)."""
     problems = validate(reply, delegate_schema()) if isinstance(reply, Mapping) else ["$: not an object"]
     if problems:
         return Discarded(f"not an l4/delegate-result@1 document: {problems[0]}")
@@ -431,6 +432,8 @@ def _check_reply(
         return refuse(f"the decision {decision} does not fit a {kind.value if kind else 'unknown'} question")
     if decision == "escalate":  # nothing was checked for it: only the refs are recorded, redacted; cut at the limits
         return _cut_escalation(reason, checked, redactor)
+    if kind is QuestionKind.VERDICT and hold_kind == "skipped":  # L4-VER-094: no accept, no reject, whatever it cites
+        return refuse(SKIPPED_HOLD_REASON, "escalated")
     if problems := _length_problems(reason, checked):  # L4-DLG-029: asked again, naming every limit it breaks
         return refuse("; ".join(problems), retryable=True)
     verdict, harness = kind is QuestionKind.VERDICT, kind is QuestionKind.HARNESS

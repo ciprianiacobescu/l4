@@ -9,6 +9,7 @@ from typing import Any
 
 from l4.evidence.diffcov import DiffCoverage, FunctionCoverage
 from l4.evidence.scope import FileScope, ScopeOutcome
+from l4.evidence.skipscope import RESIDUALS
 from l4.evidence.testsran import TestsRanOutcome, TestsSummary
 from l4.verifier.types import Finding, Severity
 
@@ -89,6 +90,16 @@ def render_evidence_section(
             out.append(
                 "Skipped in files the unit did not touch: " + ", ".join(f"`{_cell(i)}`" for i in s.skipped_unchanged)
             )
+        if s.skipped_predating:
+            seen = f" ({_cell(s.skipped_source)})" if s.skipped_source else ""
+            out.append(
+                f"Skipped in a changed file before this unit (hold): also skipped in a base report{seen}; the file "
+                "adds or changes no skip construct the harness reads and the unit changed it only in places that "
+                f"cannot change why a test skips; not told apart: {RESIDUALS}. Tests: "
+                + ", ".join(f"`{_cell(i)}`" for i in s.skipped_predating)
+            )
+        if s.skipped_note:
+            out.append(f"Skipped tests were not matched with a base report: {_cell(s.skipped_note)}")
     return out
 
 
@@ -129,7 +140,11 @@ def evidence_json(
         if ran is None
         else {
             "tests_ok": ran.label,
-            "summary": {**asdict(ran.summary), "skipped_unchanged": list(ran.summary.skipped_unchanged)},
+            "summary": {
+                **asdict(ran.summary),
+                "skipped_unchanged": list(ran.summary.skipped_unchanged),
+                "skipped_predating": list(ran.summary.skipped_predating),
+            },
             "findings": [{"severity": f.severity.value, "title": f.title, "detail": f.detail} for f in ran.findings],
         },
     }
@@ -176,7 +191,13 @@ def render_evidence_json(data: dict[str, Any]) -> list[str]:
                 for f in ran.get("findings", [])
             ],
             ran["tests_ok"],
-            TestsSummary(**{**ran["summary"], "skipped_unchanged": tuple(ran["summary"]["skipped_unchanged"])}),
+            TestsSummary(
+                **{
+                    **ran["summary"],
+                    "skipped_unchanged": tuple(ran["summary"]["skipped_unchanged"]),
+                    "skipped_predating": tuple(ran["summary"].get("skipped_predating", ())),  # older files have none
+                }
+            ),
         )  # fmt: skip
     )
     return render_evidence_section(scope_out, dc_out, ran_out)

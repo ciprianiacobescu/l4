@@ -86,6 +86,7 @@ class UnitFacts:
     open_fix_unit: str | None = None  # the last fix unit spawned and not done
     fix_progress: tuple[int, int] | None = None  # (done, total) tasks of the open fix unit
     fix_questions_open: tuple[str, ...] = ()  # its unanswered questions, when every pending task is held by one
+    fix_closing: bool = False  # `l4 retry` asked the next run to close the open fix unit (L4-VER-095)
     legacy_round: int | None = None  # awaiting_human on a NEEDS_HUMAN round that has no verdict question (L4-VER-013)
     verdicts_stale: tuple[str, ...] = ()  # verdict questions no `question.raised` of this attempt names (L4-VER-070)
     handoff_sha: str | None = None  # in_review: H, the hand-off commit (M1.9)
@@ -192,6 +193,8 @@ def next_action(facts: UnitFacts, now: datetime | None = None) -> tuple[str, str
     if phase in _VERIFY:
         return "verify", f"{phase}: verification outstanding"
     if phase == Phase.FIXING.value and facts.open_fix_unit:
+        if facts.fix_closing:  # a retry waits for the run that closes the fix unit: the questions no longer hold it
+            return "implement", f"fix unit {facts.open_fix_unit}: closed by the retry at the next run"
         if facts.fix_questions_open:
             if due := _delegate_due(facts, now):
                 return "delegate", f"delegate: {', '.join(due)} to ask"
@@ -419,6 +422,8 @@ def facts_of(snapshot: UnitSnapshot) -> UnitFacts:
         open_fix_unit=snapshot.state.open_fix_unit,
         fix_progress=progress,
         fix_questions_open=fix_open,
+        fix_closing=snapshot.state.close_fix_unit is not None
+        and snapshot.state.close_fix_unit == snapshot.state.open_fix_unit,
         legacy_round=legacy_round(snapshot.state, snapshot.questions),
         **_harness_facts(snapshot),
         **_review_facts(snapshot),
