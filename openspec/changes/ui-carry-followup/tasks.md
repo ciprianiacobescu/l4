@@ -66,12 +66,12 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
 
 ## 4. Documents (after 1-3, by the orchestrator)
 
-- [ ] 4.1 `docs/SPEC.md`: L4-VER-086 (condition 3: `or meets L4-VER-097/098`; the "Residual risk" and "restated" sentences:
+- [x] 4.1 `docs/SPEC.md`: L4-VER-086 (condition 3: `or meets L4-VER-097/098`; the "Residual risk" and "restated" sentences:
   a parent scenario that a later change reworded is read at the base's wording, L4-VER-096); L4-FBK-010 (the family's parent
   criteria at the base's wording for an OpenSpec follow-up); the step 5 row of the ladder; the `verify.generated` entry of 12.1
   (`appended`); change-table row 141 and a new row for this change, marked SLIPPABLE; the three requirements and SCN-VER-412..426.
   Run `uv run --frozen python scripts/check_spec.py docs/SPEC.md`.
-- [ ] 4.2 `docs/runbook.md`: the paragraph that starts `From 0.4.60 a UI criterion that the unit did not change`; `CHANGELOG.md`
+- [x] 4.2 `docs/runbook.md`: the paragraph that starts `From 0.4.60 a UI criterion that the unit did not change`; `CHANGELOG.md`
   (Changed: both rules; Upgrade: an accept bound to the old text of a rewritten criterion is asked once more).
-- [ ] 4.3 Checks: `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files changed;
+- [x] 4.3 Checks: `uv run --frozen ruff check` and `uv run --frozen ruff format --check` on the files changed;
   `openspec validate ui-carry-followup --strict`.

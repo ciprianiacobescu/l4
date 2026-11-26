@@ -83,7 +83,7 @@ call line of `test`, `it`, `describe`, `suite` or `bench` whose string names the
 first line that holds the name), `window` finds it exactly once (a name carried by two calls that the enclosing
 `describe` strings do not tell apart is not found), and the block is *closed* (its `(`, `{` and `[` balance, with strings,
 template literals and comments skipped, and no count is negative); (d) let H be the names of the tests of F in the
-step-3 reports at the head (the unit gate's and the end-to-end gate's, `tdd._test_names_of`), OLD the names of H that have
+step-3 reports at the head (the unit gate's and the end-to-end gate's, `test_locate.test_names_of`, which moved there from `tdd`), OLD the names of H that have
 a block at the base and NEW the names of H that are not in OLD and have a block at the head: every tracing test of F is in
 OLD (its title is still at the base); every name of OLD has a block at the head that is the very text of its block at the
 base, so no line was added inside any old test, the traced ones included; and the lines of the base outside the blocks of
@@ -100,9 +100,7 @@ carried. What this can lose is in `design.md` D3; the run of the base's file on 
 file at step 3 are the evidence that neither the traced tests nor the new ones broke the other. [V for the file's evidence, a consumer: a unit changed one test file by adding one new test (the file's
 trace holds fifteen old tests with the proof `pass_to_pass` and that one new test with a plain string title and a red proof),
 and the two UI criteria that its old tests traced stayed holds because the file was a changed file; the step-1 record listed
-the file in `reverted` with empty `failing` and `not_run`. [U] The brief says the change was +11/-0; that the eleven lines were
-one plain `it(...)` block with no new import or hook was not read, and the outside-lines condition of (d) would refuse the
-case otherwise]
+the file in `reverted` with empty `failing` and `not_run`. [V, the diff of that unit: one whole new top-level `test(...)` block of 11 added lines between two existing top-level statements, with no import, no hook and no other change, which this rule accepts]
 
 #### Scenario: SCN-VER-416 (+) One test appended to a changed test file carries the criteria the file traces
 - **Given** a follow-up with two unchanged UI criteria C1, C2, each traced only by passing `pass_to_pass` tests of one TypeScript
