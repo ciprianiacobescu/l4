@@ -34,6 +34,7 @@ from l4.state.fold import fold
 from l4.state.ledger import LedgerEvent, read_ledger
 from l4.vcs.authorship import commit_records, is_harness
 from l4.vcs.git import Git
+from l4.vcs.unit_base import unit_base_commit
 from l4.verifier.feedback import Event, feedback_findings, scan_feedback
 from l4.verifier.fixloop import family_units
 from l4.verifier.types import Finding, Severity
@@ -285,7 +286,9 @@ def check_preconditions(wb: Workbench) -> Preconditions:
             "bug: the base merge of step 0 did not run: the unit branch does not contain the base head "
             f"({wb.cfg.forge.base_branch})",
         )
-    base_sha = wb.git.run("merge-base", base_head, head).stdout.strip()
+    base_sha = unit_base_commit(wb.git, wb.cfg.forge.base_branch, head, local_fallback=False)  # one rule (L4-VER-096)
+    if base_sha is None:
+        raise L4Exit(ExitCode.INTERNAL_ERROR, f"git has no merge base of {base_ref} and the unit branch")
     findings: list[Finding] = []
     pending = [t.key for t in required(wb.provider.tasks(wb.ref)) if not t.done]
     if pending:

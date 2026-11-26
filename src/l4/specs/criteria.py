@@ -4,6 +4,7 @@ import hashlib
 import re
 import unicodedata
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -347,6 +348,32 @@ def unchanged_ids(criteria: Sequence[Criterion], base: Sequence[Criterion]) -> f
     scenario from a restated one."""
     before = {c.id: normalise(c.text) for c in base}
     return frozenset(c.id for c in criteria if before.get(c.id) == normalise(c.text))
+
+
+def read_at_base(parent: Sequence[Criterion], base: Sequence[Criterion]) -> list[Criterion]:
+    """`parent` (a merged parent's criteria, read from its archived delta) with the text the base's capability spec
+    holds (L4-VER-096). An OpenSpec id hashes capability, requirement name and scenario name, never the body, so the
+    same id means the same scenario and only the body can differ. A criterion gets the base's text when `base` holds
+    exactly one criterion with its id, with the same framework, capability, requirement and scenario, and its text is
+    not empty and differs from the parent's after `normalise`; it keeps its id, alias, source and everything else. Any
+    other criterion is returned as it is (the same object), and so is a Kiro one: a Kiro id hashes the text. Order and
+    number do not change. Pure."""
+    held: dict[str, list[Criterion]] = {}
+    for c in base:
+        held.setdefault(c.id, []).append(c)
+    out: list[Criterion] = []
+    for p in parent:
+        found = held.get(p.id, [])
+        match = found[0] if len(found) == 1 else None
+        if (
+            p.framework is Framework.OPENSPEC and match is not None
+            and (match.framework, match.capability, match.requirement, match.scenario)
+            == (p.framework, p.capability, p.requirement, p.scenario)
+            and (reading := normalise(match.text)) and reading != normalise(p.text)
+        ):  # fmt: skip
+            p = replace(p, text=match.text)
+        out.append(p)
+    return out
 
 
 def replaced_requirements(unit_dir: Path) -> frozenset[tuple[str, str]]:

@@ -5,26 +5,26 @@ on `pgrep`. Every group writes its tests first, runs them and sees them fail, th
 
 ## 1. A follow-up reads its merged parent's criteria at the base's wording (L4-VER-096, D1)
 
-- [ ] 1.1 Tests first, in a new `tests/unit/specs/test_parent_text.py` for the pure function and a new
+- [x] 1.1 Tests first, in a new `tests/unit/specs/test_parent_text.py` for the pure function and a new
   `tests/unit/verifier/test_family_parent_text.py` for the family (a temporary git repo as `test_fixloop_kiro.py` builds one):
   SCN-VER-412 (the reworded scenario takes the base's text and keeps its id, alias, capability, requirement, scenario,
   `source_path`, `source_line`; both real shapes: a path and a count), SCN-VER-413 (renamed requirement, a duplicate base id,
   an equal text, an empty base text, no base commit or unreadable git, a Kiro follow-up: all unchanged), SCN-VER-414 (the own
   delta wins and is not carried), SCN-VER-415 (the judge prompt, the writer prompt and the red step read the same text; an
   accept bound to the old `text_sha256` is not in force).
-- [ ] 1.2 Then add `read_at_base(parent, base)` (pure, beside `unchanged_ids` in `src/l4/specs/criteria.py`) and call it in
+- [x] 1.2 Then add `read_at_base(parent, base)` (pure, beside `unchanged_ids` in `src/l4/specs/criteria.py`) and call it in
   `FamilyProvider.merged_parent_criteria` (`src/l4/verifier/fixloop.py`) for an OpenSpec family, with `base_rev` a lazily read,
   once-per-provider argument that `family_of` passes. Share the base-commit rule of `discrimination.unit_base` and
   `preconditions.check_preconditions` in one helper that the three call (for the verifier the commit is the merge base of
   `refs/remotes/origin/<base_branch>` and `HEAD`). A failure to read gives `None` and no rewrite.
-- [ ] 1.3 Read how a task's workbench gets its `provider` in `src/l4/orchestrator.py`, `src/l4/services.py` and
+- [x] 1.3 Read how a task's workbench gets its `provider` in `src/l4/orchestrator.py`, `src/l4/services.py` and
   `src/l4/implementer/` and say where it differs from `family_of`'s. If the red step of a follow-up's task reads a plain
   provider, give it the same family (or the same rewrite) so `tdd.unchanged_on_base` and step 4 read one text (L4-IMP-093);
   add a test for it. Do not widen anything else of the red step. Also read the other callers of `family_of`
   (`src/l4/delegate/run.py`, `src/l4/verifier/legacy.py`, `fixloop.py` `:346` and `:489`): they build the family without
   `bring_in_base` before them, so say whether the base commit they read can be older than the verifier's, and make them read
   the same commit or nothing.
-- [ ] 1.4 Run `tests/unit/specs/test_criteria.py`, `test_base_criteria_at.py`, `test_followup_marker.py`,
+- [x] 1.4 Run `tests/unit/specs/test_criteria.py`, `test_base_criteria_at.py`, `test_followup_marker.py`,
   `tests/unit/verifier/test_fixloop.py`, `test_fixloop_kiro.py`, `test_fixloop_own_criteria.py` and `test_ui_flow.py`, one at
   a time: nothing of them changes.
 

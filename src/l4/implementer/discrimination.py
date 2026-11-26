@@ -42,6 +42,7 @@ from l4.implementer.workbench import Workbench
 from l4.security.protected import glob_match
 from l4.specs.criteria import trace_ids
 from l4.vcs.git import GitError
+from l4.vcs.unit_base import unit_base_commit
 
 PROOF_ZERO_VALUE = "zero_value"
 PROOF_PRE_SATISFIED = "pre_satisfied"
@@ -735,15 +736,7 @@ def _is_test_path(wb: Workbench, path: str) -> bool:
 
 def unit_base(wb: Workbench) -> str | None:
     """Where the unit branch left the base branch, the way the verifier finds it (preconditions step 0)."""
-    branch = wb.cfg.forge.base_branch
-    for ref in (f"refs/remotes/origin/{branch}", branch):
-        sha = wb.git.rev_parse(ref)
-        if sha is None:
-            continue
-        done = wb.git.run("merge-base", sha, "HEAD", check=False)
-        if done.returncode == 0 and done.stdout.strip():
-            return done.stdout.strip()
-    return None
+    return unit_base_commit(wb.git, wb.cfg.forge.base_branch)
 
 
 def _changed_modules(wb: Workbench) -> set[str]:

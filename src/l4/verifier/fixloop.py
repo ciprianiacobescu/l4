@@ -60,7 +60,7 @@ from l4.specs.base import (
 from l4.specs.base import (
     Finding as SpecFinding,
 )
-from l4.specs.criteria import kiro_criteria, openspec_criteria
+from l4.specs.criteria import base_criteria_at, kiro_criteria, openspec_criteria, read_at_base
 from l4.specs.criteria import own_criteria as own_criteria  # re-exported: the prompt, red and doctor read it here
 from l4.specs.feedback import FeedbackFile, FeedbackStatus
 from l4.specs.fixmark import FixMarker, read_fix_marker, split_fix_name
@@ -78,8 +78,9 @@ from l4.state.next_step import (
     UNCONVERTED_AND_JUDGE_VIEW,
 )
 from l4.vcs.authorship import commit_records, is_harness_strict
-from l4.vcs.git import Git
+from l4.vcs.git import Git, GitError
 from l4.vcs.trailers import CommitTrailers
+from l4.vcs.unit_base import unit_base_commit
 from l4.verifier.failures import BASE_FAILS_TITLE, BASE_GONE_TITLE, GATE_FINDING_GATES
 from l4.verifier.feedback import record_no_status
 from l4.verifier.fixunit import FixPlan, plan_fix_unit, redact_plan
@@ -144,13 +145,18 @@ class FamilyProvider:
     `tasks(<fix unit>)` is that unit's own list, so that `run_task` ticks the right box."""
 
     def __init__(
-        self, inner: SpecProvider, parent: UnitRef, *, git: Git | None = None, on_reject: Reject | None = None
-    ) -> None:
+        self, inner: SpecProvider, parent: UnitRef, *, git: Git | None = None, on_reject: Reject | None = None,
+        base_rev: Callable[[], str | None] | None = None,
+    ) -> None:  # fmt: skip
         """`git` makes the family trust only fix units that the harness committed (see `fix_units_of`); `on_reject`
-        hears about each rejected folder once."""
+        hears about each rejected folder once. `base_rev` gives the unit's base commit (`vcs.unit_base`), called once
+        and only when an OpenSpec follow-up's merged parent is read: without it a parent criterion keeps the text of its
+        archived delta (L4-VER-096)."""
         self.inner, self.parent = inner, parent
         self.framework: Framework = inner.framework
         self.git, self._on_reject = git, on_reject
+        self._base_rev = base_rev
+        self._base: list[Criterion] | None = None  # the base's criteria at `base_rev`, read once
         self._rejected: set[tuple[str, str]] = set()
 
     def _reject(self, unit: UnitRef, why: str) -> None:
@@ -200,9 +206,25 @@ class FamilyProvider:
         if folder is None:
             return []
         try:
-            return kiro_criteria(folder) if self.framework is Framework.KIRO else openspec_criteria(folder)
+            if self.framework is Framework.KIRO:
+                return kiro_criteria(folder)
+            merged = openspec_criteria(folder)
+            return read_at_base(merged, self._base_criteria()) if merged else merged
         except SpecError:
             return []
+
+    def _base_criteria(self) -> list[Criterion]:
+        """The base's capability specs at the unit's base commit, from git, read once per provider (L4-VER-096). Nothing
+        when no commit is known or git cannot read them: the parent's text then stays as its archived delta has it."""
+        if self._base is None:
+            self._base = []
+            if self._base_rev is not None and self.git is not None:
+                try:
+                    rev = self._base_rev()
+                    self._base = base_criteria_at(self.git, rev) if rev else []
+                except (OSError, GitError):
+                    self._base = []
+        return self._base
 
     def load(self, unit: UnitRef) -> Unit:
         return Unit(unit, tuple(self.tasks(unit)), tuple(self.criteria(unit)))
@@ -249,7 +271,10 @@ def family_of(ctx: HookContext) -> FamilyProvider:
             "guard.violation", phase="verify", path=path, rule="foreign-fix-unit", action="ignored", reason=why
         )
 
-    return FamilyProvider(s.provider, s.ref, git=s.git, on_reject=reject)
+    base = ctx.cfg.forge.base_branch
+    return FamilyProvider(
+        s.provider, s.ref, git=s.git, on_reject=reject, base_rev=lambda: unit_base_commit(s.git, base)
+    )  # the base commit the red step and the verifier's step 0 read (L4-VER-096)
 
 
 def family_units(provider: SpecProvider, ref: UnitRef) -> list[UnitRef]:
