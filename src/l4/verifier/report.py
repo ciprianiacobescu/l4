@@ -387,7 +387,7 @@ def _generated_json(g: GeneratedOutcome) -> dict[str, Any]:
     data["tests"], data["artifacts"] = list(g.tests), list(g.artifacts)
     data["covered_by"] = list(g.covered_by)
     data["appended"] = list(g.appended)
-    if not data["appended"]:  # an optional key: a round that appended nothing is stored as 0.4.60 stored it
+    if not data["appended"]:  # an optional key: a round that appended nothing is stored as 0.4.61 stored it
         del data["appended"]
     data["code"] = "" if g.accepted else g.code[:MAX_CODE_CHARS]  # a copy `generate` already bounded and redacted
     if not data["code"]:

@@ -3,7 +3,7 @@
 This runbook tells you how to operate the units of the L4 harness. It shows the states of a unit, how to find why a
 unit stopped, and the procedures that make a unit move again.
 
-It applies to harness 0.4.60 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
+It applies to harness 0.4.61 on GitHub and on GitLab. The text follows the rules of ASD-STE100 (Simplified
 Technical English): short sentences, one instruction in each step, and each warning before its step.
 
 Other documents:
@@ -24,7 +24,7 @@ Other documents:
 8. [How to retry something](#8-how-to-retry-something)
 9. [What your push does](#9-what-your-push-does)
 10. [Reference](#10-reference)
-11. [Known limits of 0.4.60](#11-known-limits-of-0460)
+11. [Known limits of 0.4.61](#11-known-limits-of-0461)
 12. [Delivery plans](#12-delivery-plans)
 13. [Reading the history (`l4 kg`)](#13-reading-the-history-l4-kg)
 
@@ -886,7 +886,7 @@ A question of a fix unit does not move the unit to `awaiting_human`. The unit st
 labels `l4:fixing` and `l4:needs-answers`. The heading is ``### Waiting for you: a human answer (fix unit `<name>`)``.
 `l4 plan` says `fixing: fix unit questions open: …`.
 
-**Procedure: a unit in `fixing` whose fix unit cannot move** (the release after 0.4.60; L4-VER-095). The case: the
+**Procedure: a unit in `fixing` whose fix unit cannot move** (since 0.4.61; L4-VER-095). The case: the
 unit failed on the finding `existing tests are skipped in a changed test file` on an older harness, its fix unit has one
 task for that finding, and the task asked a question because a fix unit cannot change test files. No answer lets the task
 run. `l4 status` shows `fixing` with `fix unit questions: Q-NNN`. Do these steps **in this order**:
@@ -1205,7 +1205,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   (`judge_view_rejected`, [7.3.3](#733-escalated-with-judge_view_rejected)): a fix unit cannot shrink a diff, so no
   `WHEN … THEN …` makes a fix of it. Split the change into smaller units instead.
 - A hold `skipped: existing tests in `<path>` were also skipped in a base report, and the file adds or changes no skip the
-  harness reads (<n> tests)` (the release after 0.4.60; L4-VER-092 to L4-VER-095) says that the unit changed a test file,
+  harness reads (<n> tests)` (since 0.4.61; L4-VER-092 to L4-VER-095) says that the unit changed a test file,
   the gate's report holds old tests of that file as skipped, and the harness found nothing that the unit added to skip
   them. The usual cause is an environment the gate does not have: a docker-compose stack, a service, a variable
   (`skipif(os.getenv("…") != "true")`). Before this release the same case was a major finding that nobody could waive,
@@ -1284,7 +1284,7 @@ A push to a unit branch runs that branch's own copy of `l4.yml`, which can be ol
   says `carried from the base`, and the judge still has to pass it. A test whose file the harness cannot place with
   certainty (a module name that two roots share, a TypeScript test beside a Python module of its stem, or two files that
   could hold it) keeps the hold.
-  Releases after 0.4.60 also carry two cases that kept the hold before. A follow-up reads its merged parent's scenarios
+  Releases after 0.4.61 also carry two cases that kept the hold before. A follow-up reads its merged parent's scenarios
   at the wording the base spec holds now: a parent scenario that a later change reworded is the base's text for the
   family, so it is unchanged on the base, and a person's earlier accept of its criterion verdict is asked once more
   because it was bound to the old text (a scenario the follow-up restates in its own delta keeps its own text and is
@@ -2178,7 +2178,7 @@ The cause is a changed ledger file. It has a line that is not correct, a sequenc
 another unit. Or its `run_id` does not match the file name (a renamed or copied file).
 
 Before the hand-off, the ledger is on `<branch>` only. After the hand-off, new events are in `ledger-pending/` on the
-lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.60 has no procedure for a corrupt `ledger-pending/`.
+lock ref, and a revert on `<branch>` cannot reach them. Release 0.4.61 has no procedure for a corrupt `ledger-pending/`.
 Report a harness defect.
 
 1. Fetch:
@@ -2247,7 +2247,7 @@ on the unit.
     works in`). Check out another branch there, or run `l4` from another checkout. Then run again.
   Upgrade the projects of a runner between pipelines: a job of the older harness that is still running holds
   the old lock path, so it does not exclude a job of the new one.
-- `l4 unlock` is not available in 0.4.60 (exit 2). On a self-hosted runner, if the process does not stop, stop the
+- `l4 unlock` is not available in 0.4.61 (exit 2). On a self-hosted runner, if the process does not stop, stop the
   process with the pid.
 
 ### 7.11a The prompt cut a spec file, or red names a criterion
@@ -2670,7 +2670,7 @@ creates `l4:resume` only. `l4 setup gitlab` creates no labels.
 | `l4 yolo check\|review\|activate\|status\|cancel\|resume\|report <plan-id>` | Operates a delivery plan ([section 12](#12-delivery-plans)). `check`, `status` and `report` only read. | The others: yes |
 | `l4 verify --unit <unit>` | Runs only the verification of an `implemented` or `verifying` unit. It also accepts an `awaiting_human` unit when all verdicts are answered. | Yes |
 
-These commands and options are not available in 0.4.60. `l4 --help` marks each with `(not yet implemented)`. They stop
+These commands and options are not available in 0.4.61. `l4 --help` marks each with `(not yet implemented)`. They stop
 with exit 2: `l4 unlock`, `l4 status --rebuild`, `l4 resume --extend-iterations`, `l4 resume --extend-cost`,
 `l4 run --time-budget`, `l4 verify --dry-run`.
 
@@ -3041,11 +3041,11 @@ Risks:
 32000 and that has no key: `<profile> asks for at most 32000 output tokens although its model entry allows <output>
 (OpenCode 1's default): set options.max_output_tokens to use it`. The note does not change the status of the check.
 
-## 11. Known limits of 0.4.60
+## 11. Known limits of 0.4.61
 
 These limits make operation more difficult. Know them before you start.
 
-- From the release after 0.4.60, an old skipped test of a changed test file is a hold when a base report also holds it as
+- From 0.4.61, an old skipped test of a changed test file is a hold when a base report also holds it as
   skipped, the file adds or changes no skip construct that the harness reads and nothing inside the file that decides
   whether an unchanged skip skips (a flag, a guard's condition, a helper, a fixture, an import), the unit changed the
   file only in places that cannot change why a test skips (a comment, a blank line, the body of a test beyond what skips it, a plain `pytest.mark.<name>`, a whole new standard library import of an unused name), and no test-support, runner, setup or dependency file changed. Otherwise it

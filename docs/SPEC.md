@@ -18151,7 +18151,7 @@ scenario is a spec defect (§26).
   base spec holds two scenarios of that name under that requirement, one whose base text equals the parent's, and one
   that is checked in a repository where git cannot read `openspec/specs` at the base commit; and a Kiro follow-up
 - **When** the family's criteria are read
-- **Then** every one of them has the parent's text exactly as in 0.4.60, none is carried by reason of this requirement,
+- **Then** every one of them has the parent's text exactly as in 0.4.61, none is carried by reason of this requirement,
   and the Kiro follow-up's criteria and baseline are unchanged
 
 #### SCN-VER-414 (−) The follow-up's own scenario wins and a changed one is still not carried · L4-VER-096
@@ -18183,7 +18183,7 @@ scenario is a spec defect (§26).
 - **Given** SCN-VER-416 where the unit also changed one assertion of an old test that C1 does not trace, or deleted a blank
   line, a comment or an import line (-1 line, whatever it is)
 - **When** step 5 runs
-- **Then** neither C1 nor C2 is carried and each follows 0.4.60 (the writer, then a hold)
+- **Then** neither C1 nor C2 is carried and each follows 0.4.61 (the writer, then a hold)
 
 #### SCN-VER-418 (−) A line added inside an old test, a traced one or not, keeps the hold · L4-VER-097, L4-VER-086
 - **Given** SCN-VER-416 where the unit added one line inside the body of the traced test (+1/-0), or inside another old
@@ -18217,13 +18217,13 @@ scenario is a spec defect (§26).
 - **Given** the tests of SCN-VER-416 in a file that the unit renamed (so the path at the head is an addition), or whose blob
   is over `MAX_SOURCE_BYTES`, or a Go, Java or C# test file that the unit changed by adding one test
 - **When** step 5 runs
-- **Then** the criteria are gaps as in 0.4.60
+- **Then** the criteria are gaps as in 0.4.61
 
 #### SCN-VER-423 (+/−) The other conditions of L4-VER-086 still decide, file by file · L4-VER-097, L4-VER-086
 - **Given** SCN-VER-416 where C1 is also traced by a test in a second changed file that fails the rule, C2 has a tracing
   test whose proof is red, C3 is rejected by a person, and C4's scenario text differs from the base's
 - **When** step 5 runs
-- **Then** none of C1, C2, C3 and C4 is carried, and each one's outcome is what 0.4.60 gives it
+- **Then** none of C1, C2, C3 and C4 is carried, and each one's outcome is what 0.4.61 gives it
 
 #### SCN-VER-424 (+) A new test function and a new method of an old class carry the criteria the file traces · L4-VER-098, L4-VER-086
 - **Given** a unit that changed a Python test file F by adding `def test_new(...)` at module level and `def test_other(self)` to
@@ -18237,7 +18237,7 @@ scenario is a spec defect (§26).
   carries `@pytest.mark.slow`, or is a `def test_x` inside an old test's body, or the unit also changed one line of an old
   test or a module-level statement, or the head does not parse
 - **When** step 5 runs
-- **Then** the rule fails and the criterion is a gap as in 0.4.60
+- **Then** the rule fails and the criterion is a gap as in 0.4.61
 
 #### SCN-VER-426 (+) A reused round keeps the carry and the row says what was appended · L4-VER-098, L4-VER-086
 - **Given** the round of SCN-VER-416 or SCN-VER-424, reused by the next round
@@ -18266,7 +18266,7 @@ scenario is a spec defect (§26).
   `def test_new(x=compute())`, `def test_new(*, x=1)`, `def test_new(a: compute())`, `def test_new(a: (lambda: 1)())` or
   `def test_new() -> compute()`
 - **When** step 5 runs
-- **Then** the rule fails and the criterion is a gap as in 0.4.60; plain fixture parameters (`db`, `db: Session`,
+- **Then** the rule fails and the criterion is a gap as in 0.4.61; plain fixture parameters (`db`, `db: Session`,
   `-> None`) and an ordinary comment on line 1 do not fail it
 
 #### SCN-VER-429 (−) A traced test that step 1's run did not pass keeps the hold · L4-VER-097, L4-VER-086

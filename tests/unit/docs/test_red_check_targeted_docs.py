@@ -44,15 +44,15 @@ def test_the_runbook_and_the_skill_name_the_key() -> None:
 
 
 def test_the_changelog_names_the_key_under_unreleased() -> None:
-    unreleased = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+    unreleased = read("CHANGELOG.md").split("## 0.4.61 (", 1)[1].split("\n## ", 1)[0]
     assert "red_check" in unreleased
 
 
 def test_no_file_of_the_change_names_a_version_of_the_release() -> None:
     texts = {p: p.read_text(encoding="utf-8") for p in CHANGE.rglob("*.md")}
     assert texts
-    unreleased = read("CHANGELOG.md").split("## Unreleased", 1)[1].split("\n## ", 1)[0]
-    texts[Path("CHANGELOG.md#Unreleased")] = unreleased
+    unreleased = read("CHANGELOG.md").split("## 0.4.61 (", 1)[1].split("\n## ", 1)[0]
+    texts[Path("CHANGELOG.md#0.4.61")] = unreleased
     for path, text in texts.items():
         assert not OTHER_VERSION.search(text), path
 
