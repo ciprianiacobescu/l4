@@ -37,7 +37,7 @@ def flat(count: int = 15, *, new_at: int | None = None, new: str | None = None, 
 
 def names_of(text: str) -> list[str]:
     """The names a reporter gives the tests of `text`: the strings of its `test(` and `it(` calls."""
-    return re.findall(r"""^\s*(?:test|it)(?:\.\w+)*\(\s*["'](.+?)["']""", text, re.M)
+    return re.findall(r"""^\s*(?:test|it)(?:\.\w+)*\(\s*["'`](.+?)["'`]""", text, re.M)
 
 
 def accepts(base: str, head: str, traced: list[str] | None = None, *, path: str = TS, facts=OK, names=None) -> bool:
@@ -251,12 +251,15 @@ def test_two_sibling_tests_with_one_title_are_not_found():
 
 def test_the_base_file_must_have_been_run_by_step_1_and_no_traced_test_failed_there():
     traced = [f"{PREFIX}C-00000003 old test 3"]
-    assert base_run_covers(Step1Run(reverted=(TS,)), TS, traced)
+    ran = Step1Run(reverted=(TS,), passed=tuple(traced))
+    assert base_run_covers(ran, TS, traced)
     assert not base_run_covers(None, TS, traced)  # step 1 did not run
-    assert not base_run_covers(Step1Run(reverted=("web/src/other.test.ts",)), TS, traced)  # kept at head, or not run
+    assert not base_run_covers(Step1Run(reverted=("web/src/other.test.ts",), passed=tuple(traced)), TS, traced)
     for field in ("failing", "not_run", "flaky"):
-        assert not base_run_covers(Step1Run(reverted=(TS,), **{field: tuple(traced)}), TS, traced)
-    assert base_run_covers(Step1Run(reverted=(TS,), failing=("web.src.other.test.ts::x",)), TS, traced)
+        assert not base_run_covers(Step1Run(reverted=(TS,), passed=tuple(traced), **{field: tuple(traced)}), TS, traced)
+    assert base_run_covers(
+        Step1Run(reverted=(TS,), passed=tuple(traced), failing=("web.src.other.test.ts::x",)), TS, traced
+    )
 
 
 # -- SCN-VER-422: other files and other languages --------------------------------------------------------------------
@@ -480,7 +483,7 @@ def glue(repo, head, *, run=None, traced=None, reports=()):
     ids = traced if traced is not None else [f"{PREFIX}C-00000003 old test 3"]
     report = TestReport({i: TestCase(i, "passed") for i in [*ids, *(f"{PREFIX}{n}" for n in reports)]})
     return AppendedFiles(
-        repo.git, repo.base, head, run=run or Step1Run(reverted=(TS,)), files=dict.fromkeys(ids, TS),
+        repo.git, repo.base, head, run=run or Step1Run(reverted=(TS,), passed=tuple(ids)), files=dict.fromkeys(ids, TS),
         reports=[report, None], paths=lambda: [TS], facts=lambda: changed_file_facts(repo.git, repo.base, head),
     )  # fmt: skip
 
@@ -492,7 +495,7 @@ def test_the_glue_reads_git_decides_once_per_file_and_remembers_what_it_accepted
     test = f"{PREFIX}C-00000003 old test 3"
     assert only(test, TS) is True and only(test, TS) is True and only.accepted == {TS}
     assert glue(repo, head, run=Step1Run())(test, TS) is False  # step 1 did not run the base's file
-    assert glue(repo, head, run=Step1Run(reverted=(TS,), failing=(test,)))(test, TS) is False
+    assert glue(repo, head, run=Step1Run(reverted=(TS,), passed=(test,), failing=(test,)))(test, TS) is False
     refused = glue(repo, head)  # the report of the head lacks the new test: its lines are outside every block
     assert refused(test, TS) is False and refused.accepted == set()
 
@@ -510,3 +513,301 @@ def test_scn_ver_422_a_binary_or_oversized_or_not_utf8_blob_keeps_the_hold(repo)
     repo.write(TS, big)
     head = repo.commit("oversized")
     assert glue(repo, head, reports=["C-0badf00d the new test"])(f"{PREFIX}C-00000003 old test 3", TS) is False
+
+
+# -- group 5 (review findings): F1, a new block is exactly one plain `it(` or `test(` statement ------------------------
+
+N = "C-0badf00d the new test"
+
+
+def with_new(text: str, *, at: int = 8) -> str:
+    """`BASE` with `text` (lines, as written) before old block `at`."""
+    return flat(new=text, new_at=at)
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        f'it("{N}", () => {{}}); beforeEach(() => {{ counter = 5; }});\n',
+        f'it("{N}", () => {{}}); vi.mock("./mod");\n',
+        f'it("{N}", () => {{}}); counter = 5;\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n  }}); beforeEach(() => {{ counter = 5;\n}});\n',
+        f'it("{N}", (counter = 7, () => {{}}));\n',
+        f'it("{N}", (() => {{ counter = 9; return () => {{}}; }})());\n',
+        f'it("{N}", () => {{}}, (counter = 4));\n',
+        f'foo(); it("{N}", () => {{}});\n',
+        f'it("{N}", () => {{}}) + (counter = 1);\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}}).skip;\n',
+        f'it.only("{N}", () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it.skip("{N}", () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'test.todo("{N}");\n',
+        f'it("{N}", (a = counter++) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", async ({{ page = open(1) }}) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", (a, b) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", () => expect(2).toBe(2));\n',
+        f'it("{N}", {{ retry: 2 }}, () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}}, {{ timeout: 5 }});\n',
+        f"it(`{N} ${{kind}}`, () => {{\n  expect(2).toBe(2);\n}});\n",
+        f'it("{N}" + suffix, () => {{\n  expect(2).toBe(2);\n}});\n',
+        "it(title, () => {\n  expect(2).toBe(2);\n});\n",
+        f'describe("{N}", () => {{\n  it("{N}", () => {{\n    expect(2).toBe(2);\n  }});\n}});\n',
+        f'describe("{N}", () => {{\n  beforeEach(() => {{ counter = 5; }});\n  it("{N}", () => {{\n    a();\n  }});\n}});\n',  # noqa: E501
+        f'if (flag)\nit("{N}", () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'foo(\nit("{N}", () => {{\n  expect(2).toBe(2);\n}})\n);\n',
+        f'const x = [\nit("{N}", () => {{\n  expect(2).toBe(2);\n}}),\n];\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}})\n(counter = 1);\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}})\n.skip;\n',
+    ],
+    ids=[
+        "hook-on-the-line",
+        "vi.mock-on-the-line",
+        "assignment-on-the-line",
+        "hook-opened-on-the-closing-line",
+        "default-argument-side-effect",
+        "called-function-argument",
+        "timeout-is-an-assignment",
+        "code-before-the-it",
+        "operator-after-the-call",
+        "member-after-the-call",
+        "it.only",
+        "it.skip",
+        "test.todo",
+        "default-value-param",
+        "destructured-default",
+        "two-params",
+        "expression-body",
+        "options-object-second",
+        "options-object-third",
+        "template-title-with-expression",
+        "concatenated-title",
+        "variable-title",
+        "describe-with-the-same-title",
+        "describe-with-a-hook-and-the-same-title",
+        "body-of-an-if",
+        "argument-of-a-call",
+        "element-of-an-array",
+        "next-line-calls-it",
+        "next-line-member",
+    ],
+)
+def test_scn_ver_419_a_new_block_is_exactly_one_plain_it_or_test_statement(new):
+    assert not accepts(BASE, with_new(new))
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", () => {{}});\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}})\n',
+        f'it("{N}", async () => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", function () {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", async function named() {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", ({{ page }}) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", async ({{ page }}: Fixtures) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", async (ctx: TestContext) => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", ctx => {{\n  expect(2).toBe(2);\n}});\n',
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}}, 5000);\n',
+        f"it('{N}', () => {{\n  expect(2).toBe(2);\n}});\n",
+        f"it(`{N}`, () => {{\n  expect(2).toBe(2);\n}});\n",
+        f'it("{N}", () => {{\n  expect(2).toBe(2);\n}}); // why\n',
+        f'it(\n  "{N}",\n  () => {{\n    expect(2).toBe(2);\n  }},\n);\n',
+        f'it(\n  "{N}",\n  () => {{\n    expect(2).toBe(2);\n  }},\n  1000,\n);\n',
+        f'test("{N}", () => {{\n  const text = "a ) }} ] and a (";\n  expect(text).toBe(text);\n}});\n',
+        f'test("{N}", () => {{\n  const t = `a ${{b}} ) `;\n  expect(t).toBe(t);\n}});\n',
+    ],
+    ids=[
+        "plain",
+        "empty-body",
+        "no-semicolon",
+        "async-arrow",
+        "function",
+        "named-async-function",
+        "destructured",
+        "destructured-typed",
+        "named-typed",
+        "bare-param",
+        "timeout",
+        "single-quotes",
+        "backtick-title",
+        "trailing-comment",
+        "prettier-multiline",
+        "prettier-timeout",
+        "brackets-in-strings",
+        "template-body",
+    ],
+)
+def test_scn_ver_416_a_plain_it_or_test_statement_is_a_new_block(new):
+    assert accepts(BASE, with_new(new))
+    assert accepts(BASE, with_new(new, at=0)) and accepts(BASE, flat(new=new))
+
+
+@pytest.mark.parametrize("head", ["if (flag)", "for (const x of xs)", "for await (const x of xs)", "while (go)"])
+def test_scn_ver_419_a_test_inserted_as_the_body_of_a_braceless_control_statement_keeps_the_hold(head):
+    """The base's next line is the body of `<head>`; a plain `it(` inserted between them becomes that body."""
+    base = BASE.replace("const done = 1;\n", f"{head}\n  done();\n")
+    new = f'it("{N}", () => {{\n  expect(2).toBe(2);\n}});\n'
+    assert not accepts(base, base.replace(f"{head}\n", f"{head}\n{new}"))
+    assert accepts(base, base.replace(f"{head}\n", new + f"{head}\n"))  # before the head: a statement of its own
+
+
+def test_scn_ver_416_a_plain_statement_inside_a_describe_and_after_one_without_a_semicolon():
+    base = HEADER + 'describe("g", () => {\n  it("C-00000003 old test 3", () => {\n    expect(1).toBe(1);\n  })\n})\n'
+    new = f'  it("{N}", () => {{\n    expect(2).toBe(2);\n  }})\n'
+    head = base.replace("  })\n})\n", "  })\n" + new + "})\n")
+    traced = [f"{PREFIX}g C-00000003 old test 3"]
+    assert accepts(base, head, traced, names=[f"g {n}" for n in names_of(head)])
+
+
+def test_scn_ver_419_a_block_in_a_template_literal_or_a_comment_is_not_a_block():
+    block = f'it("{N}", () => {{\n  expect(2).toBe(2);\n}});\n'
+    base = BASE.replace("const done = 1;\n", "const page = `\n<p>a</p>\n`;\nconst done = 1;\n")
+    assert not accepts(base, base.replace("<p>a</p>\n", "<p>a</p>\n" + block))  # the constant's text changed
+    assert not accepts(BASE, flat(new=f"/*\n{block}*/\n"))
+    assert not accepts(BASE, flat(new=f"// {block}"))
+
+
+def test_scn_ver_419_a_title_equal_to_a_describes_picks_the_it_never_the_describe():
+    hook = "  beforeEach(() => { counter = 5; });\n"
+    wrapped = f'describe("{N}", () => {{\n{hook}  it("{N}", () => {{\n    a();\n  }});\n}});\n'
+    assert not accepts(BASE, flat(new=wrapped), names=[N])
+    assert not accepts(BASE, flat(new=wrapped), names=[f"{N} {N}"])
+
+
+def test_scn_ver_419_two_new_tests_that_one_name_cannot_tell_apart_keep_the_hold():
+    block = f'it("{N}", () => {{\n  expect(2).toBe(2);\n}});\n'
+    assert not accepts(BASE, flat(new=block + "\n" + block), names=[*names_of(BASE), N])
+    assert accepts(BASE, flat(new=block + "\n" + block.replace(N, N + " b")), names=[*names_of(BASE), N, N + " b"])
+
+
+# -- F4: a file is read once ------------------------------------------------------------------------------------------
+
+
+def test_a_generated_file_of_3000_tests_is_decided_in_a_few_seconds():
+    import time
+
+    base = HEADER + "\n".join(old_block(n) for n in range(3000)) + "\nconst done = 1;\n"
+    head = base.replace("const done", new_block() + "\nconst done")
+    names = names_of(head)
+    traced = [f"{PREFIX}C-{n:08x} old test {n}" for n in (3, 1500, 2999)]
+    started = time.monotonic()
+    assert appended_only(TS, base, head, traced, names, OK)
+    assert time.monotonic() - started < 10, "a name is looked up in an index of the file, never found by a new scan"
+    started = time.monotonic()
+    assert not appended_only(
+        TS, base, head.replace("const done", f'it("{N}", () => {{}}); x = 1;\nconst done'), traced, names, OK
+    )
+    assert time.monotonic() - started < 10
+
+
+def test_a_generated_python_file_of_3000_tests_is_decided_in_a_few_seconds():
+    import time
+
+    base = "import pytest\n\n\n" + "\n\n".join(f"def test_{n}():\n    assert {n} == {n}\n" for n in range(3000))
+    head = base + "\n\n" + "\n\n".join(f"def test_new_{n}():\n    assert {n}\n" for n in range(300))
+    started = time.monotonic()
+    assert appended_only(PY, base, head, ["tests.test_page::test_5", "tests.test_page::test_2999"], [], OK)
+    assert time.monotonic() - started < 10
+
+
+# -- F2: a coding declaration or a shebang is code ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        "# coding: latin-1\n",
+        "# -*- coding: latin-1 -*-\n",
+        "#!/usr/bin/env python3\n",
+        "# vim: set fileencoding=latin-1\n",
+    ],
+    ids=["coding", "emacs-style", "shebang", "fileencoding"],
+)
+def test_scn_ver_424_a_coding_declaration_or_a_shebang_added_on_line_one_or_two_keeps_the_hold(first):
+    new = '\n\ndef test_new():\n    assert render("n") == "N"\n'
+    assert not py(PY_BASE, first + PY_BASE + new)
+    lines = PY_BASE.splitlines(keepends=True)
+    if not first.startswith("#!"):  # a shebang is one on line 1 only; on line 2 it is a comment
+        assert not py(PY_BASE, lines[0] + first + "".join(lines[1:]) + new)
+
+
+def test_scn_ver_424_a_changed_or_removed_declaration_keeps_the_hold_and_an_equal_one_does_not():
+    new = '\n\ndef test_new():\n    assert render("n") == "N"\n'
+    cookie = "# -*- coding: utf-8 -*-\n"
+    shebang = "#!/usr/bin/env python3\n"
+    with_cookie = cookie + PY_BASE
+    assert py(with_cookie, with_cookie + new)  # the same declaration on both sides
+    assert not py(with_cookie, with_cookie.replace("utf-8", "latin-1") + new)
+    assert not py(with_cookie, PY_BASE + new)
+    assert py(shebang + PY_BASE, shebang + PY_BASE + new)
+    assert not py(shebang + PY_BASE, shebang.replace("python3", "python2") + PY_BASE + new)
+    assert not py(
+        PY_BASE, PY_BASE.replace('"""The page."""', '"""The page."""\n# coding: x') + new
+    )  # line 2: read as one
+
+
+def test_scn_ver_424_a_plain_comment_on_line_one_is_still_dropped_and_a_late_cookie_looking_comment_too():
+    new = '\n\ndef test_new():\n    assert render("n") == "N"\n'
+    assert py(PY_BASE, "# a note\n" + PY_BASE + new)
+    late = PY_BASE.replace("def test_title", "# coding: latin-1\ndef test_title")  # line 8: not a declaration
+    assert py(PY_BASE, late + new)
+
+
+# -- F3: a new Python test has a plain signature -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "def test_new(x=STATE.update(n=5)):",
+        "def test_new(x=1):",
+        "def test_new(*, x=1):",
+        "def test_new(a, /, b=2):",
+        "def test_new(a: STATE.update(n=5)):",
+        "def test_new(a: (lambda: 1)()):",
+        "def test_new(a: (b := 3)):",
+        "def test_new(a: list[make()]):",
+        "def test_new(a: int | None):",
+        "def test_new(*args: f(), **kw):",
+        "def test_new(**kw: f()):",
+        "def test_new() -> STATE.update(n=5):",
+        "def test_new() -> (lambda: 1)():",
+        "async def test_new(x=f()):",
+    ],
+)
+def test_scn_ver_425_a_default_value_or_a_computed_annotation_on_a_new_test_keeps_the_hold(signature):
+    head = PY_BASE + f"\n\n{signature}\n    assert 1\n"
+    assert not py(PY_BASE, head)
+    method = PY_BASE + f"\n    {signature.replace('(', '(self, ', 1).replace('(self, )', '(self)')}\n        assert 1\n"
+    assert not py(PY_BASE, method)
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "def test_new():",
+        "def test_new(db):",
+        "def test_new(db, tmp_path):",
+        "def test_new(db: Session) -> None:",
+        "def test_new(db: orm.Session, n: int, *rest: str, **kw: bool) -> None:",
+        "def test_new(db: dict[str, list[int]]) -> 'Result':",
+        "def test_new(db: Optional['Session']) -> pytest.Item:",
+        "def test_new(*, db: Session) -> None:",
+        "async def test_new(db):",
+    ],
+)
+def test_scn_ver_424_plain_fixture_parameters_and_annotations_stay_allowed(signature):
+    assert py(PY_BASE, PY_BASE + f"\n\n{signature}\n    assert 1\n")
+
+
+# -- F5: the traced tests must have passed in step 1's run -------------------------------------------------------------
+
+
+def test_scn_ver_421_a_traced_test_absent_from_step_1s_passed_list_keeps_the_hold():
+    traced = [f"{PREFIX}C-00000003 old test 3", f"{PREFIX}C-00000007 old test 7"]
+    assert base_run_covers(Step1Run(reverted=(TS,), passed=tuple(traced)), TS, traced)
+    assert base_run_covers(Step1Run(reverted=(TS,), passed=(*traced, "x::y")), TS, traced)
+    assert not base_run_covers(Step1Run(reverted=(TS,), passed=(traced[0],)), TS, traced)  # one is missing
+    assert not base_run_covers(Step1Run(reverted=(TS,), passed=()), TS, traced)
+    assert not base_run_covers(Step1Run(reverted=(TS,)), TS, traced)  # the list is absent: fail closed
+    assert Step1Run().passed is None

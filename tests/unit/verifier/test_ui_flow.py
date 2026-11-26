@@ -881,6 +881,7 @@ def test_scn_ver_421_step_1s_record_of_the_round_decides_through_outcome_into_th
     [record] = seen
     assert record is not None and PRICING in record.reverted  # the real record lists the file `reverted`
     assert not (record.failing or record.not_run or record.flaky)
+    assert OLD_PRICING[KNOWN] in (record.passed or ())  # and the run says the tracing test PASSED there (F5)
 
 
 @pytest.mark.parametrize("field", ["failing", "not_run", "flaky"])
@@ -896,6 +897,34 @@ def test_scn_ver_421_a_tracing_test_among_failing_not_run_or_flaky_at_step_1_kee
     def checked(*args, **kwargs):
         outcome = real(*args, **kwargs)
         outcome.base_run = dc.replace(outcome.base_run, **{field: (OLD_PRICING[KNOWN],)})
+        return outcome
+
+    monkeypatch.setattr(base_tests, "check_base_tests", checked)
+    run = run_l4(
+        [appending_red(), web_green(), ui_test(KNOWN, 'data-testid="coupon"', "slot"), no_test(UNKNOWN), JUDGE],
+        **web_repo,
+    )
+    assert run.code == 11, run.outcome
+    assert {e["criterion"]: e["status"] for e in run.events("verify.generated")} == {
+        KNOWN: "accepted", UNKNOWN: "uncollectable",
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize("passed", [(), None], ids=["empty", "absent"])
+def test_scn_ver_421_a_tracing_test_that_step_1s_run_did_not_pass_keeps_the_hold(
+    run_l4, valid_spec, web_repo, appended_repo, monkeypatch, passed
+):
+    """Absence from `failing`, `not_run` and `flaky` is not presence: the traced test must be among those that PASSED
+    in step 1's run of the base's file on the unit's code, and a record without the list fails closed."""
+    import dataclasses as dc
+
+    from l4.verifier import base_tests
+
+    real = base_tests.check_base_tests
+
+    def checked(*args, **kwargs):
+        outcome = real(*args, **kwargs)
+        outcome.base_run = dc.replace(outcome.base_run, passed=passed)
         return outcome
 
     monkeypatch.setattr(base_tests, "check_base_tests", checked)

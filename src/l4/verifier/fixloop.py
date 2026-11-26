@@ -273,8 +273,9 @@ def family_of(ctx: HookContext) -> FamilyProvider:
 
     base = ctx.cfg.forge.base_branch
     return FamilyProvider(
-        s.provider, s.ref, git=s.git, on_reject=reject, base_rev=lambda: unit_base_commit(s.git, base)
-    )  # the base commit the red step and the verifier's step 0 read (L4-VER-096)
+        s.provider, s.ref, git=s.git, on_reject=reject,
+        base_rev=lambda: unit_base_commit(s.git, base, local_fallback=False),
+    )  # fmt: skip  # the verifier's step 0 commit: origin only, so a local base branch moved onto the unit is no base
 
 
 def family_units(provider: SpecProvider, ref: UnitRef) -> list[UnitRef]:

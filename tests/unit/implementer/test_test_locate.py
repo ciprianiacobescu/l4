@@ -1,6 +1,8 @@
 """A test id is followed to its file in any language, and a test's own lines are found in a file that is not Python
 (test-file-reach 1.1, L4-IMP-065, SCN-IMP-413, SCN-IMP-414)."""
 
+import pytest
+
 from l4.implementer.test_locate import file_of_id, outside_tests, window
 
 PATHS = [
@@ -335,3 +337,33 @@ def test_a_constant_a_comment_and_an_import_are_shared_lines_and_a_describe_scop
     assert outside_tests(scoped, ["registry > holds"]) != outside_tests(changed, ["registry > holds"])
     assert outside_tests(SHARED + "// note\n", ["first"]) != outside_tests(SHARED, ["first"])
     assert outside_tests(SHARED.replace("1, B: 2", "1, B: 2, C: 3"), ["second"]) != outside_tests(SHARED, ["second"])
+
+
+# -- the index of a file's calls gives what the line-by-line reading gives (F4 of ui-carry-followup) -----------------
+
+INDEXED = (
+    'describe("checkout", () => {\n'
+    '  it("applies the code", () => {\n    expect(1).toBe(1);\n  });\n'
+    '  it("same", () => {\n    expect(2).toBe(2);\n  });\n'
+    "});\n"
+    'describe("other", () => {\n'
+    '  it("same", () => {\n    expect(3).toBe(3);\n  });\n'
+    "});\n"
+    'it("top > level", () => {\n  expect(4).toBe(4);\n});\n'
+    'it(\n  "long name",\n  () => {\n    expect(5).toBe(5);\n  },\n);\n'
+    'helper("applies the code", () => {});\n'
+)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "applies the code", "checkout applies the code", "checkout > applies the code", "same", "checkout same",
+        "other > same", "other same", "top > level", "level", "long name", "no such test", "", "checkout",
+    ],
+)  # fmt: skip
+def test_the_call_index_gives_the_spans_of_the_line_by_line_reading(name):
+    from l4.implementer.test_locate import CallIndex, call_span
+
+    lines = INDEXED.splitlines()
+    assert call_span(lines, name, CallIndex(lines)) == call_span(lines, name)

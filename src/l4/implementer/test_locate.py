@@ -95,30 +95,58 @@ def _literal(lines: list[str], at: int) -> str | None:
     return None
 
 
-def _enclosing(lines: list[str], at: int) -> list[str]:
+class CallIndex:
+    """The test-call string of every line of a file, read once, and the lines that carry each string. `_start` run for
+    many names of one file (the carry's, L4-VER-097) would otherwise read every line again for every name."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self.literals = [_literal(lines, at) for at in range(len(lines))]
+        self.by_literal: dict[str, list[int]] = {}
+        for at, literal in enumerate(self.literals):
+            if literal:
+                self.by_literal.setdefault(literal, []).append(at)
+
+    def found(self, name: str) -> list[tuple[int, int, str]]:
+        """`(literal length, line, literal)` of every call whose string names `name`, in line order: the literal is the
+        name or what follows one of its spaces (`_names`), so the candidates are the name's own suffixes."""
+        suffixes = {name, *(name[at + 1 :] for at, char in enumerate(name) if char == " ")}
+        return sorted(
+            (len(literal), at, literal)
+            for literal in suffixes
+            if literal and _names(literal, name)
+            for at in self.by_literal.get(literal, ())
+        )  # fmt: skip
+
+
+def _enclosing(lines: list[str], at: int, calls: CallIndex | None = None) -> list[str]:
     """The strings of the test calls that enclose line `at` (earlier lines indented less), outermost first."""
     names: list[str] = []
     level = _indent(lines[at])
     for before in range(at - 1, -1, -1):
         if level and lines[before].strip() and _indent(lines[before]) < level:
             level = _indent(lines[before])
-            if (literal := _literal(lines, before)) is not None:
+            literal = calls.literals[before] if calls is not None else _literal(lines, before)
+            if literal is not None:
                 names.append(literal)
     return names[::-1]
 
 
-def _start(lines: list[str], name: str) -> int | None:
+def _start(lines: list[str], name: str, calls: CallIndex | None = None) -> int | None:
     """The line of the test call (or Go function) that names `name`: the longest literal wins; among equal literals the
     one whose enclosing calls' strings are the name's words before the literal (`AMBIGUOUS` when none or several is);
-    with no call, the first line that holds the name."""
+    with no call, the first line that holds the name. With `calls` (the file's `CallIndex`) only calls are looked at,
+    through the index, and no call is None: `call_span` wants nothing else."""
     found: list[tuple[int, int, str]] = []  # (literal length, line, literal)
-    go = re.compile(rf"^\s*func\s+(?:\([^)]*\)\s*)?{re.escape(name.split('/', 1)[0])}\s*\(") if name else None
-    for at, line in enumerate(lines):
-        literal = _literal(lines, at)
-        if literal is not None and _names(literal, name):
-            found.append((len(literal), at, literal))
-        elif go is not None and go.match(line) and not found:
-            found.append((len(name), at, name))
+    if calls is not None:
+        found = calls.found(name)
+    else:
+        go = re.compile(rf"^\s*func\s+(?:\([^)]*\)\s*)?{re.escape(name.split('/', 1)[0])}\s*\(") if name else None
+        for at, line in enumerate(lines):
+            literal = _literal(lines, at)
+            if literal is not None and _names(literal, name):
+                found.append((len(literal), at, literal))
+            elif go is not None and go.match(line) and not found:
+                found.append((len(name), at, name))
     if found:
         top = max(length for length, _, _ in found)
         tied = [(at, literal) for length, at, literal in found if length == top]
@@ -127,10 +155,12 @@ def _start(lines: list[str], name: str) -> int | None:
         matching = []
         for at, literal in tied:
             prefix = name[: len(name) - len(literal)].rstrip(" >").replace(" > ", " ")
-            context = " ".join(_enclosing(lines, at))
+            context = " ".join(_enclosing(lines, at, calls))
             if context == prefix or (prefix and context.endswith(" " + prefix)):
                 matching.append(at)
         return matching[0] if len(matching) == 1 else AMBIGUOUS
+    if calls is not None:
+        return None
     return next((at for at, line in enumerate(lines) if name in line), None)
 
 
@@ -143,11 +173,11 @@ def _backticks(line: str, inside: bool) -> bool:
     return inside != (text.count("`") % 2 == 1)
 
 
-def _span(lines: list[str], name: str) -> tuple[int, int] | None:
+def _span(lines: list[str], name: str, calls: CallIndex | None = None) -> tuple[int, int] | None:
     """The first line and the line after the last of the test `name` in `lines` (see `window`), or None."""
     if not name:
         return None
-    start = _start(lines, name)
+    start = _start(lines, name, calls)
     if start is None or start == AMBIGUOUS:
         return None
     base = _indent(lines[start])
@@ -162,15 +192,16 @@ def _span(lines: list[str], name: str) -> tuple[int, int] | None:
     return start, end
 
 
-def call_span(lines: list[str], name: str) -> tuple[int, int] | None:
+def call_span(lines: list[str], name: str, calls: CallIndex | None = None) -> tuple[int, int] | None:
     """The first line and the line after the last of the test `name`, as `window` gives them, but only when the block
     starts at a call line (`test`, `it`, `describe`, `suite` or `bench`, with its modifiers) whose string names the test
     (L4-VER-097): not `_start`'s last resort, the first line that holds the name, and not a Go function. None when the
-    test is not found, or is found at several places that the enclosing strings do not tell apart."""
-    span = _span(lines, name)
+    test is not found, or is found at several places that the enclosing strings do not tell apart. `calls` is the file's
+    `CallIndex` when many names of one file are asked for."""
+    span = _span(lines, name, calls)
     if span is None:
         return None
-    literal = _literal(lines, span[0])
+    literal = calls.literals[span[0]] if calls is not None else _literal(lines, span[0])
     return span if literal is not None and _names(literal, name) else None
 
 

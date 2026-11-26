@@ -321,3 +321,22 @@ def test_the_red_step_never_reads_a_parent_criterion_whatever_its_provider_is(wo
     for provider, ref in ((Inner(world.ref), world.ref), (family, fix)):
         wb = SimpleNamespace(git=world.git, ref=ref, provider=provider, cfg=config)
         assert unchanged_on_base(wb, provider.criteria(ref), report, report) == {}
+
+
+def test_a_missing_origin_ref_leaves_the_parents_text_even_when_the_local_base_branch_holds_the_units_head(world):
+    """F6: the family reads the base's wording at the merge base of `origin/<base>` and the head, never at a local
+    branch that may have moved onto the unit (the unit's own edit of the spec would then be read as the base)."""
+    world.write("openspec/specs/journeys/spec.md", spec(("opens the flow", THIRD), ("keeps the count", NEW_COUNT)))
+    world.commit("the unit edits the base spec")
+    world.raw(world.repo, "branch", "-f", "main", "unit")  # the local base branch moved onto the unit's head
+    world.raw(world.repo, "update-ref", "-d", "refs/remotes/origin/main")  # and there is no origin ref
+    wb = SimpleNamespace(git=world.git, cfg=SimpleNamespace(forge=SimpleNamespace(base_branch="main")))
+    ctx = SimpleNamespace(
+        cfg=wb.cfg, services=SimpleNamespace(provider=Inner(world.ref), ref=world.ref, git=world.git,
+                                             worktree=world.repo, ledger=None),
+    )  # fmt: skip
+    family = family_of(ctx)
+    assert unit_base_commit(world.git, "main") == world.raw(world.repo, "rev-parse", "HEAD").strip()  # others fall back
+    assert unit_base_commit(world.git, "main", local_fallback=False) is None
+    assert family._base_rev() is None  # origin only
+    assert texts(family.criteria(world.ref)) == {"opens the flow": OLD_FLOW, "keeps the count": OLD_COUNT}  # unchanged

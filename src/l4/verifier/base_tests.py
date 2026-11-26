@@ -635,7 +635,10 @@ def check_base_tests(
     for task, count in sorted(over.items()):
         note += f"; {count} more support file(s) named by task {task} reverted (at most {MAX_NAMED_SUPPORT} kept)"
     _emit(wb, round_no, ctx, source, reverted, judged, flaky, [a.split(" (")[0] for a in allowed], errors, support)
-    ran = Step1Run(tuple(reverted), tuple(judged.failing), tuple(judged.not_run), tuple(flaky))  # what the event says
+    ran = Step1Run(
+        tuple(reverted), tuple(judged.failing), tuple(judged.not_run), tuple(flaky),
+        tuple(sorted(i for i, c in r1.tests.items() if c.status == "passed")),
+    )  # fmt: skip  # what the event says, and the ids that PASSED in this run (R1): absence is not presence
     record: dict[str, Any] = {
         "base_sha": ctx.base_sha,
         "command": command,
